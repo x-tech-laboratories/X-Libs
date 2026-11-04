@@ -74,7 +74,7 @@ npm test
 npm run lint
 ```
 
-`npm publish` builds first.
+`npm pack` and `npm publish` build first.
 
 ## License
 

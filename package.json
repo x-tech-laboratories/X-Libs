@@ -24,7 +24,7 @@
     "build": "tsc -b",
     "test": "vitest run",
     "lint": "oxlint",
-    "prepublishOnly": "npm run build"
+    "prepack": "npm run build"
   },
   "peerDependencies": {
     "@fastify/websocket": "^11.3.5",
