@@ -3,13 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LongRuns } from "../../src/agent/long_runs.ts";
+import { shell_runner } from "../../src/agent/tasks.ts";
 
 let state: string;
-let runs: LongRuns;
+let runs: LongRuns<string>;
 
 beforeEach(() => {
   state = mkdtempSync(join(tmpdir(), "x-libs-runs-"));
-  runs = new LongRuns(state, { kill_grace_in_milliseconds: 300, tail_interval_in_milliseconds: 20, process_name: "x-test-run" });
+  runs = new LongRuns(state, shell_runner("x-test-run"), { kill_grace_in_milliseconds: 300, tail_interval_in_milliseconds: 20 });
 });
 
 afterEach(async () => {
@@ -85,7 +86,7 @@ describe("long runs", () => {
 
   it("is found by a new instance reading the same folder", async () => {
     runs.start("adopted", "sleep 0.3; echo done", null);
-    const later = new LongRuns(state);
+    const later = new LongRuns(state, shell_runner("x-test-run"));
     expect(later.list()).toMatchObject([{ run_id: "adopted", state: "running" }]);
     while (later.get("adopted").state === "running") await new Promise((resolve) => setTimeout(resolve, 20));
     expect(later.get("adopted")).toMatchObject({ state: "exited", exit_code: 0 });
@@ -96,5 +97,20 @@ describe("long runs", () => {
     const command_line = readFileSync(`/proc/${run.pid}/cmdline`, "utf8").split("\0");
     expect(command_line).toContain("x-test-run");
     await runs.stop("named");
+  });
+
+  it("starts a run as the program the app's runner names", async () => {
+    // A runner of the app's own, whose process writes its output and exit code itself.
+    const script = 'const [folder, word] = process.argv.slice(1); const fs = require("node:fs"); fs.writeFileSync(folder + "/out", word + "\\n"); fs.writeFileSync(folder + "/exit.part", "5\\n"); fs.renameSync(folder + "/exit.part", folder + "/exit");';
+    const typed = new LongRuns<{ word: string }>(state, {
+      run: async () => ({ exit_code: 0, stdout: "", stderr: "" }),
+      launch: (task, folder) => ({ program: process.execPath, args: ["-e", script, folder, task.word] }),
+    });
+
+    typed.start("typed", { word: "hello" }, null);
+    while (typed.get("typed").state === "running") await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(typed.get("typed")).toMatchObject({ state: "exited", exit_code: 5 });
+    expect((await typed.poll("typed", 0)).new_output).toBe("hello\n");
   });
 });

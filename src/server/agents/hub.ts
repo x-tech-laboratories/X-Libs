@@ -10,7 +10,7 @@ import type { IncomingHttpHeaders } from "node:http";
 
 import { parse_public_key, verify_challenge } from "../../agent/keys.ts";
 import {
-  encode_message, is_agent_message, key_host_header, parse_agent_message, protocol_version, type AppMessage, type LongRun, type LongRunPoll, type RunResult,
+  encode_message, is_agent_message, key_host_header, parse_agent_message, type AgentApp, type AppMessage, type LongRun, type LongRunPoll, type RunResult,
 } from "../../agent/protocol.ts";
 import { AgentError, ended_stream, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
 import { AgentConnection, type ConnectionOptions, type ServerSocket } from "./connection.ts";
@@ -25,15 +25,14 @@ export interface AgentTokenLookup {
   seen?(host: string): void;
 }
 
-export interface HubOptions {
-  // The app's name, such as "x-nix", which names the key login's header and is bound into its signature.
-  app: string;
+export interface HubOptions<Task> {
+  app: AgentApp<Task>;
   // The server's own machine, answered by an agent built into the server.
-  local?: { host: string; agent: Agent };
+  local?: { host: string; agent: Agent<Task> };
   // Lets agents log in with a token; without it, only with a declared key.
   tokens?: AgentTokenLookup;
   // Takes the app's own messages from a connected agent.
-  on_message?: (host: string, message: AppMessage, connection: AgentConnection) => void;
+  on_message?: (host: string, message: AppMessage, connection: AgentConnection<Task>) => void;
   // How long a new socket has to say hello.
   hello_timeout_in_milliseconds?: number;
   connection?: Partial<ConnectionOptions>;
@@ -80,19 +79,19 @@ const default_connection: ConnectionOptions = {
 
 // ── Hub ──────────────────────────────────────────────────────────────────────
 
-export class AgentHub extends EventEmitter<HubEvents> {
-  readonly app: string;
-  private readonly local: { host: string; readonly agent: Agent } | null;
+export class AgentHub<Task> extends EventEmitter<HubEvents> {
+  readonly app: AgentApp<Task>;
+  private readonly local: { host: string; readonly agent: Agent<Task> } | null;
   private readonly tokens: AgentTokenLookup | null;
-  private readonly on_message: HubOptions["on_message"] | null;
+  private readonly on_message: HubOptions<Task>["on_message"] | null;
   private readonly hello_timeout: number;
   private readonly connection_options: ConnectionOptions;
-  private readonly connections = new Map<string, AgentConnection>();
-  private readonly logins = new WeakMap<AgentConnection, AgentLogin>();
+  private readonly connections = new Map<string, AgentConnection<Task>>();
+  private readonly logins = new WeakMap<AgentConnection<Task>, AgentLogin>();
   // Each host's declared public key, with the line it was read from.
   private agent_keys = new Map<string, { line: string; key: KeyObject }>();
 
-  constructor(options: HubOptions) {
+  constructor(options: HubOptions<Task>) {
     super();
     this.app = options.app;
     this.local = options.local === undefined ? null : { ...options.local };
@@ -143,7 +142,7 @@ export class AgentHub extends EventEmitter<HubEvents> {
 
   // Who an agent's upgrade request says it is: the host it names to log in with that host's key, or a token's host.
   admit(headers: IncomingHttpHeaders): Admission {
-    const header = key_host_header(this.app);
+    const header = key_host_header(this.app.name);
     const named = headers[header];
     if (typeof named === "string" && named !== "") {
       if (named === this.local?.host) return { error: `'${named}' is the server's own host, which needs no agent.` };
@@ -162,10 +161,10 @@ export class AgentHub extends EventEmitter<HubEvents> {
   // Takes a socket whose upgrade named the host, and waits for its hello before using it; one logging in with its key
   // is sent a nonce first, which its hello must carry signed.
   accept(socket: ServerSocket, host: string, login: AgentLogin): void {
-    let connection: AgentConnection | null = null;
+    let connection: AgentConnection<Task> | null = null;
     const hello_timer = setTimeout(() => socket.close(close_codes.no_hello, "No hello came."), this.hello_timeout);
     const nonce = login === "key" ? randomBytes(32).toString("base64url") : null;
-    if (nonce !== null) socket.send(encode_message({ type: "challenge", nonce }));
+    if (nonce !== null) socket.send(encode_message({ type: "challenge", nonce }, this.app));
 
     socket.on("message", (raw, is_binary) => {
       const data = as_buffer(raw);
@@ -173,11 +172,11 @@ export class AgentHub extends EventEmitter<HubEvents> {
         connection.receive(data, is_binary);
         return;
       }
-      const hello = is_binary ? null : parse_agent_message(data.toString("utf8"));
+      const hello = is_binary ? null : parse_agent_message(data.toString("utf8"), this.app as AgentApp<unknown>);
       if (hello === null || !is_agent_message(hello) || hello.type !== "hello") return;
       clearTimeout(hello_timer);
-      if (hello.protocol !== protocol_version) {
-        socket.close(close_codes.protocol, `This server speaks agent protocol ${protocol_version}, not ${hello.protocol}.`);
+      if (hello.protocol !== this.app.protocol_version) {
+        socket.close(close_codes.protocol, `This server speaks agent protocol ${this.app.protocol_version}, not ${hello.protocol}.`);
         return;
       }
       const { signature, ...greeting } = hello;
@@ -186,7 +185,7 @@ export class AgentHub extends EventEmitter<HubEvents> {
         return;
       }
       this.connections.get(host)?.close(close_codes.replaced, "A newer connection from the same host replaced this one.");
-      const current = new AgentConnection(socket, host, greeting, this.connection_options);
+      const current = new AgentConnection(socket, this.app, host, greeting, this.connection_options);
       current.on_message = (message) => this.on_message?.(host, message, current);
       connection = current;
       this.connections.set(host, current);
@@ -207,7 +206,7 @@ export class AgentHub extends EventEmitter<HubEvents> {
 
   private proves_key(host: string, nonce: string, signature: unknown): boolean {
     const declared = this.agent_keys.get(host);
-    return declared !== undefined && typeof signature === "string" && verify_challenge(declared.key, this.app, host, nonce, signature);
+    return declared !== undefined && typeof signature === "string" && verify_challenge(declared.key, this.app.name, host, nonce, signature);
   }
 
   disconnect(host: string, code = 1000, reason = "The server hung up."): void {
@@ -235,7 +234,7 @@ export class AgentHub extends EventEmitter<HubEvents> {
   }
 
   // The host's agent, or null when it is not connected.
-  agent(host: string): Agent | null {
+  agent(host: string): Agent<Task> | null {
     if (this.local?.host === host) return this.local.agent;
     const connection = this.connections.get(host);
     return connection?.is_open ? connection : null;
@@ -244,17 +243,17 @@ export class AgentHub extends EventEmitter<HubEvents> {
   // ── Commands ─────────────────────────────────────────────────────────────
 
   // A run on a host with no agent answers with exit code -1 rather than rejecting, as a command that failed does.
-  run(host: string, command: string, options: AgentRunOptions): Promise<RunResult> {
+  run(host: string, task: Task, options: AgentRunOptions): Promise<RunResult> {
     const agent = this.agent(host);
-    return agent === null ? Promise.resolve({ exit_code: -1, stdout: "", stderr: not_connected(host) }) : agent.run(command, options);
+    return agent === null ? Promise.resolve({ exit_code: -1, stdout: "", stderr: not_connected(host) }) : agent.run(task, options);
   }
 
-  stream(host: string, command: string, options: AgentStreamOptions = {}): CommandStream {
-    return this.agent(host)?.stream(command, options) ?? ended_stream(not_connected(host));
+  stream(host: string, task: Task, options: AgentStreamOptions = {}): CommandStream {
+    return this.agent(host)?.stream(task, options) ?? ended_stream(not_connected(host));
   }
 
-  start(host: string, run_id: string, command: string, options: AgentStreamOptions = {}): Promise<LongRun> {
-    return this.require(host).then((agent) => agent.start(run_id, command, options));
+  start(host: string, run_id: string, task: Task, options: AgentStreamOptions = {}): Promise<LongRun> {
+    return this.require(host).then((agent) => agent.start(run_id, task, options));
   }
 
   poll(host: string, run_id: string, offset: number): Promise<LongRunPoll> {
@@ -281,13 +280,13 @@ export class AgentHub extends EventEmitter<HubEvents> {
     return this.require(host).then((agent) => agent.request(type, body));
   }
 
-  private async require(host: string): Promise<Agent> {
+  private async require(host: string): Promise<Agent<Task>> {
     const agent = this.agent(host);
     if (agent === null) throw new AgentError(not_connected(host), true);
     return agent;
   }
 
-  private status_of(connection: AgentConnection): AgentStatus {
+  private status_of(connection: AgentConnection<Task>): AgentStatus {
     return {
       host: connection.host,
       reported_host: connection.hello.host,

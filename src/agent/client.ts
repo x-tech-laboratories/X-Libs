@@ -8,14 +8,16 @@ import { readFileSync } from "node:fs";
 
 import { AgentKeyError, parse_private_key } from "./keys.ts";
 import { LongRuns, type LongRunOptions } from "./long_runs.ts";
-import { key_host_header } from "./protocol.ts";
+import { key_host_header, type AgentApp } from "./protocol.ts";
 import { AgentSession, type SessionHooks } from "./session.ts";
+import type { TaskRunner } from "./tasks.ts";
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-export interface AgentConfig extends SessionHooks {
-  // The app's name, such as "x-nix", which names the key login's header and is bound into its signature.
-  app: string;
+export interface AgentConfig<Task> extends SessionHooks<Task> {
+  app: AgentApp<Task>;
+  // How the agent carries out each task, such as shell_runner("x-backups-run").
+  runner: TaskRunner<Task>;
   url: string;
   // Exactly one of these: the host's OpenSSH ed25519 private key, or the token the server issued it.
   key_file?: string;
@@ -61,7 +63,7 @@ export function check_url(text: string): URL {
 // How the agent logs in, which is read again on each dial so a replaced secret file is picked up.
 type Login = { kind: "key"; file: string } | { kind: "token"; file: string };
 
-function login_of(config: AgentConfig): Login {
+function login_of(config: AgentConfig<unknown>): Login {
   const has_key = Boolean(config.key_file);
   const has_token = Boolean(config.token_file);
   if (has_key === has_token) throw new AgentConfigError("Give exactly one of a key file and a token file.");
@@ -81,19 +83,19 @@ export function read_key_file(file: string): KeyObject {
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 
-export interface RunningAgent {
-  readonly runs: LongRuns;
+export interface RunningAgent<Task> {
+  readonly runs: LongRuns<Task>;
   // Whether a session is open now.
   connected(): boolean;
   // The open session, for sending the app's own messages.
-  session(): AgentSession | null;
+  session(): AgentSession<Task> | null;
   // Hangs up and stops dialling; long runs carry on.
   stop(): Promise<void>;
 }
 
-export function start_agent(config: AgentConfig): RunningAgent {
+export function start_agent<Task>(config: AgentConfig<Task>): RunningAgent<Task> {
   const url = check_url(config.url);
-  const login = login_of(config);
+  const login = login_of(config as AgentConfig<unknown>);
   // A key that is there but unusable stops the agent at once; one not there yet, as before secrets are in place, is retried.
   if (login.kind === "key") {
     try {
@@ -102,14 +104,14 @@ export function start_agent(config: AgentConfig): RunningAgent {
       if (error instanceof AgentConfigError) throw error;
     }
   }
-  const runs = new LongRuns(config.state_directory, { process_name: `${config.app}-run`, ...config.long_runs });
+  const runs = new LongRuns(config.state_directory, config.runner, config.long_runs);
   const log = config.log ?? ((line: string) => console.log(line));
   const heartbeat = config.heartbeat_in_milliseconds ?? 15_000;
   const initial = config.backoff_initial_in_milliseconds ?? 1000;
   const longest = config.backoff_longest_in_milliseconds ?? 60_000;
 
   let socket: WebSocket | null = null;
-  let session: AgentSession | null = null;
+  let session: AgentSession<Task> | null = null;
   let failures = 0;
   let stopping = false;
   let retry_timer: NodeJS.Timeout | undefined;
@@ -130,7 +132,7 @@ export function start_agent(config: AgentConfig): RunningAgent {
     try {
       if (login.kind === "key") {
         key = read_key_file(login.file);
-        headers = { [key_host_header(config.app)]: config.host };
+        headers = { [key_host_header(config.app.name)]: config.host };
       } else {
         headers = { authorization: `Bearer ${readFileSync(login.file, "utf8").trim()}` };
       }
@@ -147,7 +149,7 @@ export function start_agent(config: AgentConfig): RunningAgent {
       failures = 0;
       log(`Connected to ${url.origin}`);
       session = new AgentSession(current, runs, {
-        app: config.app, host: config.host, agent_version: config.agent_version, heartbeat_in_milliseconds: heartbeat, key,
+        app: config.app, runner: config.runner, host: config.host, agent_version: config.agent_version, heartbeat_in_milliseconds: heartbeat, key,
         requests: config.requests, on_message: config.on_message, on_hello: config.on_hello,
       });
     });

@@ -6,30 +6,31 @@
 
 import type { KeyObject } from "node:crypto";
 
-import { type CommandStream, run_command, stream_command } from "./commands.ts";
+import type { CommandStream } from "./commands.ts";
 import { sign_challenge } from "./keys.ts";
 import type { LongRuns } from "./long_runs.ts";
 import {
-  encode_chunk, encode_message, is_server_message, parse_server_message, protocol_version,
-  type AgentMessage, type AppMessage, type RequestMessage, type ServerMessage,
+  encode_chunk, encode_message, is_server_message, parse_server_message,
+  type AgentApp, type AgentMessage, type AppMessage, type RequestMessage, type ServerMessage,
 } from "./protocol.ts";
+import type { TaskRunner } from "./tasks.ts";
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 // The app's own requests by type, each answered with what its handler returns.
 export type AppRequests = Record<string, (message: AppMessage) => unknown>;
 
-export interface SessionHooks {
+export interface SessionHooks<Task> {
   requests?: AppRequests;
   // Takes an app message from the server that is not a request.
-  on_message?: (message: AppMessage, session: AgentSession) => void;
+  on_message?: (message: AppMessage, session: AgentSession<Task>) => void;
   // Runs once the hello has gone, as for an app that reports what it did while the server was away.
-  on_hello?: (session: AgentSession) => void;
+  on_hello?: (session: AgentSession<Task>) => void;
 }
 
-export interface SessionOptions extends SessionHooks {
-  // The app's name, such as "x-nix", which the key's signature is bound to.
-  app: string;
+export interface SessionOptions<Task> extends SessionHooks<Task> {
+  app: AgentApp<Task>;
+  runner: TaskRunner<Task>;
   host: string;
   agent_version: string;
   // A ping goes out this often, and a server silent for three of them is taken as gone.
@@ -53,14 +54,14 @@ const socket_open = 1;
 class OutputPump {
   private readonly id: string;
   private readonly stream: CommandStream;
-  private readonly session: AgentSession;
+  private readonly session: AgentSession<unknown>;
   private credit: number;
   private readonly pending: Buffer[] = [];
   private stdout_ended = false;
   private result: { exit_code: number; stderr: string } | null = null;
   private finished = false;
 
-  constructor(id: string, stream: CommandStream, window: number, session: AgentSession) {
+  constructor(id: string, stream: CommandStream, window: number, session: AgentSession<unknown>) {
     this.id = id;
     this.stream = stream;
     this.credit = window;
@@ -115,17 +116,17 @@ class OutputPump {
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
-export class AgentSession {
+export class AgentSession<Task> {
   private readonly socket: MessageSocket;
-  private readonly runs: LongRuns;
-  private readonly options: SessionOptions;
+  private readonly runs: LongRuns<Task>;
+  private readonly options: SessionOptions<Task>;
   private readonly pumps = new Map<string, OutputPump>();
   private last_heard = Date.now();
   private readonly heartbeat: NodeJS.Timeout;
   private closed = false;
   private greeted = false;
 
-  constructor(socket: MessageSocket, runs: LongRuns, options: SessionOptions) {
+  constructor(socket: MessageSocket, runs: LongRuns<Task>, options: SessionOptions<Task>) {
     this.socket = socket;
     this.runs = runs;
     this.options = options;
@@ -136,7 +137,7 @@ export class AgentSession {
 
   private say_hello(signature?: string): void {
     this.greeted = true;
-    const hello = { type: "hello", protocol: protocol_version, host: this.options.host, agent_version: this.options.agent_version, runs: this.runs.list() } as const;
+    const hello = { type: "hello", protocol: this.options.app.protocol_version, host: this.options.host, agent_version: this.options.agent_version, runs: this.runs.list() } as const;
     this.send(signature === undefined ? hello : { ...hello, signature });
     this.options.on_hello?.(this);
   }
@@ -144,7 +145,7 @@ export class AgentSession {
   // Handles one text frame from the server; anything that is not a message is ignored.
   receive(text: string): void {
     this.last_heard = Date.now();
-    const message = parse_server_message(text);
+    const message = parse_server_message(text, this.options.app);
     if (message === null) return;
     if (is_server_message(message)) this.handle(message);
     else this.handle_app(message);
@@ -162,7 +163,7 @@ export class AgentSession {
   // ── Sending ──────────────────────────────────────────────────────────────
 
   send(message: AgentMessage | AppMessage): void {
-    if (!this.closed && this.socket.readyState === socket_open) this.socket.send(encode_message(message));
+    if (!this.closed && this.socket.readyState === socket_open) this.socket.send(encode_message(message, this.options.app));
   }
 
   send_chunk(id: string, data: Buffer): void {
@@ -176,7 +177,7 @@ export class AgentSession {
 
   // ── Handling ─────────────────────────────────────────────────────────────
 
-  private handle(message: ServerMessage): void {
+  private handle(message: ServerMessage<Task>): void {
     switch (message.type) {
       case "ping":
         this.send({ type: "pong", epoch_ms: message.epoch_ms });
@@ -184,7 +185,7 @@ export class AgentSession {
       case "pong":
         return;
       case "challenge":
-        if (this.options.key && !this.greeted) this.say_hello(sign_challenge(this.options.key, this.options.app, this.options.host, message.nonce));
+        if (this.options.key && !this.greeted) this.say_hello(sign_challenge(this.options.key, this.options.app.name, this.options.host, message.nonce));
         return;
       case "credit":
         this.pumps.get(message.id)?.grant(message.bytes);
@@ -193,7 +194,7 @@ export class AgentSession {
         this.pumps.get(message.id)?.cancel();
         return;
       case "stream":
-        this.start_pump(message.id, () => stream_command(message.command, { stdin: message.stdin }), message.window);
+        this.start_pump(message.id, () => this.open_stream(message.task, message.stdin), message.window);
         return;
       case "attach":
         this.start_pump(message.id, () => this.runs.tail(message.run_id, message.offset), message.window);
@@ -227,7 +228,7 @@ export class AgentSession {
       this.send({ type: "stream_end", id, exit_code: -1, stderr: (error as Error).message });
       return;
     }
-    this.pumps.set(id, new OutputPump(id, stream, window, this));
+    this.pumps.set(id, new OutputPump(id, stream, window, this as AgentSession<unknown>));
   }
 
   private async answer(id: string, work: () => unknown): Promise<void> {
@@ -239,12 +240,17 @@ export class AgentSession {
     }
   }
 
-  private async value_for(message: RequestMessage): Promise<unknown> {
+  private open_stream(task: Task, stdin: string | null): CommandStream {
+    if (this.options.runner.stream === undefined) throw new Error("This agent does not stream its tasks.");
+    return this.options.runner.stream(task, { stdin });
+  }
+
+  private async value_for(message: RequestMessage<Task>): Promise<unknown> {
     switch (message.type) {
       case "run":
-        return run_command(message.command, { timeout_in_seconds: message.timeout_in_seconds, stdin: message.stdin });
+        return this.options.runner.run(message.task, { timeout_in_seconds: message.timeout_in_seconds, stdin: message.stdin });
       case "start":
-        return this.runs.start(message.run_id, message.command, message.stdin);
+        return this.runs.start(message.run_id, message.task, message.stdin);
       case "poll":
         return this.runs.poll(message.run_id, message.offset);
       case "stop":

@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 
 import {
   decode_chunk, encode_message, is_agent_message, parse_agent_message,
-  type AgentMessage, type AppMessage, type LongRun, type LongRunPoll, type RequestType, type Requests, type RunResult, type ServerMessage,
+  type AgentApp, type AgentMessage, type AppMessage, type LongRun, type LongRunPoll, type RequestType, type Requests, type RunResult, type ServerMessage,
 } from "../../agent/protocol.ts";
 import { AgentError, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
 
@@ -51,7 +51,7 @@ class IncomingStream {
   readonly stdout: Readable;
   readonly done: Promise<{ exit_code: number; stderr: string }>;
   private readonly id: string;
-  private readonly connection: AgentConnection;
+  private readonly connection: AgentConnection<unknown>;
   private readonly window: number;
   // Credit the agent still holds: bytes it may send before it hears from us again.
   private outstanding: number;
@@ -60,7 +60,7 @@ class IncomingStream {
   private stdout_closed = false;
   private settle!: (result: { exit_code: number; stderr: string }) => void;
 
-  constructor(id: string, connection: AgentConnection, window: number) {
+  constructor(id: string, connection: AgentConnection<unknown>, window: number) {
     this.id = id;
     this.connection = connection;
     this.window = window;
@@ -114,13 +114,14 @@ class IncomingStream {
 
 // ── Connection ───────────────────────────────────────────────────────────────
 
-export class AgentConnection implements Agent {
+export class AgentConnection<Task> implements Agent<Task> {
   readonly host: string;
   readonly hello: Hello;
   readonly connected_epoch = Math.floor(Date.now() / 1000);
   // Takes the app's own messages from the agent that are not replies.
   on_message: ((message: AppMessage) => void) | null = null;
   private readonly socket: ServerSocket;
+  private readonly app: AgentApp<Task>;
   private readonly options: ConnectionOptions;
   private readonly pending = new Map<string, Pending>();
   private readonly streams = new Map<string, IncomingStream>();
@@ -129,8 +130,9 @@ export class AgentConnection implements Agent {
   private readonly heartbeat: NodeJS.Timeout;
   private closed_reason: string | null = null;
 
-  constructor(socket: ServerSocket, host: string, hello: Hello, options: ConnectionOptions) {
+  constructor(socket: ServerSocket, app: AgentApp<Task>, host: string, hello: Hello, options: ConnectionOptions) {
     this.socket = socket;
+    this.app = app;
     this.host = host;
     this.hello = hello;
     this.options = options;
@@ -144,21 +146,21 @@ export class AgentConnection implements Agent {
 
   // ── Agent ────────────────────────────────────────────────────────────────
 
-  async run(command: string, options: AgentRunOptions): Promise<RunResult> {
+  async run(task: Task, options: AgentRunOptions): Promise<RunResult> {
     try {
       const timeout = options.timeout_in_seconds * 1000 + run_reply_slack_in_milliseconds;
-      return await this.send_request("run", { command, stdin: options.stdin ?? null, timeout_in_seconds: options.timeout_in_seconds }, timeout);
+      return await this.send_request("run", { task, stdin: options.stdin ?? null, timeout_in_seconds: options.timeout_in_seconds }, timeout);
     } catch (error) {
       return { exit_code: -1, stdout: "", stderr: (error as Error).message };
     }
   }
 
-  stream(command: string, options: AgentStreamOptions = {}): CommandStream {
-    return this.open_stream((id, window) => ({ type: "stream", id, command, stdin: options.stdin ?? null, window }));
+  stream(task: Task, options: AgentStreamOptions = {}): CommandStream {
+    return this.open_stream((id, window) => ({ type: "stream", id, task, stdin: options.stdin ?? null, window }));
   }
 
-  start(run_id: string, command: string, options: AgentStreamOptions = {}): Promise<LongRun> {
-    return this.send_request("start", { run_id, command, stdin: options.stdin ?? null });
+  start(run_id: string, task: Task, options: AgentStreamOptions = {}): Promise<LongRun> {
+    return this.send_request("start", { run_id, task, stdin: options.stdin ?? null });
   }
 
   poll(run_id: string, offset: number): Promise<LongRunPoll> {
@@ -187,8 +189,8 @@ export class AgentConnection implements Agent {
 
   // ── Socket ───────────────────────────────────────────────────────────────
 
-  send(message: ServerMessage | AppMessage): void {
-    if (this.is_open && this.socket.readyState === socket_open) this.socket.send(encode_message(message));
+  send(message: ServerMessage<Task> | AppMessage): void {
+    if (this.is_open && this.socket.readyState === socket_open) this.socket.send(encode_message(message, this.app));
   }
 
   // Handles one frame from the agent after its hello.
@@ -199,7 +201,7 @@ export class AgentConnection implements Agent {
       if (chunk !== null) this.streams.get(chunk.id)?.receive(chunk.data);
       return;
     }
-    const message = parse_agent_message(data.toString("utf8"));
+    const message = parse_agent_message(data.toString("utf8"), this.app as AgentApp<unknown>);
     if (message === null) return;
     if (!is_agent_message(message)) {
       this.on_message?.(message);
@@ -250,7 +252,7 @@ export class AgentConnection implements Agent {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  private send_request<K extends RequestType>(type: K, body: Requests[K]["body"], timeout = this.options.request_timeout_in_milliseconds): Promise<Requests[K]["reply"]> {
+  private send_request<K extends RequestType>(type: K, body: Requests<Task>[K]["body"], timeout = this.options.request_timeout_in_milliseconds): Promise<Requests<Task>[K]["reply"]> {
     if (!this.is_open) return Promise.reject(new AgentError(this.closed_reason!, true));
     const id = `r${this.next_id++}`;
     return new Promise((resolve, reject) => {
@@ -259,13 +261,13 @@ export class AgentConnection implements Agent {
         reject(new AgentError(`The agent on ${this.host} did not answer within ${Math.round(timeout / 1000)}s.`, true));
       }, timeout);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      this.send({ ...body, type, id } as ServerMessage);
+      this.send({ ...body, type, id } as ServerMessage<Task>);
     });
   }
 
-  private open_stream(message: (id: string, window: number) => ServerMessage): CommandStream {
+  private open_stream(message: (id: string, window: number) => ServerMessage<Task>): CommandStream {
     const id = `s${this.next_id++}`;
-    const stream = new IncomingStream(id, this, this.options.window_in_bytes);
+    const stream = new IncomingStream(id, this as AgentConnection<unknown>, this.options.window_in_bytes);
     if (!this.is_open) {
       stream.end({ exit_code: -1, stderr: this.closed_reason! });
     } else {

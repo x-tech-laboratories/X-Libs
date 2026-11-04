@@ -8,7 +8,8 @@ import { Writable } from "node:stream";
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { start_agent, type AgentConfig, type RunningAgent } from "../../src/agent/client.ts";
-import { encode_message, key_host_header, protocol_version, type AppMessage } from "../../src/agent/protocol.ts";
+import { encode_message, key_host_header, shell_app, type AgentApp, type AppMessage } from "../../src/agent/protocol.ts";
+import { shell_runner } from "../../src/agent/tasks.ts";
 import { AgentHub, close_codes, type AgentTokenLookup } from "../../src/server/agents/hub.ts";
 import { LocalAgent } from "../../src/server/agents/local.ts";
 import { register_agent_route } from "../../src/server/agents/route.ts";
@@ -16,6 +17,8 @@ import { make_key } from "../test_keys.ts";
 
 const agent_main = join(import.meta.dirname, "../agent_main.ts");
 const app_name = "x-test";
+const agent_app = shell_app(app_name);
+const runner = shell_runner("x-test-run");
 
 // The tokens an app issued, kept in memory.
 class Tokens implements AgentTokenLookup {
@@ -39,14 +42,14 @@ class Tokens implements AgentTokenLookup {
 }
 
 let app: FastifyInstance;
-let hub: AgentHub;
+let hub: AgentHub<string>;
 let tokens: Tokens;
 let messages: { host: string; message: AppMessage }[];
 let url: string;
 let folder: string;
 let token_file: string;
 let state_directory: string;
-let agent: RunningAgent | null;
+let agent: RunningAgent<string> | null;
 let processes: ChildProcess[];
 
 function sleep(milliseconds: number) {
@@ -65,9 +68,9 @@ function connected(host = "odin") {
   });
 }
 
-function start_test_agent(extra: Partial<AgentConfig> = {}): RunningAgent {
+function start_test_agent(extra: Partial<AgentConfig<string>> = {}): RunningAgent<string> {
   agent = start_agent({
-    app: app_name, url, token_file, state_directory, host: "odin-box", agent_version: "test",
+    app: agent_app, runner, url, token_file, state_directory, host: "odin-box", agent_version: "test",
     backoff_initial_in_milliseconds: 50, backoff_longest_in_milliseconds: 200,
     long_runs: { kill_grace_in_milliseconds: 300, tail_interval_in_milliseconds: 20 },
     log: () => {},
@@ -103,7 +106,7 @@ beforeEach(async () => {
   messages = [];
   tokens = new Tokens();
   hub = new AgentHub({
-    app: app_name, tokens, connection: { window_in_bytes: 64 * 1024 },
+    app: agent_app, tokens, connection: { window_in_bytes: 64 * 1024 },
     on_message: (host, message, connection) => {
       messages.push({ host, message });
       if (message.type === "pulls") connection.send({ type: "pulls_received", count: (message.pulls as unknown[]).length });
@@ -262,7 +265,7 @@ describe("agent hub", () => {
     const token = tokens.issue("thor");
     const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as unknown as string[]);
     socket.addEventListener("open", () => {
-      socket.send(encode_message({ type: "hello", protocol: protocol_version + 1, host: "thor", agent_version: "9", runs: [] }));
+      socket.send(encode_message({ type: "hello", protocol: agent_app.protocol_version + 1, host: "thor", agent_version: "9", runs: [] }, agent_app));
     });
     const [event] = await once(socket, "close") as [CloseEvent];
     expect(event.code).toBe(close_codes.protocol);
@@ -288,7 +291,7 @@ describe("agent hub", () => {
   });
 
   it("moves its built-in agent to the host the config names as the server's own", () => {
-    const local = new AgentHub({ app: app_name, local: { host: "local", agent: new LocalAgent(state_directory) } });
+    const local = new AgentHub({ app: agent_app, local: { host: "local", agent: new LocalAgent(state_directory, { runner }) } });
 
     local.set_local_host("heimdall");
 
@@ -329,7 +332,7 @@ describe("agent key login", () => {
     hub.set_agent_keys(new Map([["odin", key.public_line]]));
   });
 
-  function start_key_agent(private_file = key.private_file): RunningAgent {
+  function start_key_agent(private_file = key.private_file): RunningAgent<string> {
     return start_test_agent({ token_file: undefined, key_file: private_file, host: "odin" });
   }
 
@@ -377,7 +380,7 @@ describe("agent key login", () => {
       expect(challenge).toMatchObject({ type: "challenge", nonce: expect.any(String) });
       const closed = new Promise<CloseEvent>((resolve) => socket.addEventListener("close", resolve, { once: true }));
 
-      socket.send(encode_message({ type: "hello", protocol: protocol_version, host: "odin", agent_version: "test", runs: [], signature }));
+      socket.send(encode_message({ type: "hello", protocol: agent_app.protocol_version, host: "odin", agent_version: "test", runs: [], signature }, agent_app));
 
       expect((await closed).code).toBe(close_codes.bad_key);
       expect(hub.is_connected("odin")).toBe(false);
@@ -386,7 +389,7 @@ describe("agent key login", () => {
 
   it("refuses a key login for a host with no declared key, or for the server's own host", () => {
     const header = key_host_header(app_name);
-    const local = new AgentHub({ app: app_name, local: { host: "heimdall", agent: new LocalAgent(state_directory) } });
+    const local = new AgentHub({ app: agent_app, local: { host: "heimdall", agent: new LocalAgent(state_directory, { runner }) } });
 
     expect(hub.admit({ [header]: "thor" })).toEqual({ error: "Host 'thor' has no declared agent key." });
     expect(local.admit({ [header]: "heimdall" })).toEqual({ error: "'heimdall' is the server's own host, which needs no agent." });
@@ -427,8 +430,8 @@ describe("agent key login", () => {
 
 describe("local agent", () => {
   it("answers through the hub as the server's own host, with no socket", async () => {
-    const local = new LocalAgent(state_directory, { requests: { health: () => ({ cpus: 2 }) } });
-    const local_hub = new AgentHub({ app: app_name, local: { host: "server", agent: local } });
+    const local = new LocalAgent(state_directory, { runner, requests: { health: () => ({ cpus: 2 }) } });
+    const local_hub = new AgentHub({ app: agent_app, local: { host: "server", agent: local } });
 
     expect(local_hub.is_connected("server")).toBe(true);
     expect(await local_hub.run("server", "cat", { timeout_in_seconds: 5, stdin: "secret\n" })).toEqual({ exit_code: 0, stdout: "secret", stderr: "" });
@@ -443,5 +446,54 @@ describe("local agent", () => {
     expect(Buffer.concat(chunks).toString()).toBe("hi\n");
     expect((await local_hub.attach("server", "missing", 0).done).stderr).toMatch(/No run named/);
     await expect(local_hub.poll("server", "missing", 0)).rejects.toMatchObject({ name: "AgentError", unreachable: false });
+  });
+});
+
+describe("typed tasks", () => {
+  // An app whose tasks are typed operations, sent in an `operation` field under its own protocol version.
+  interface Operation {
+    kind: "echo";
+    words: string[];
+  }
+
+  const typed_app: AgentApp<Operation> = {
+    name: "x-typed",
+    protocol_version: 2,
+    task_field: "operation",
+    is_task: (value): value is Operation => typeof value === "object" && value !== null && (value as Operation).kind === "echo",
+  };
+
+  it("carries the app's own tasks to its own runner, over the wire and in long runs", async () => {
+    const typed_hub = new AgentHub({ app: typed_app });
+    const typed_server = fastify();
+    await register_agent_route(typed_server, typed_hub);
+    await typed_server.listen({ host: "127.0.0.1", port: 0 });
+    const address = typed_server.server.address();
+    const typed_url = `ws://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}/api/agent`;
+    const key = make_key(folder, "typed");
+    typed_hub.set_agent_keys(new Map([["odin", key.public_line]]));
+    const typed_agent = start_agent({
+      app: typed_app, url: typed_url, key_file: key.private_file, state_directory, host: "odin", agent_version: "test",
+      runner: {
+        run: async (task) => ({ exit_code: 0, stdout: task.words.join(" "), stderr: "" }),
+        launch: (task, run_folder) => ({ program: "sh", args: ["-c", 'echo "$2" > "$1/out"; echo 0 > "$1/exit"', "x-typed-run", run_folder, task.words.join(" ")] }),
+      },
+      backoff_initial_in_milliseconds: 50, log: () => {},
+    });
+    try {
+      while (!typed_hub.is_connected("odin")) await sleep(20);
+
+      expect(await typed_hub.run("odin", { kind: "echo", words: ["typed", "hello"] }, { timeout_in_seconds: 5 })).toEqual({ exit_code: 0, stdout: "typed hello", stderr: "" });
+      await typed_hub.start("odin", "typed-run", { kind: "echo", words: ["long", "run"] });
+      let poll = await typed_hub.poll("odin", "typed-run", 0);
+      while (poll.alive) poll = await typed_hub.poll("odin", "typed-run", 0);
+      expect(poll).toMatchObject({ exit_code: 0, new_output: "long run\n" });
+      const stream = typed_hub.stream("odin", { kind: "echo", words: [] });
+      stream.stdout.resume();
+      expect((await stream.done).stderr).toBe("This agent does not stream its tasks.");
+    } finally {
+      await typed_agent.stop();
+      await typed_server.close();
+    }
   });
 });

@@ -40,13 +40,13 @@ export function ended_stream(stderr: string): CommandStream {
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 
-export interface Agent {
-  // Runs a command to its end; it never rejects, answering a failure to reach the host with exit code -1.
-  run(command: string, options: AgentRunOptions): Promise<RunResult>;
-  // Runs a command with no timeout, handing back its stdout as it comes.
-  stream(command: string, options?: AgentStreamOptions): CommandStream;
+export interface Agent<Task> {
+  // Carries out a task to its end; it never rejects, answering a failure to reach the host with exit code -1.
+  run(task: Task, options: AgentRunOptions): Promise<RunResult>;
+  // Carries out a task with no timeout, handing back its stdout as it comes.
+  stream(task: Task, options?: AgentStreamOptions): CommandStream;
   // Starts a long run, which outlives the connection, the agent and the server; rejects with an AgentError.
-  start(run_id: string, command: string, options?: AgentStreamOptions): Promise<LongRun>;
+  start(run_id: string, task: Task, options?: AgentStreamOptions): Promise<LongRun>;
   // What a long run has written past an offset in bytes, and whether it has ended; rejects with an AgentError.
   poll(run_id: string, offset: number): Promise<LongRunPoll>;
   // Follows a long run's output from an offset until it ends.

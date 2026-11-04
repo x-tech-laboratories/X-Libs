@@ -1,4 +1,4 @@
-// Long runs: commands that keep going on their own, in their own process group, so they outlive the connection that
+// Long runs: tasks that keep going on their own, in their own process group, so they outlive the connection that
 // started them and the agent itself. Each writes its output and exit code into its own folder under the state
 // directory, which is all a later agent needs to report on it, follow it, or stop it.
 //
@@ -17,6 +17,7 @@ import { Readable } from "node:stream";
 
 import { type CommandStream, kill_grace_in_milliseconds, signal_group } from "./commands.ts";
 import { is_run_id, type LongRun, type LongRunPoll, type LongRunState } from "./protocol.ts";
+import type { TaskRunner } from "./tasks.ts";
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -26,12 +27,7 @@ export const poll_limit_in_bytes = 1024 * 1024;
 // A followed run is read in pieces of this size.
 const tail_chunk_in_bytes = 64 * 1024;
 
-// The outer shell runs the command with its output in the run's folder, then writes the exit code in one rename.
-const wrapper = 'sh -c "$2" > "$1/out" 2>&1; echo $? > "$1/exit.part"; mv -f "$1/exit.part" "$1/exit"';
-
 export interface LongRunOptions {
-  // What `ps` shows for a run's outer shell, such as "x-nix-run".
-  process_name?: string;
   kill_grace_in_milliseconds?: number;
   // How often a followed run that has written nothing new is looked at again.
   tail_interval_in_milliseconds?: number;
@@ -54,43 +50,44 @@ export class LongRunError extends Error {
 
 // ── Long runs ────────────────────────────────────────────────────────────────
 
-export class LongRuns {
+export class LongRuns<Task> {
   private readonly directory: string;
   private readonly grace: number;
   private readonly tail_interval: number;
-  private readonly process_name: string;
+  private readonly runner: TaskRunner<Task>;
   // The runs this agent started, whose exit it hears of directly.
   private readonly children = new Map<string, ChildProcess>();
 
-  constructor(state_directory: string, options: LongRunOptions = {}) {
+  constructor(state_directory: string, runner: TaskRunner<Task>, options: LongRunOptions = {}) {
     this.directory = join(state_directory, "runs");
     this.grace = options.kill_grace_in_milliseconds ?? kill_grace_in_milliseconds;
     this.tail_interval = options.tail_interval_in_milliseconds ?? 250;
-    this.process_name = options.process_name ?? "x-libs-run";
+    this.runner = runner;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
   }
 
   // ── Starting ─────────────────────────────────────────────────────────────
 
-  start(run_id: string, command: string, stdin: string | null): LongRun {
+  start(run_id: string, task: Task, stdin: string | null): LongRun {
     const folder = this.folder(run_id);
     if (existsSync(folder)) throw new LongRunError(`A run named '${run_id}' already exists.`);
     mkdirSync(folder, { mode: 0o700 });
     writeFileSync(join(folder, "out"), "", { mode: 0o600 });
 
-    const child = spawn("sh", ["-c", wrapper, this.process_name, folder, command], {
+    const launch = this.runner.launch(task, folder, stdin !== null);
+    const child = spawn(launch.program, launch.args, {
       detached: true,
       stdio: [stdin === null ? "ignore" : "pipe", "ignore", "ignore"],
     });
     if (child.pid === undefined) {
       rmSync(folder, { recursive: true, force: true });
-      throw new LongRunError("Could not start sh.");
+      throw new LongRunError(`Could not start ${launch.program}.`);
     }
     if (stdin !== null) {
       child.stdin!.on("error", () => {});
       child.stdin!.end(stdin);
     }
-    // A wrapper killed before it could write its exit code is given the shell's code for that signal.
+    // A process killed before it could write its exit code is given the shell's code for that signal.
     child.on("exit", (code, signal) => {
       this.children.delete(run_id);
       const exit_file = join(folder, "exit");

@@ -14,7 +14,7 @@ const largest_message_in_bytes = 64 * 1024 * 1024;
 
 // ── Route ────────────────────────────────────────────────────────────────────
 
-export async function register_agent_route(app: FastifyInstance, hub: AgentHub, path = "/api/agent"): Promise<void> {
+export async function register_agent_route<Task>(app: FastifyInstance, hub: AgentHub<Task>, path = "/api/agent"): Promise<void> {
   await app.register(fastify_websocket, { options: { maxPayload: largest_message_in_bytes } });
   const admitted = new WeakMap<FastifyRequest, { host: string; login: AgentLogin }>();
 

@@ -3,16 +3,18 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { run_command, stream_command } from "../../agent/commands.ts";
 import { LongRuns, type LongRunOptions } from "../../agent/long_runs.ts";
 import type { AppMessage } from "../../agent/protocol.ts";
 import type { AppRequests } from "../../agent/session.ts";
+import type { TaskRunner } from "../../agent/tasks.ts";
 import {
   AgentError, ended_stream, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream, type LongRun, type LongRunPoll,
   type RunResult,
 } from "./agent.ts";
 
-export interface LocalAgentOptions {
+export interface LocalAgentOptions<Task> {
+  // How tasks are carried out, the same runner the app's agent uses.
+  runner: TaskRunner<Task>;
   long_runs?: LongRunOptions;
   // The app's own requests, answered by the same handlers its agent uses.
   requests?: AppRequests;
@@ -20,26 +22,29 @@ export interface LocalAgentOptions {
 
 // ── Local agent ──────────────────────────────────────────────────────────────
 
-export class LocalAgent implements Agent {
-  readonly long_runs: LongRuns;
+export class LocalAgent<Task> implements Agent<Task> {
+  readonly long_runs: LongRuns<Task>;
+  private readonly runner: TaskRunner<Task>;
   private readonly requests: AppRequests;
 
   // Long runs keep their output under the state directory, so they outlive a restart of the server.
-  constructor(state_directory: string, options: LocalAgentOptions = {}) {
-    this.long_runs = new LongRuns(state_directory, options.long_runs);
+  constructor(state_directory: string, options: LocalAgentOptions<Task>) {
+    this.runner = options.runner;
+    this.long_runs = new LongRuns(state_directory, options.runner, options.long_runs);
     this.requests = options.requests ?? {};
   }
 
-  run(command: string, options: AgentRunOptions): Promise<RunResult> {
-    return run_command(command, options);
+  run(task: Task, options: AgentRunOptions): Promise<RunResult> {
+    return this.runner.run(task, options);
   }
 
-  stream(command: string, options: AgentStreamOptions = {}): CommandStream {
-    return stream_command(command, options);
+  stream(task: Task, options: AgentStreamOptions = {}): CommandStream {
+    if (this.runner.stream === undefined) return ended_stream("This agent does not stream its tasks.");
+    return this.runner.stream(task, options);
   }
 
-  start(run_id: string, command: string, options: AgentStreamOptions = {}): Promise<LongRun> {
-    return as_agent_error(() => this.long_runs.start(run_id, command, options.stdin ?? null));
+  start(run_id: string, task: Task, options: AgentStreamOptions = {}): Promise<LongRun> {
+    return as_agent_error(() => this.long_runs.start(run_id, task, options.stdin ?? null));
   }
 
   poll(run_id: string, offset: number): Promise<LongRunPoll> {

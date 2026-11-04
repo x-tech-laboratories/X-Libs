@@ -12,6 +12,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `agent/keys`                             | Reads and makes OpenSSH ed25519 agent keys; signs and checks the login challenge. |
 | `agent/protocol`                         | The messages between the server and an agent.                                 |
 | `agent/session`, `agent/client`          | The agent's side: `start_agent` dials the server and answers it.              |
+| `agent/tasks`                            | `TaskRunner`, and `shell_runner` for apps whose tasks are command lines.      |
 | `server/agents/hub`                      | `AgentHub`: the agents that have dialled in, and the server's built-in one.   |
 | `server/agents/connection`, `agent`, `local`, `route` | One connected agent, the `Agent` interface, `LocalAgent`, and the Fastify route. |
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
@@ -42,11 +43,17 @@ import { ContextMenu } from "@x-tech-laboratories/x-libs/web/preact/menus";
 
 A request whose session has lapsed throws `LoginNeeded` from `web/states`; `load` and `attempt` pass it on so the page can ask for a login.
 
-## The app's name
+## The app and its tasks
 
-The agent modules take the app's name, such as `x-nix`. It names the key login's header (`x-nix-agent-host`), is bound
-into the challenge the agent signs (`x-nix-agent-v1|<host>|<nonce>`), and names a long run's process (`x-nix-run`), so
-agents already deployed for an app keep logging in.
+The server and every agent are given the same `AgentApp`: the app's name, its protocol version, and its tasks.
+
+- The **name**, such as `x-nix`, names the key login's header (`x-nix-agent-host`) and is bound into the challenge the
+  agent signs (`x-nix-agent-v1|<host>|<nonce>`), so agents already deployed for an app keep logging in.
+- A **task** is what a run, a long run or a stream carries: a shell command line for one app, a typed operation for
+  another. The app names the wire field it travels in and checks it. `shell_app("x-backups")` sends a string in
+  `command`.
+- The agent and the server's `LocalAgent` carry tasks out through a `TaskRunner`: `run`, an optional `stream`, and
+  `launch`, the program a long run's process starts as. `shell_runner("x-backups-run")` runs each under `sh`.
 
 ## The app's own messages
 
