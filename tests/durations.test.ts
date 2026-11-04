@@ -8,6 +8,8 @@ describe("durations", () => {
     expect(parse_duration(" 60S ", "interval")).toBe(60);
     expect(parse_duration("90", "interval")).toBe(90);
     expect(parse_duration(12.7, "interval")).toBe(12);
+    expect(parse_duration("1.5h", "interval")).toBe(5400);
+    expect(parse_duration("2 days", "interval")).toBe(172800);
   });
 
   it("names the setting when the value is not a duration", () => {
@@ -18,7 +20,7 @@ describe("durations", () => {
   it("writes the two largest units in words", () => {
     expect(format_duration(0)).toBe("0 seconds");
     expect(format_duration(1)).toBe("1 second");
-    expect(format_duration(93784)).toBe("1 day 2 hours");
+    expect(format_duration(93784)).toBe("1 day, 2 hours");
     expect(format_age(-1)).toBe("never");
     expect(format_age(120)).toBe("2 minutes ago");
   });

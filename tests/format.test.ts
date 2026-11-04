@@ -20,6 +20,8 @@ describe("formatting", () => {
     expect(until(now + 3 * 86400)).toBe("in 3d");
     expect(until(now - 120)).toBe("2m ago");
     expect(until(null)).toBe("—");
+    expect(until(now + 30)).toBe("now");
+    expect(until(now - 30)).toBe("30s ago");
   });
 
   it("writes durations short", () => {
@@ -33,7 +35,8 @@ describe("formatting", () => {
     expect(bytes(512)).toBe("512 B");
     expect(bytes(44.4 * 1024 ** 3)).toBe("44.4 GiB");
     expect(size(1_200_000_000)).toBe("1.2 GB");
-    expect(size_change(-300_000_000)).toBe("−300 MB");
+    expect(size_change(-300_000_000)).toBe("-300 MB");
+    expect(size_change(0)).toBe("0 B");
     expect(size_change(1_200_000_000)).toBe("+1.2 GB");
     expect(size(undefined)).toBe("—");
   });

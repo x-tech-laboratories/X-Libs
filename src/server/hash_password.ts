@@ -6,45 +6,28 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { text } from "node:stream/consumers";
 
+import password from "@inquirer/password";
+
 import { account_name_pattern, hash_password, set_account } from "./passwords.ts";
 
 // ── Asking ───────────────────────────────────────────────────────────────────
 
-// Reads one line without echoing it.
-function ask_hidden(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    process.stderr.write(question);
-    process.stdin.setRawMode(true);
-    process.stdin.setEncoding("utf8");
-    let answer = "";
-    const on_data = (chunk: string) => {
-      for (const character of chunk) {
-        if (character === "\r" || character === "\n") {
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.off("data", on_data);
-          process.stderr.write("\n");
-          resolve(answer);
-          return;
-        }
-        if (character === "\u0003") process.exit(130);
-        if (character === "\u007f") answer = answer.slice(0, -1);
-        else answer += character;
-      }
-    };
-    process.stdin.on("data", on_data);
-    process.stdin.resume();
-  });
-}
-
+// Asks twice at a terminal without echoing, on stderr so stdout stays clean; reads one line from a pipe.
 async function read_password(): Promise<string> {
   if (!process.stdin.isTTY) return (await text(process.stdin)).replace(/\r?\n$/, "");
-  const password = await ask_hidden("Password: ");
-  if (password !== (await ask_hidden("Again: "))) {
-    console.error("The passwords differ.");
-    process.exit(1);
+  const ask = (message: string) => password({ message, mask: false }, { output: process.stderr });
+  try {
+    const first = await ask("Password:");
+    if (first !== (await ask("Again:"))) {
+      console.error("The passwords differ.");
+      process.exit(1);
+    }
+    return first;
+  } catch (error) {
+    // Ctrl-C at the prompt ends the command as a shell would.
+    if ((error as Error).name === "ExitPromptError") process.exit(130);
+    throw error;
   }
-  return password;
 }
 
 // ── Command ──────────────────────────────────────────────────────────────────

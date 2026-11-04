@@ -1,25 +1,38 @@
 // Writes times, durations, sizes and counts short enough for a table cell.
 
+import pretty_bytes from "pretty-bytes";
+
 // ── Times ────────────────────────────────────────────────────────────────────
 
 export function now_seconds(): number {
   return Date.now() / 1000;
 }
 
-export function age(epoch: number | null | undefined): string {
-  if (!epoch) return "never";
-  const seconds = Math.max(0, now_seconds() - epoch);
-  if (seconds < 90) return `${Math.round(seconds)}s ago`;
-  if (seconds < 5400) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 129600) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
+const relative = new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+
+const plurals = new Intl.PluralRules("en");
+
+// A whole number of the largest unit that reads well, such as -3 hours, for "3h ago" or "in 3h".
+function relative_time(seconds: number): string {
+  const magnitude = Math.abs(seconds);
+  const sign = seconds < 0 ? -1 : 1;
+  if (magnitude < 90) return relative.format(sign * Math.round(magnitude), "second");
+  if (magnitude < 5400) return relative.format(sign * Math.round(magnitude / 60), "minute");
+  if (magnitude < 129600) return relative.format(sign * Math.round(magnitude / 3600), "hour");
+  return relative.format(sign * Math.round(magnitude / 86400), "day");
 }
 
-// How long until the epoch, such as "in 3d", or how long ago when it has passed.
+export function age(epoch: number | null | undefined): string {
+  if (!epoch) return "never";
+  return relative_time(-Math.max(0, now_seconds() - epoch));
+}
+
+// How long until the epoch, such as "in 3d", "now" when it is less than 90 seconds off, or how long ago once passed.
 export function until(epoch: number | null): string {
   if (epoch === null) return "—";
   const seconds = epoch - now_seconds();
-  return seconds < 0 ? age(epoch) : `in ${duration(seconds)}`;
+  if (seconds < 0) return age(epoch);
+  return seconds < 90 ? "now" : relative_time(seconds);
 }
 
 export function duration(seconds: number | null): string {
@@ -40,33 +53,19 @@ export function stamp(epoch: number): string {
 
 // Sizes in binary units, such as "44.4 GiB".
 export function bytes(count: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
-  let value = count;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return unit === 0 ? `${Math.round(value)} B` : `${value.toFixed(1)} ${units[unit]}`;
+  return pretty_bytes(count, { binary: true, maximumFractionDigits: 1 });
 }
 
 // Sizes in decimal units, such as "1.2 GB".
 export function size(count: number | null | undefined): string {
   if (count === null || count === undefined) return "—";
-  const units = ["B", "kB", "MB", "GB", "TB", "PB"];
-  let value = Math.abs(count);
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  return `${count < 0 ? "−" : ""}${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+  return pretty_bytes(count, { maximumFractionDigits: 1 });
 }
 
-// A size change with its sign, such as +1.2 GB or −300 MB.
+// A size change with its sign, such as +1.2 GB or -300 MB.
 export function size_change(count: number | null | undefined): string {
   if (count === null || count === undefined) return "—";
-  return count > 0 ? `+${size(count)}` : size(count);
+  return count === 0 ? size(0) : pretty_bytes(count, { signed: true, maximumFractionDigits: 1 });
 }
 
 // ── Counts ───────────────────────────────────────────────────────────────────
@@ -77,5 +76,5 @@ export function count_change(value: number | null | undefined): string {
 }
 
 export function plural(count: number, word: string): string {
-  return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
+  return `${count.toLocaleString()} ${word}${plurals.select(count) === "one" ? "" : "s"}`;
 }
