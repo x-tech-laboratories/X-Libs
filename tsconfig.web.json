@@ -10,7 +10,9 @@
     "rootDir": "src/web",
     "outDir": "dist/web",
     "declaration": true,
-    "composite": true
+    "composite": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
   "include": ["src/web"]
 }

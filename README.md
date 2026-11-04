@@ -17,11 +17,30 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice. |
+| `web/halon-tokens.css`, `web/halon.css`  | Halon: the colors, sizes and shadows, and every component's look, for any app's markup. |
+| `web/layout`, `web/badges`, `web/states` | Panels, facts, tiles, cards, tabs, crumbs, toolbars, steppers; badges and chips; loading, empty and failed states. |
+| `web/controls`, `web/tables`             | Search boxes, selects, segmented choices, switches, button groups; sortable tables that turn into cards on phones, and a pager. |
+| `web/toasts`, `web/dialogs`, `web/menus` | Toasts with a link or Undo, modal and confirm dialogs, right-click menus and popovers kept on screen. |
+| `web/split`, `web/shell`                 | Pane sizing and resize handles; the sidebar menu, the section it lights up, and the theme button. |
+| `web/preact/*`                           | The same widgets as Preact components: menus, split, controls, layout, dialog, table. |
 
 ```ts
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
 import { parse_duration } from "@x-tech-laboratories/x-libs/durations";
 ```
+
+## The page's widgets
+
+The widgets build Halon's markup, so an app imports the two stylesheets once and the widgets or its own markup take the look:
+
+```ts
+import "@x-tech-laboratories/x-libs/web/halon-tokens.css";
+import "@x-tech-laboratories/x-libs/web/halon.css";
+import { data_table } from "@x-tech-laboratories/x-libs/web/tables";
+import { ContextMenu } from "@x-tech-laboratories/x-libs/web/preact/menus";
+```
+
+A request whose session has lapsed throws `LoginNeeded` from `web/states`; `load` and `attempt` pass it on so the page can ask for a login.
 
 ## The app's name
 
