@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.web.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rootDir": "src/web",
+    "outDir": "dist/web",
+    "declaration": true,
+    "composite": true
+  },
+  "include": ["src/web"]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "@x-tech-laboratories/x-libs",
+  "version": "0.1.0",
+  "description": "Code the X-apps share: agents and their long runs, passwords, durations, and the web page's helpers",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/x-tech-laboratories/X-Libs.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "lint": "oxlint",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@fastify/websocket": "^11.3.5",
+    "fastify": "^5.12.7"
+  },
+  "peerDependenciesMeta": {
+    "@fastify/websocket": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@fastify/websocket": "^11.3.5",
+    "@types/node": "^24.19.2",
+    "fastify": "^5.12.7",
+    "oxlint": "^1.90.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
