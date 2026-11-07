@@ -7,6 +7,9 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | Import                                   | What it holds                                                                 |
 | ---------------------------------------- | ----------------------------------------------------------------------------- |
 | `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration`, `format_age`. |
+| `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
+| `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server. |
+| `electron/window`                        | `create_window`: links open in the browser, the background follows the system theme, and the size and place are remembered. |
 | `agent/commands`                         | `run_command` and `stream_command`: one shell command, in its own process group. |
 | `agent/long_runs`                        | `LongRuns`: commands that outlive the agent, their output and exit code kept on disk. |
 | `agent/keys`                             | Reads and makes OpenSSH ed25519 agent keys; signs and checks the login challenge. |
@@ -19,10 +22,13 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice. |
 | `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; table sorting; menu items and on-screen placement; pane sizing. |
+| `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, and where a dropped or keyed row lands. |
 | `web/react/shell`                        | `Shell`: top bar, sidebar, theme button, toasts and dialogs; `use_route`.       |
 | `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover. |
 | `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; sortable tables that turn into cards on phones, and a pager. |
+| `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
+| `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, and reorder by dragging or with Alt and the arrow keys. |
 | `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo; modal, confirm and text dialogs openable from anywhere; context menus and popovers; resize handles and splits. |
 
 ```ts
@@ -46,6 +52,46 @@ The widgets are React components, so a page renders with React through `createRo
 holds the toasts and dialogs that `toast` and `confirm_dialog` open from anywhere. A request whose session has lapsed
 throws `LoginNeeded` from `web/states`, and `use_resource` passes it on as an unhandled rejection, which the page's
 login listens for.
+
+## Shortcuts and trees
+
+```tsx
+import { use_shortcuts } from "@x-tech-laboratories/x-libs/web/react/shortcuts";
+import { Tree } from "@x-tech-laboratories/x-libs/web/react/tree";
+
+use_shortcuts([
+  { keys: "mod+z", run: undo },
+  { keys: "escape", run: clear_picks },
+]);
+
+<Tree items={tags} label="Tags" render_item={(tag) => tag.name} collapsed={collapsed} on_collapsed_change={set_collapsed}
+  on_move={(tag, { parent_id, position }) => move_tag(tag.id, parent_id, position)} />
+```
+
+A shortcut stays quiet in text fields unless it has `when: "always"`, and while a dialog or popover is open unless it
+has `over_overlays: true`. The tree builds Halon's `.tree` markup; a row dropped onto its top or bottom quarter lands
+beside it, and onto its middle inside it.
+
+## Electron apps
+
+The bridge and window helpers describe the few parts of Electron they use, so the app passes Electron's own objects in
+and X-Libs does not depend on Electron.
+
+```ts
+// shared
+export const notes_bridge = define_bridge<NotesApi>("x_notes", ["list_notes", "add_note"]);
+// preload
+notes_bridge.expose(contextBridge, ipcRenderer);
+// main
+notes_bridge.handle(ipcMain, { list_notes, add_note });
+create_window(BrowserWindow, {
+  title: "X-Notes", file: join(__dirname, "../renderer/index.html"), dev_url: process.env.ELECTRON_RENDERER_URL,
+  preload: join(__dirname, "../preload/index.mjs"), default_size: { width: 1100, height: 700 },
+  state_file: join(app.getPath("userData"), "window.json"), native_theme: nativeTheme, shell,
+});
+// web page
+window.x_notes = notes_bridge.web_rpc((method, args) => post_json(`api/${method}`, args));
+```
 
 ## The app and its tasks
 
