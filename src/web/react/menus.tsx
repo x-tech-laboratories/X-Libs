@@ -115,23 +115,47 @@ interface MenuListProps {
   on_close: () => void;
 }
 
-// A menu's buttons, also for use inside a Popover, such as a column filter's choices.
+// Which radio run each item is in: radio items side by side, broken by a separator or another item.
+function radio_runs(items: MenuItem[]): number[] {
+  let run = 0;
+  return items.map((item, index) => {
+    const previous = items[index - 1];
+    if (!item.radio || item.separator_before || !previous?.radio) run += 1;
+    return run;
+  });
+}
+
+// A menu's buttons, also for use inside a Popover, such as a column filter's choices; an item that keeps the menu open ticks at once, until new items arrive.
 export function MenuList({ items, on_close }: MenuListProps) {
+  const [ticks, set_ticks] = useState<{ items: MenuItem[]; checked: Record<string, boolean> }>({ items, checked: {} });
+  const checked_now = ticks.items === items ? ticks.checked : {};
+  const runs = radio_runs(items);
+  const is_checked = (item: MenuItem): boolean | undefined => item.checked === undefined ? undefined : checked_now[item.label] ?? item.checked;
+
+  function tick(item: MenuItem, index: number): void {
+    if (item.checked === undefined) return;
+    const changes: Record<string, boolean> = item.radio
+      ? Object.fromEntries(items.filter((other, other_index) => other.radio && runs[other_index] === runs[index]).map((other) => [other.label, other === item]))
+      : { [item.label]: !is_checked(item) };
+    set_ticks({ items, checked: { ...checked_now, ...changes } });
+  }
+
   return (
     <>
-      {items.map((item) => (
+      {items.map((item, index) => (
         <Fragment key={item.label}>
           {item.separator_before && <div className="menu-separator" role="separator" />}
           <button
             type="button"
             className={item.danger ? "menu-item danger" : "menu-item"}
             role={item.checked === undefined ? "menuitem" : item.radio ? "menuitemradio" : "menuitemcheckbox"}
-            aria-checked={item.checked}
+            aria-checked={is_checked(item)}
             aria-disabled={item.disabled || undefined}
             tabIndex={-1}
             onClick={() => {
               if (item.disabled) return;
               if (!item.keep_open) on_close();
+              else tick(item, index);
               item.run();
             }}
           >

@@ -1,10 +1,12 @@
 // A React table drawn like the page's own on TanStack Table: sorting by one column or several, columns the user moves, resizes,
-// hides and filters, rows nested under rows, rows in groups under headings, rows dragged by the app's rules, and cards on phones.
+// hides and filters, rows nested under rows, rows in groups under headings, rows dragged by the app's rules, long lists drawn
+// only where they show, and cards on phones.
 
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
 import { clamp_width, column_id, compare_values, move_column, ordered_columns, sort_after_click, sorting_list, type Sorting, type SortValue } from "../tables.ts";
 import { placement_at, type DropPlacement } from "../tree.ts";
+import { virtual_window } from "../virtual.ts";
 import { ContextMenu, Popover } from "./menus.tsx";
 import { ResizeHandle } from "./split.tsx";
 
@@ -43,14 +45,27 @@ export interface RowGroup<Row> {
   class_name?: string;
 }
 
+// Draws only the rows in view; the table's .table-wrap scrolls, so the app gives it a height.
+export interface TableVirtual {
+  // Every row's height in pixels, group headings included.
+  row_height: number;
+  // How many rows past each edge of the view are drawn too.
+  overscan?: number;
+  // A phone card's height in pixels; phones draw every row when it is left out.
+  card_height?: number;
+}
+
 interface DataTableProps<Row> {
   columns: TableColumn<Row>[];
   rows: Row[];
-  // Rows under headings, each group sorted on its own; used in place of `rows`.
+  // Rows under headings, each group sorted on its own; used in place of `rows`; a heading hides while the filter empties its group.
   groups?: RowGroup<Row>[];
   // A row's stable key, such as its id; rows keep their place when there is none.
   row_key?: (row: Row) => string | number;
   caption?: string;
+  virtual?: TableVirtual;
+  // Lets the last column on show take the room the others' fixed widths leave.
+  fill_last_column?: boolean;
 
   // One sorting or several, the first deciding first.
   sorting?: Sorting | Sorting[];
@@ -97,7 +112,7 @@ interface DataTableProps<Row> {
   row_title?: (row: Row) => string | undefined;
   // Inline style for a row, such as a custom property its cells read for a tint.
   row_style?: (row: Row) => CSSProperties | undefined;
-  // A full-width row after a row, such as an inline form for a new child.
+  // A full-width row after a row, such as an inline form for a new child; a virtual table counts it in its row's height.
   render_after_row?: (row: Row) => ReactNode;
 
   // Makes rows draggable; the app decides what moves, such as every picked row.
@@ -121,10 +136,122 @@ function filtered_tree<Row>(rows: Row[], passes: (row: Row) => boolean, get_chil
   });
 }
 
+// ── Rows ─────────────────────────────────────────────────────────────────────
+
+// What a row hands back to the table, read from the table's latest draw.
+interface RowEvents<Row> {
+  click: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  double_click: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  context_menu: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  key_down: (row: Row, event: KeyboardEvent<HTMLTableRowElement>) => void;
+  toggle: (id: string, open: boolean) => void;
+  drag_start: (row: Row, id: string, event: DragEvent<HTMLTableRowElement>) => void;
+  drag_end: () => void;
+  drag_over: (row: Row, id: string, event: DragEvent<HTMLTableRowElement>) => void;
+  drag_leave: (id: string) => void;
+  drop: (row: Row, id: string, event: DragEvent<HTMLTableRowElement>) => void;
+}
+
+interface TableRowProps<Row> {
+  original: Row;
+  id: string;
+  row_key: string;
+  depth: number;
+  open: boolean;
+  child_count: number;
+  columns: TableColumn<Row>[];
+  tree: boolean;
+  class_name: string | undefined;
+  title: string | undefined;
+  style: CSSProperties | undefined;
+  selected: boolean | undefined;
+  tab_index: number | undefined;
+  keyed: boolean;
+  draggable: boolean;
+  after: ReactNode;
+  events: RefObject<RowEvents<Row>>;
+}
+
+function TableRowView<Row>(props: TableRowProps<Row>) {
+  const { original, id, columns, events } = props;
+  const after = props.after;
+  return (
+    <>
+      <tr
+        className={props.class_name}
+        title={props.title}
+        style={props.style}
+        data-row-key={props.keyed ? props.row_key : undefined}
+        tabIndex={props.tab_index}
+        aria-selected={props.selected}
+        draggable={props.draggable || undefined}
+        onDragStart={props.draggable ? (event) => events.current.drag_start(original, id, event) : undefined}
+        onDragEnd={props.draggable ? () => events.current.drag_end() : undefined}
+        onDragOver={(event) => events.current.drag_over(original, id, event)}
+        onDragLeave={() => events.current.drag_leave(id)}
+        onDrop={(event) => events.current.drop(original, id, event)}
+        onClick={(event) => events.current.click(original, event)}
+        onDoubleClick={(event) => events.current.double_click(original, event)}
+        onKeyDown={(event) => events.current.key_down(original, event)}
+        onContextMenu={(event) => events.current.context_menu(original, event)}
+      >
+        {columns.map((column, index) => {
+          const label = column.label;
+          if (!props.tree || index > 0) return <td key={column_id(column)} className={column.class} data-label={label}>{column.cell(original)}</td>;
+          const count = props.child_count;
+          return (
+            <td key={column_id(column)} className={[column.class, "tree-cell"].filter(Boolean).join(" ")} data-label={label} style={{ "--tree-depth": props.depth } as CSSProperties}>
+              {count > 0 ? (
+                <button type="button" className="icon tree-toggle" aria-expanded={props.open} aria-label={props.open ? "Collapse" : "Expand"} onClick={(event) => { event.stopPropagation(); events.current.toggle(id, props.open); }}>
+                  {props.open ? "▾" : "▸"}
+                </button>
+              ) : <span className="tree-spacer" />}
+              {column.cell(original)}
+              {count > 0 && !props.open && <span className="tree-count" title={`${count} inside`}>{count}</span>}
+            </td>
+          );
+        })}
+      </tr>
+      {after !== undefined && after !== null && typeof after !== "boolean" && <tr className="row-extra"><td colSpan={columns.length}>{after}</td></tr>}
+    </>
+  );
+}
+
+function same_style(first: CSSProperties | undefined, second: CSSProperties | undefined): boolean {
+  if (first === second) return true;
+  if (!first || !second) return false;
+  const keys = Object.keys(first) as (keyof CSSProperties)[];
+  return keys.length === Object.keys(second).length && keys.every((key) => first[key] === second[key]);
+}
+
+function same_row<Row>(before: TableRowProps<Row>, after: TableRowProps<Row>): boolean {
+  return (Object.keys(after) as (keyof TableRowProps<Row>)[]).every((key) => key === "style" ? same_style(before.style, after.style) : before[key] === after[key]);
+}
+
+// A row draws again only when something it shows changes, so picking one row leaves the others alone.
+const TableRow = memo(TableRowView, same_row) as <Row>(props: TableRowProps<Row> & { key?: string }) => ReactElement;
+
+// A group's heading or one of the rows, in the order drawn.
+type Line<Row> = { kind: "group"; group: RowGroup<Row> } | { kind: "row"; row: TanstackRow<Row>; key: string };
+
+// Whether the page is phone-sized, where the rows are cards.
+function use_phone(): boolean {
+  const query = "(max-width: 640px)";
+  const [phone, set_phone] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const list = window.matchMedia(query);
+    const changed = () => set_phone(list.matches);
+    list.addEventListener("change", changed);
+    return () => list.removeEventListener("change", changed);
+  }, []);
+  return phone;
+}
+
 // ── Table ────────────────────────────────────────────────────────────────────
 
 export function DataTable<Row>(props: DataTableProps<Row>) {
-  const { columns, row_key, caption, get_children, row_passes, groups, allow_inside_drop = true } = props;
+  const { columns, row_key, caption, get_children, row_passes, groups, allow_inside_drop = true, fill_last_column: fill_last = false } = props;
   const rows = useMemo(() => groups ? groups.flatMap((group) => group.rows) : props.rows, [groups, props.rows]);
   const [own_expanded, set_own_expanded] = useState<string[] | true>(true);
   const [open_filter, set_open_filter] = useState<{ id: string; anchor: HTMLElement } | null>(null);
@@ -191,13 +318,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     manualSorting: manual,
   });
 
-  const shown = table.getVisibleLeafColumns().map((column) => by_id.get(column.id)!);
+  const shown_ids = table.getVisibleLeafColumns().map((column) => column.id).join("\n");
+  const shown = useMemo(() => shown_ids.split("\n").filter(Boolean).map((id) => by_id.get(id)!), [shown_ids, by_id]);
 
-  function toggle_row(row: TanstackRow<Row>): void {
+  function toggle_row(id: string, is_open: boolean): void {
     const open = expanded === true
       ? table.getCoreRowModel().flatRows.filter((each) => each.subRows.length > 0).map((each) => each.id)
       : expanded;
-    const next = row.getIsExpanded() ? open.filter((id) => id !== row.id) : [...open, row.id];
+    const next = is_open ? open.filter((each) => each !== id) : [...open, id];
     if (props.expanded === undefined) set_own_expanded(next);
     props.on_expanded_change?.(next);
   }
@@ -219,7 +347,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     if (!props.on_column_widths_change) return;
     const sizes = Object.fromEntries([...header_cells.current].map(([id, cell]) => [id, cell.offsetWidth]));
     set_measured((before) => JSON.stringify(before) === JSON.stringify(sizes) ? before : sizes);
-  }, [shown.map(column_id).join("\n"), props.on_column_widths_change]);
+  }, [shown_ids, props.on_column_widths_change]);
 
   function resize(column: TableColumn<Row>, width: number, done: boolean): void {
     props.on_column_widths_change?.({ ...widths, [column_id(column)]: width }, done);
@@ -295,37 +423,37 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // ── Dragging rows ──
 
   // A drag started in this table lands anywhere, and any drag lands where the app's rule allows it.
-  function row_placement(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): DropPlacement | null {
+  function row_placement(row: Row, event: DragEvent<HTMLTableRowElement>): DropPlacement | null {
     if (!props.on_row_drop) return null;
     const box = event.currentTarget.getBoundingClientRect();
     const placement = placement_at(box.height > 0 ? (event.clientY - box.top) / box.height : 0.5, allow_inside_drop);
-    const allowed = props.can_drop_on_row ? props.can_drop_on_row(row.original, placement) : row_dragging;
+    const allowed = props.can_drop_on_row ? props.can_drop_on_row(row, placement) : row_dragging;
     return allowed ? placement : null;
   }
 
-  function row_drag_start(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+  function row_drag_start(row: Row, id: string, event: DragEvent<HTMLTableRowElement>): void {
     set_row_dragging(true);
-    props.on_row_drag_start!(row.original, event);
+    props.on_row_drag_start!(row, event);
     // Some browsers start a drag only once it carries data.
-    if (event.dataTransfer && event.dataTransfer.types.length === 0) event.dataTransfer.setData("text/plain", row.id);
+    if (event.dataTransfer && event.dataTransfer.types.length === 0) event.dataTransfer.setData("text/plain", id);
   }
 
-  function row_drag_over(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+  function row_drag_over(row: Row, id: string, event: DragEvent<HTMLTableRowElement>): void {
     const placement = row_placement(row, event);
     if (!placement) {
-      if (row_drop?.id === row.id) set_row_drop(null);
+      if (row_drop?.id === id) set_row_drop(null);
       return;
     }
     event.preventDefault();
-    if (row_drop?.id !== row.id || row_drop.placement !== placement) set_row_drop({ id: row.id, placement });
+    if (row_drop?.id !== id || row_drop.placement !== placement) set_row_drop({ id, placement });
   }
 
-  function row_drag_drop(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+  function row_drag_drop(row: Row, event: DragEvent<HTMLTableRowElement>): void {
     const placement = row_placement(row, event);
     set_row_drop(null);
     if (!placement) return;
     event.preventDefault();
-    props.on_row_drop!(row.original, placement, event);
+    props.on_row_drop!(row, placement, event);
   }
 
   function row_drag_end(): void {
@@ -334,6 +462,21 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     props.on_row_drag_end?.();
   }
 
+  // The rows read these through a ref, so a new handler from the app never draws every row again.
+  const events = useRef<RowEvents<Row>>(null!);
+  events.current = {
+    click: (row, event) => props.on_row_click?.(row, event),
+    double_click: (row, event) => props.on_row_double_click?.(row, event),
+    context_menu: (row, event) => props.on_row_context_menu?.(row, event),
+    key_down: (row, event) => props.on_row_key_down?.(row, event),
+    toggle: toggle_row,
+    drag_start: row_drag_start,
+    drag_end: row_drag_end,
+    drag_over: (row, id, event) => { if (props.on_row_drop) row_drag_over(row, id, event); },
+    drag_leave: (id) => { if (props.on_row_drop && row_drop?.id === id) set_row_drop(null); },
+    drop: (row, _id, event) => { if (props.on_row_drop) row_drag_drop(row, event); },
+  };
+
   // ── Drawing ──
 
   function header(column: TableColumn<Row>) {
@@ -341,7 +484,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const index = sorting.findIndex((key) => key.key === id);
     const key = sorting[index];
     const sortable = is_sortable(column) && Boolean(props.on_sort || props.on_sorting_change);
-    const width = width_of(column);
+    const filling = fill_last && column === shown[shown.length - 1];
+    const width = filling ? undefined : width_of(column);
     const movable = can_move(column);
     const class_name = [
       column.class, column.filter_active && "filtered", dragged === id && "dragged", drop_target?.id === id && (drop_target.after ? "drop-after" : "drop-before"),
@@ -358,7 +502,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         ref={(cell) => { if (cell) header_cells.current.set(id, cell); else header_cells.current.delete(id); }}
         className={class_name}
         scope="col"
-        style={width === undefined ? undefined : { width, minWidth: width, maxWidth: width }}
+        style={width !== undefined ? { width, minWidth: width, maxWidth: width } : filling && column.min_width !== undefined ? { minWidth: column.min_width } : undefined}
         aria-sort={sortable ? (key ? (key.descending ? "descending" : "ascending") : "none") : undefined}
         draggable={movable || undefined}
         title={movable ? "Drag to move this column" : undefined}
@@ -398,7 +542,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
             <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 3h12l-4.5 5.5V13l-3 1.5v-6z" fill="currentColor" /></svg>
           </button>
         )}
-        {props.on_column_widths_change && (
+        {props.on_column_widths_change && !filling && (
           <ResizeHandle
             side="left"
             size={width ?? measured[id] ?? column.min_width ?? 48}
@@ -415,58 +559,37 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     );
   }
 
-  function body_row(row: TanstackRow<Row>) {
+  function body_row(row: TanstackRow<Row>, key: string) {
     const original = row.original;
-    const row_class = [props.row_class?.(original), row_drop?.id === row.id && `drop-${row_drop.placement}`].filter(Boolean).join(" ") || undefined;
-    const after = props.render_after_row?.(original);
-    const draggable = Boolean(props.on_row_drag_start);
     const keyed = props.on_row_key_down !== undefined;
-    const key = row_key ? String(row_key(original)) : row.id;
     return (
-      <Fragment key={row.id}>
-        <tr
-          className={row_class}
-          title={props.row_title?.(original)}
-          style={props.row_style?.(original)}
-          data-row-key={keyed ? key : undefined}
-          tabIndex={keyed ? (props.active_row !== undefined && String(props.active_row) === key ? 0 : -1) : undefined}
-          aria-selected={props.row_selected ? props.row_selected(original) : undefined}
-          draggable={draggable || undefined}
-          onDragStart={draggable ? (event) => row_drag_start(row, event) : undefined}
-          onDragEnd={draggable ? row_drag_end : undefined}
-          onDragOver={props.on_row_drop && ((event) => row_drag_over(row, event))}
-          onDragLeave={props.on_row_drop && (() => { if (row_drop?.id === row.id) set_row_drop(null); })}
-          onDrop={props.on_row_drop && ((event) => row_drag_drop(row, event))}
-          onClick={props.on_row_click && ((event) => props.on_row_click!(original, event))}
-          onDoubleClick={props.on_row_double_click && ((event) => props.on_row_double_click!(original, event))}
-          onKeyDown={props.on_row_key_down && ((event) => props.on_row_key_down!(original, event))}
-          onContextMenu={props.on_row_context_menu && ((event) => props.on_row_context_menu!(original, event))}
-        >
-          {shown.map((column, index) => {
-            const label = column.label;
-            if (!tree || index > 0) return <td key={column_id(column)} className={column.class} data-label={label}>{column.cell(original)}</td>;
-            const open = row.getIsExpanded();
-            const count = row.subRows.length;
-            return (
-              <td key={column_id(column)} className={[column.class, "tree-cell"].filter(Boolean).join(" ")} data-label={label} style={{ "--tree-depth": row.depth } as CSSProperties}>
-                {count > 0 ? (
-                  <button type="button" className="icon tree-toggle" aria-expanded={open} aria-label={open ? "Collapse" : "Expand"} onClick={(event) => { event.stopPropagation(); toggle_row(row); }}>
-                    {open ? "▾" : "▸"}
-                  </button>
-                ) : <span className="tree-spacer" />}
-                {column.cell(original)}
-                {count > 0 && !open && <span className="tree-count" title={`${count} inside`}>{count}</span>}
-              </td>
-            );
-          })}
-        </tr>
-        {after !== undefined && after !== null && typeof after !== "boolean" && <tr className="row-extra"><td colSpan={shown.length}>{after}</td></tr>}
-      </Fragment>
+      <TableRow<Row>
+        key={row.id}
+        original={original}
+        id={row.id}
+        row_key={key}
+        depth={row.depth}
+        open={row.getIsExpanded()}
+        child_count={row.subRows.length}
+        columns={shown}
+        tree={tree}
+        class_name={[props.row_class?.(original), row_drop?.id === row.id && `drop-${row_drop.placement}`].filter(Boolean).join(" ") || undefined}
+        title={props.row_title?.(original)}
+        style={props.row_style?.(original)}
+        selected={props.row_selected?.(original)}
+        tab_index={keyed ? (props.active_row !== undefined && String(props.active_row) === key ? 0 : -1) : undefined}
+        keyed={keyed}
+        draggable={Boolean(props.on_row_drag_start)}
+        after={props.render_after_row?.(original)}
+        events={events}
+      />
     );
   }
 
+  const row_line = (row: TanstackRow<Row>): Line<Row> => ({ kind: "row", row, key: row_key ? String(row_key(row.original)) : row.id });
+
   // Each group's heading and then its rows, which keep the order of the sorted whole, so each group is sorted on its own.
-  function grouped_body(groups: RowGroup<Row>[]) {
+  function grouped_lines(groups: RowGroup<Row>[]): Line<Row>[] {
     const group_of = new Map<Row, number>();
     groups.forEach((group, index) => group.rows.forEach((row) => { if (!group_of.has(row)) group_of.set(row, index); }));
     const rows_by_group = groups.map((): TanstackRow<Row>[] => []);
@@ -475,15 +598,83 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       if (row.depth === 0) current = group_of.get(row.original) ?? current;
       rows_by_group[current]!.push(row);
     }
-    return groups.map((group, index) => (
-      <Fragment key={group.key}>
-        <tr className={group.class_name ? `group-row ${group.class_name}` : "group-row"}>
-          <th scope="colgroup" colSpan={shown.length}>{group.label}</th>
-        </tr>
-        {rows_by_group[index]!.map(body_row)}
-      </Fragment>
-    ));
+    // A group the filter emptied loses its heading, while one that was empty all along keeps it.
+    return groups.flatMap((group, index) => rows_by_group[index]!.length === 0 && group.rows.length > 0
+      ? []
+      : [{ kind: "group" as const, group }, ...rows_by_group[index]!.map(row_line)]);
   }
+
+  const lines = groups ? grouped_lines(groups) : table.getRowModel().rows.map(row_line);
+
+  // ── Virtual rows ──
+
+  const phone = use_phone();
+  const line_height = props.virtual ? (phone ? props.virtual.card_height : props.virtual.row_height) : undefined;
+  const wrap = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLTableSectionElement>(null);
+  const [view, set_view] = useState({ top: 0, height: 0 });
+  const rows_focused = useRef(false);
+  const measure = () => {
+    const element = wrap.current;
+    if (element) set_view({ top: element.scrollTop, height: element.clientHeight });
+  };
+
+  useEffect(() => {
+    if (line_height === undefined || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrap.current!);
+    return () => observer.disconnect();
+  }, [line_height === undefined]);
+
+  const head_height = head.current?.offsetHeight ?? 0;
+  const viewport = view.height || window.innerHeight;
+  const windowed = line_height === undefined ? undefined : virtual_window(lines.length, line_height, view.top - head_height, Math.max(line_height, viewport - head_height), props.virtual!.overscan);
+  const active_index = props.active_row === undefined ? -1 : lines.findIndex((line) => line.kind === "row" && line.key === String(props.active_row));
+
+  // A row that moves the active row by key hands focus on to it once it is drawn.
+  const focus_pending = useRef(false);
+  useLayoutEffect(() => { focus_pending.current = line_height !== undefined && rows_focused.current; }, [props.active_row]);
+
+  // The active row scrolls into view as the keys move it.
+  useLayoutEffect(() => {
+    if (line_height === undefined || active_index < 0) return;
+    const element = wrap.current!;
+    const row_top = head_height + active_index * line_height;
+    const top = view.top;
+    const next = row_top < top + head_height ? row_top - head_height : row_top + line_height > top + viewport ? row_top + line_height - viewport : top;
+    if (next !== top) {
+      element.scrollTop = next;
+      set_view({ top: next, height: view.height });
+    }
+  }, [props.active_row, active_index, line_height]);
+
+  useLayoutEffect(() => {
+    if (!focus_pending.current || props.active_row === undefined) return;
+    const active = String(props.active_row);
+    const row = [...wrap.current!.querySelectorAll<HTMLElement>("tr[data-row-key]")].find((each) => each.dataset.rowKey === active);
+    if (!row) return;
+    focus_pending.current = false;
+    const focused = document.activeElement;
+    if (focused !== row && (focused === null || focused === document.body || wrap.current!.contains(focused))) row.focus({ preventScroll: true });
+  });
+
+  function spacer(height: number, key: string) {
+    if (height <= 0) return null;
+    return <tr key={key} className="virtual-spacer" aria-hidden="true" style={{ height }}><td colSpan={shown.length} style={{ padding: 0, border: "none" }} /></tr>;
+  }
+
+  function draw_line(line: Line<Row>) {
+    if (line.kind === "row") return body_row(line.row, line.key);
+    const group = line.group;
+    return (
+      <tr key={`group ${group.key}`} className={group.class_name ? `group-row ${group.class_name}` : "group-row"}>
+        <th scope="colgroup" colSpan={shown.length}>{group.label}</th>
+      </tr>
+    );
+  }
+
+  const drawn = windowed ? lines.slice(windowed.start, windowed.end) : lines;
+  const fills_by_fixed = fill_last && shown.slice(0, -1).every((column) => width_of(column) !== undefined);
 
   const filtered_column = open_filter ? by_id.get(open_filter.id) : undefined;
   const filter_body = filtered_column?.filter;
@@ -497,11 +688,23 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           {props.on_hidden_columns_change && <button type="button" aria-haspopup="menu" onClick={open_columns_menu}>Columns</button>}
         </div>
       )}
-      <div className="table-wrap">
-        <table className="responsive">
+      <div
+        ref={wrap}
+        className={props.virtual ? "table-wrap virtual" : "table-wrap"}
+        style={props.virtual ? { overflowY: "auto" } : undefined}
+        onScroll={line_height === undefined ? undefined : measure}
+      >
+        <table className={fill_last ? "responsive fill-last-column" : "responsive"} style={fills_by_fixed ? { tableLayout: "fixed" } : undefined}>
           {caption && <caption className="visually-hidden">{caption}</caption>}
-          <thead onContextMenu={props.on_hidden_columns_change && open_columns_menu}><tr>{shown.map(header)}</tr></thead>
-          <tbody>{groups ? grouped_body(groups) : table.getRowModel().rows.map(body_row)}</tbody>
+          <thead ref={head} onContextMenu={props.on_hidden_columns_change && open_columns_menu}><tr>{shown.map(header)}</tr></thead>
+          <tbody
+            onFocus={() => { rows_focused.current = true; }}
+            onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) rows_focused.current = false; }}
+          >
+            {windowed && spacer(windowed.offset_px, "spacer before")}
+            {drawn.map(draw_line)}
+            {windowed && spacer(windowed.total_px - windowed.end * line_height!, "spacer after")}
+          </tbody>
         </table>
       </div>
       {open_filter && filtered_column && filter_body !== undefined && (

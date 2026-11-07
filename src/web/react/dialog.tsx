@@ -1,23 +1,39 @@
 // Modal dialogs on the native one: any body and buttons, one that asks before an action, and one that shows a long text.
 
-import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "./toasts.tsx";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
+// Makes the body and buttons one form, so Enter in a field or a submit button runs on_submit.
+export interface DialogForm {
+  on_submit: (event: FormEvent<HTMLFormElement>) => void;
+  // Adds the primary submit button after the other buttons.
+  submit_label?: ReactNode;
+  submit_disabled?: boolean;
+  danger?: boolean;
+}
+
 interface DialogProps {
   title: ReactNode;
+  // A muted line under the title, such as what the dialog edits.
+  subtitle?: ReactNode;
+  // Buttons on the title's row, such as a close or a menu button.
+  actions?: ReactNode;
   on_close: () => void;
-  // The row of buttons at the foot, such as Cancel and Save.
+  // The row of buttons at the foot, such as Cancel and Save; inside a form, give the others type="button".
   buttons?: ReactNode;
+  form?: DialogForm;
   wide?: boolean;
+  // Fills the window, such as for a page shown over the app.
+  full?: boolean;
   // A class that sets the dialog's own width or look.
   class_name?: string;
   children: ReactNode;
 }
 
 // Shown while it is rendered: the page behind it is inert, focus stays inside, Escape calls on_close, and focus goes back to the opener after.
-export function Dialog({ title, on_close, buttons, wide = false, class_name, children }: DialogProps) {
+export function Dialog({ title, subtitle, actions, on_close, buttons, form, wide = false, full = false, class_name, children }: DialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title_id = useId();
   const close = useRef(on_close);
@@ -34,10 +50,17 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
     };
   }, []);
 
+  const heading = <h2 id={title_id}>{title}</h2>;
+  const submit = form?.submit_label !== undefined && (
+    <button type="submit" className={form.danger ? "danger solid" : "accent solid"} disabled={form.submit_disabled}>{form.submit_label}</button>
+  );
+  const foot = (buttons || submit) && <div className="dialog-buttons">{buttons}{submit}</div>;
+  const body = <div className="dialog-body">{children}</div>;
+
   return (
     <dialog
       ref={dialog}
-      className={["dialog", wide && "wide", class_name].filter(Boolean).join(" ")}
+      className={["dialog", wide && "wide", full && "full", class_name].filter(Boolean).join(" ")}
       aria-labelledby={title_id}
       onCancel={(event) => {
         // Escape asks the owner to close, so the dialog never closes behind its owner's back.
@@ -46,9 +69,21 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
         close.current();
       }}
     >
-      <h2 id={title_id}>{title}</h2>
-      <div className="dialog-body">{children}</div>
-      {buttons && <div className="dialog-buttons">{buttons}</div>}
+      {subtitle === undefined && actions === undefined ? heading : (
+        <header className="dialog-header">
+          <div className="dialog-heading">
+            {heading}
+            {subtitle !== undefined && <p className="dialog-subtitle">{subtitle}</p>}
+          </div>
+          {actions !== undefined && <div className="dialog-actions">{actions}</div>}
+        </header>
+      )}
+      {form ? (
+        <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); form.on_submit(event); }}>
+          {body}
+          {foot}
+        </form>
+      ) : <>{body}{foot}</>}
     </dialog>
   );
 }

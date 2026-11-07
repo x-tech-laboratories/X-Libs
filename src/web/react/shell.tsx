@@ -1,4 +1,4 @@
-// The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, the theme button, and the toasts, dialogs and menus.
+// The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, the theme button, a status bar, and the toasts, dialogs and menus.
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
@@ -64,13 +64,15 @@ interface ShellProps {
   sections?: ShellSection[];
   // The section to light up, such as the route's first part.
   active?: string;
-  // The sidebar's own content, such as views and tags, in place of the section links.
+  // The sidebar's own content, such as views and tags, in place of the section links, held in a .sidebar-content box.
   sidebar?: ReactNode;
   // Makes the sidebar's edge draggable on wide screens.
   sidebar_width?: SidebarWidth;
   theme: ThemeChoice;
-  // Who is logged in, or null on the login page, which hides the sidebar and the top bar's tools; left out when the app has no logins.
+  // Who is logged in; left out, null or empty shows no account name or Log out.
   user?: string | null;
+  // Hides the sidebar and the top bar's tools, such as on the login page; true when user is null unless set.
+  logged_out?: boolean;
   // Makes the user's name a link, such as to their account page.
   user_href?: string;
   on_logout?: () => void;
@@ -85,6 +87,8 @@ interface ShellProps {
   tools?: ReactNode;
   // What sits at the foot of the sidebar, such as whether the live updates are connected.
   sidebar_foot?: ReactNode;
+  // A bar along the foot of the window, such as what is playing or how many rows are picked.
+  status_bar?: ReactNode;
   // Changes whenever the view does, so focus and scroll move to the new page.
   view_key?: string;
   children: ReactNode;
@@ -103,7 +107,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, view_key,
+  brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -112,7 +116,8 @@ export function Shell({
   const menu_button = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const first_view = useRef(true);
-  const logged_out = user === null;
+  const logged_out = held_logged_out ?? user === null;
+  const user_name = typeof user === "string" && user !== "" ? user : undefined;
   const [width, change_width] = use_sidebar_width(sidebar_width);
 
   // Every opening and closing of the phone menu goes through here, so an app that holds it hears each one.
@@ -128,7 +133,8 @@ export function Shell({
   useEffect(() => {
     document.body.classList.toggle("logged-out", logged_out);
     document.body.classList.toggle("menu-open", menu_open);
-  }, [logged_out, menu_open]);
+    document.body.classList.toggle("has-status-bar", status_bar !== undefined);
+  }, [logged_out, menu_open, status_bar !== undefined]);
 
   useEffect(() => {
     if (menu_open) sidebar.current?.querySelector<HTMLElement>("a[href], button:not(:disabled), input, select, textarea, [tabindex='0']")?.focus();
@@ -158,12 +164,12 @@ export function Shell({
         <a href={brand_href} className="brand">{brand}</a>
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
-        {typeof user === "string" && (user_href ? <a className="account-link" href={user_href}>{user}</a> : <span className="user-name">{user}</span>)}
-        {typeof user === "string" && on_logout && <button onClick={on_logout}>Log out</button>}
+        {user_name !== undefined && (user_href ? <a className="account-link" href={user_href}>{user_name}</a> : <span className="user-name">{user_name}</span>)}
+        {user_name !== undefined && on_logout && <button onClick={on_logout}>Log out</button>}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
-          {sidebar_content ?? sections.map((section) => (
+          {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : sections.map((section) => (
             <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
               {section.label}
             </a>
@@ -186,6 +192,7 @@ export function Shell({
         <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
         <main ref={main} id="main" className={main_class} tabIndex={-1}>{children}</main>
       </div>
+      {status_bar !== undefined && <footer className="status-bar">{status_bar}</footer>}
       <Toasts />
       <Dialogs />
       <ContextMenus />

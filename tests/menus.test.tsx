@@ -122,6 +122,26 @@ describe("context menu keys", () => {
     expect(on_close).not.toHaveBeenCalled();
   });
 
+  it("ticks items that keep it open at once, even when the items never change", () => {
+    const run = vi.fn();
+    const menu_items: MenuItem[] = [
+      { label: "Show notes", run, checked: false, keep_open: true },
+      { label: "By name", run, checked: true, radio: true, keep_open: true, separator_before: true },
+      { label: "By date", run, checked: false, radio: true, keep_open: true },
+    ];
+    render(<ContextMenu x={0} y={0} on_close={() => {}} items={menu_items} />);
+    const checked = (role: "menuitemcheckbox" | "menuitemradio", name: string) => screen.getByRole(role, { name }).getAttribute("aria-checked");
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Show notes" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "By date" }));
+
+    expect(checked("menuitemcheckbox", "Show notes")).toBe("true");
+    expect(checked("menuitemradio", "By name")).toBe("false");
+    expect(checked("menuitemradio", "By date")).toBe("true");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+
   it("opens from anywhere at the event's point", () => {
     render(<ContextMenus />);
 

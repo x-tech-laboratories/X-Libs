@@ -19,6 +19,11 @@ export interface TreeMove {
   position: number;
 }
 
+// Siblings are ordered by position unless by_list_order keeps them in the order the list gives, such as one already sorted on screen.
+export interface DropOptions {
+  by_list_order?: boolean;
+}
+
 // ── Shape ────────────────────────────────────────────────────────────────────
 
 export function by_position<Item extends { position: number }>(first: Item, second: Item): number {
@@ -99,8 +104,8 @@ export function can_drop(dragged_id: string, target_id: string, items: TreeItem[
 }
 
 // Picks a position between the neighbours at the drop point, so only the moved item changes.
-function position_beside<Item extends { id: string; position: number }>(siblings: Item[], target: Item, placement: SidePlacement): number {
-  const sorted = [...siblings].sort(by_position);
+function position_beside<Item extends { id: string; position: number }>(siblings: Item[], target: Item, placement: SidePlacement, options: DropOptions = {}): number {
+  const sorted = options.by_list_order ? siblings : [...siblings].sort(by_position);
   const index = sorted.findIndex((sibling) => sibling.id === target.id);
   const neighbour = sorted[placement === "before" ? index - 1 : index + 1];
   if (!neighbour) return placement === "before" ? target.position - 1 : target.position + 1;
@@ -108,12 +113,12 @@ function position_beside<Item extends { id: string; position: number }>(siblings
 }
 
 // For a flat list, where items only move before or after each other.
-export function position_for_drop<Item extends { id: string; position: number }>(dragged: Item, target: Item, placement: SidePlacement, items: Item[]): number {
-  return position_beside(items.filter((item) => item.id !== dragged.id), target, placement);
+export function position_for_drop<Item extends { id: string; position: number }>(dragged: Item, target: Item, placement: SidePlacement, items: Item[], options: DropOptions = {}): number {
+  return position_beside(items.filter((item) => item.id !== dragged.id), target, placement, options);
 }
 
 // Inside drops after the target's last child; before and after drop among the target's siblings.
-export function move_for_drop<Item extends TreeItem>(dragged: Item, target: Item, placement: DropPlacement, items: Item[]): TreeMove {
+export function move_for_drop<Item extends TreeItem>(dragged: Item, target: Item, placement: DropPlacement, items: Item[], options: DropOptions = {}): TreeMove {
   const others = items.filter((item) => item.id !== dragged.id);
 
   if (placement === "inside") {
@@ -121,11 +126,11 @@ export function move_for_drop<Item extends TreeItem>(dragged: Item, target: Item
     return { parent_id: target.id, position: last_child_position + 1 };
   }
 
-  return { parent_id: target.parent_id, position: position_beside(children_of(target.parent_id, others), target, placement) };
+  return { parent_id: target.parent_id, position: position_beside(children_of(target.parent_id, others), target, placement, options) };
 }
 
 // Moves several items together, keeping their order: inside the target after its last child, or in a run between it and its neighbour.
-export function moves_for_drop<Item extends TreeItem>(dragged: Item[], target: Item, placement: DropPlacement, items: Item[]): TreeMove[] {
+export function moves_for_drop<Item extends TreeItem>(dragged: Item[], target: Item, placement: DropPlacement, items: Item[], options: DropOptions = {}): TreeMove[] {
   const dragged_ids = new Set(dragged.map((item) => item.id));
   const others = items.filter((item) => !dragged_ids.has(item.id));
 
@@ -134,7 +139,8 @@ export function moves_for_drop<Item extends TreeItem>(dragged: Item[], target: I
     return dragged.map((_, index) => ({ parent_id: target.id, position: last_child_position + index + 1 }));
   }
 
-  const siblings = children_of(target.parent_id, others).sort(by_position);
+  const siblings = children_of(target.parent_id, others);
+  if (!options.by_list_order) siblings.sort(by_position);
   const index = siblings.findIndex((sibling) => sibling.id === target.id);
   const neighbour = siblings[placement === "before" ? index - 1 : index + 1];
   const low = placement === "before" ? (neighbour?.position ?? target.position - 1) : target.position;

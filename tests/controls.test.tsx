@@ -30,6 +30,21 @@ describe("SearchBox", () => {
     expect(field.value).toBe("");
     vi.useRealTimers();
   });
+
+  test("drops typing not yet handed on when the value is cleared from outside", () => {
+    vi.useFakeTimers();
+    const on_input = vi.fn();
+    const { rerender } = render(<SearchBox label="Search" value="milk" on_input={on_input} />);
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search" });
+
+    fireEvent.change(field, { target: { value: "milkshake" } });
+    rerender(<SearchBox label="Search" value="" on_input={on_input} />);
+    vi.advanceTimersByTime(200);
+
+    expect(field.value).toBe("");
+    expect(on_input).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });
 
 // ============================================================================

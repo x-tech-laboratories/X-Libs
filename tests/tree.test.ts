@@ -130,3 +130,23 @@ describe("keyboard moves", () => {
     expect(move_for_key(item("a"), "outdent", items)).toBeNull();
   });
 });
+
+// ── List order ───────────────────────────────────────────────────────────────
+
+describe("dropping by list order", () => {
+  // Shown in the order x, y, z, though z sits between x and y by position.
+  const listed: TreeItem[] = [
+    { id: "x", parent_id: null, position: 1 },
+    { id: "y", parent_id: null, position: 5 },
+    { id: "z", parent_id: null, position: 3 },
+    { id: "w", parent_id: null, position: 9 },
+  ];
+  const [x, , , w] = listed as [TreeItem, TreeItem, TreeItem, TreeItem];
+
+  test("orders siblings by position unless told to keep the list's order", () => {
+    expect(position_for_drop(w, x, "after", listed)).toBe(2);
+    expect(position_for_drop(w, x, "after", listed, { by_list_order: true })).toBe(3);
+    expect(move_for_drop(w, x, "after", listed, { by_list_order: true })).toEqual({ parent_id: null, position: 3 });
+    expect(moves_for_drop([w], x, "after", listed, { by_list_order: true })).toEqual([{ parent_id: null, position: 3 }]);
+  });
+});

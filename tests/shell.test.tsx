@@ -96,6 +96,26 @@ describe("shell top bar", () => {
     expect(document.body.classList.contains("logged-out")).toBe(true);
   });
 
+  it("shows no account name for an empty user, and keeps the tools when told the user is not logged out", () => {
+    const { rerender } = render(<Shell brand="X-Test" tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} user="" on_logout={() => {}}>Page</Shell>);
+    expect(document.querySelector(".user-name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+
+    rerender(<Shell brand="X-Test" tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} user={null} logged_out={false}>Page</Shell>);
+    expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();
+    expect(document.body.classList.contains("logged-out")).toBe(false);
+    expect(document.querySelector(".user-name")).toBeNull();
+  });
+
+  it("holds the app's sidebar in a content box and draws a status bar at the foot", () => {
+    render(<Shell brand="X-Test" sidebar={<p>Not a link</p>} status_bar={<span>3 picked</span>} theme={theme_choice("x-test-theme")}>Page</Shell>);
+
+    expect(screen.getByText("Not a link").parentElement!.className).toBe("sidebar-content");
+    expect(screen.getByRole("contentinfo").className).toBe("status-bar");
+    expect(screen.getByRole("contentinfo").textContent).toBe("3 picked");
+    expect(document.body.classList.contains("has-status-bar")).toBe(true);
+  });
+
   it("hands the phone menu to an app that holds it", () => {
     const on_menu_open_change = vi.fn();
     const { rerender } = render(<Shell brand="X-Test" menu_open={false} on_menu_open_change={on_menu_open_change} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);

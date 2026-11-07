@@ -284,6 +284,13 @@ describe("table groups", () => {
 
     expect(body_rows().map((title) => title!.replace(/[▸▾\d]/g, ""))).toEqual(["# Now", "Bake", "Weigh", "Mix", "# Later", "Clean", "Air"]);
   });
+
+  it("hides the heading of a group the filter empties, but keeps one empty all along", () => {
+    const with_empty = [...groups, { key: "someday", label: "Someday", rows: [] }];
+    render(<DataTable columns={columns} rows={[]} groups={with_empty} row_key={(task) => task.id} row_passes={(task) => task.title === "Clean"} />);
+
+    expect(body_rows()).toEqual(["# Later", "Clean", "# Someday"]);
+  });
 });
 
 // ============================================================================
@@ -355,5 +362,94 @@ describe("table rows", () => {
     expect(extra.firstElementChild!.getAttribute("colspan")).toBe("3");
     expect(document.querySelectorAll(".row-extra")).toHaveLength(1);
     expect(row_of("Clean").title).toBe("Task c");
+  });
+});
+
+// ============================================================================
+// Drawing
+// ============================================================================
+
+describe("table drawing", () => {
+  it("draws again only the rows whose picking changed", () => {
+    const drawn: string[] = [];
+    const counted: TableColumn<Task>[] = [{ label: "Title", cell: (task) => { drawn.push(task.id); return task.title; } }];
+    const flat = tasks.map(({ children: _children, ...task }) => task);
+    const table = (picked: string) => <DataTable columns={counted} rows={flat} row_key={(task) => task.id} row_selected={(task) => task.id === picked} on_row_click={() => {}} />;
+    const { rerender } = render(table("a"));
+    drawn.length = 0;
+
+    rerender(table("c"));
+
+    expect(drawn.sort()).toEqual(["a", "c"]);
+    expect(row_of("Clean").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("lets the last column fill the room the fixed widths leave", () => {
+    render(<DataTable columns={columns} rows={tasks} fill_last_column column_widths={{ Title: 200, size: 80, Note: 120 }} on_column_widths_change={() => {}} />);
+    const [title, , note] = screen.getAllByRole("columnheader");
+
+    expect(title!.style.width).toBe("200px");
+    expect(note!.getAttribute("style")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "Resize the Note column" })).toBeNull();
+    expect(screen.getByRole("table").style.tableLayout).toBe("fixed");
+    expect(screen.getByRole("table").classList.contains("fill-last-column")).toBe(true);
+  });
+});
+
+// ============================================================================
+// Virtual rows
+// ============================================================================
+
+const many: Task[] = Array.from({ length: 1000 }, (_, index) => ({ id: `r${index}`, title: `Row ${index}`, size: index }));
+const drawn_keys = () => [...document.querySelectorAll<HTMLElement>("tbody tr[data-row-key]")].map((row) => row.dataset.rowKey);
+const spacers = () => [...document.querySelectorAll<HTMLElement>("tbody tr.virtual-spacer")].map((row) => row.style.height);
+
+// jsdom has no layout, so the scroller gets a fixed 400px height and the scroll it is told.
+function scroller(scroll_top = 0): HTMLElement {
+  const wrap = document.querySelector<HTMLElement>(".table-wrap")!;
+  Object.defineProperty(wrap, "clientHeight", { configurable: true, value: 400 });
+  Object.defineProperty(wrap, "scrollTop", { configurable: true, writable: true, value: scroll_top });
+  return wrap;
+}
+
+describe("table virtual rows", () => {
+  const virtual_table = (active: string) => (
+    <DataTable columns={columns} rows={many} row_key={(task) => task.id} manual_sorting virtual={{ row_height: 40, overscan: 2 }} active_row={active} on_row_key_down={() => {}} />
+  );
+
+  it("draws only the rows in view, with spacers for the rest", () => {
+    render(virtual_table("r0"));
+    const wrap = scroller(4000);
+
+    fireEvent.scroll(wrap);
+
+    expect(drawn_keys()).toEqual(Array.from({ length: 14 }, (_, index) => `r${98 + index}`));
+    expect(spacers()).toEqual(["3920px", `${(1000 - 112) * 40}px`]);
+  });
+
+  it("scrolls the active row into view and hands it focus from the row that had it", () => {
+    const { rerender } = render(virtual_table("r0"));
+    const wrap = scroller();
+    fireEvent.scroll(wrap);
+    const first = document.querySelector<HTMLElement>('tr[data-row-key="r0"]')!;
+    first.focus();
+
+    rerender(virtual_table("r500"));
+
+    expect(wrap.scrollTop).toBe(500 * 40 + 40 - 400);
+    expect(document.activeElement).toBe(document.querySelector('tr[data-row-key="r500"]'));
+    expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
+  });
+
+  it("draws every row as a card on phones unless a card height is given", () => {
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    try {
+      render(virtual_table("r0"));
+      expect(drawn_keys()).toHaveLength(1000);
+      expect(spacers()).toEqual([]);
+    } finally {
+      window.matchMedia = before;
+    }
   });
 });
