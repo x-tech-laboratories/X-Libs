@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { age, bytes, count_change, duration, plural, size, size_change, until } from "../src/web/format.ts";
+import { age, bytes, compact_count, count_change, duration, plural, size, size_change, until } from "../src/web/format.ts";
 
 const now = 1_800_000_000;
 
@@ -47,5 +47,13 @@ describe("formatting", () => {
     expect(count_change(0)).toBe("0");
     expect(plural(1, "host")).toBe("1 host");
     expect(plural(2, "host")).toBe("2 hosts");
+  });
+
+  it("writes a count in a few characters", () => {
+    expect(compact_count(950)).toBe("950");
+    expect(compact_count(1_500)).toBe("1.5K");
+    expect(compact_count(150_000)).toBe("150K");
+    expect(compact_count(1_432_912)).toBe("1.4M");
+    expect(compact_count(2_000_000_000)).toBe("2B");
   });
 });

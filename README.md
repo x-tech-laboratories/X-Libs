@@ -11,7 +11,8 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
 | `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server; `with_cloneable_arguments` flattens what structured clone refuses, such as a Proxy. |
 | `electron/events`                        | `define_events`: messages the main process pushes to its pages, such as progress, on one channel and subscribed to by name. |
-| `electron/window`                        | `create_window`: links open in the browser, the background follows the system theme, and the size and place are remembered, through the app's write guard if it has one; timers can keep running while hidden. |
+| `electron/window`                        | `create_window`: links and other sites open in the browser, the background follows the system theme, and the size and place are remembered, through the app's write guard if it has one; timers can keep running while hidden. |
+| `electron/fetch`                         | `create_main_fetch` and `create_page_fetch`: the page's requests sent from the main process past cross-origin rules, to an allow-list of hosts, with headers such as `Origin` pinned. |
 | `agent/commands`                         | `run_command` and `stream_command`: one shell command, in its own process group. |
 | `agent/long_runs`                        | `LongRuns`: commands that outlive the agent, their output and exit code kept on disk. |
 | `agent/keys`                             | Reads and makes OpenSSH ed25519 agent keys; signs and checks the login challenge. |
@@ -22,7 +23,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/agents/connection`, `agent`, `local`, `route` | One connected agent, the `Agent` interface, `LocalAgent`, and the Fastify route. |
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
-| `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice, kept in this browser or the app's settings. |
+| `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters (including `compact_count`, such as `"1.4M"`), hash router and theme choice, kept in this browser or the app's settings. |
 | `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; sorting by several columns, trees and column order; menu items, placement and keys; pane sizing. |
 | `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, and where a dropped or keyed row lands. |
 | `web/watch`, `web/react/watch`           | `create_watch`: a change counter a store bumps; `use_watch` redraws only the components that read that store. |
@@ -31,6 +32,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/shell`                        | `Shell`: top bar, section links or the app's own sidebar, resizable, theme button, toasts, dialogs and menus; `use_route`. |
 | `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover. |
+| `web/react/reveal`                       | `use_reveal`: a long list shown a page at a time, the next page added as its end scrolls into view. |
 | `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, rows that come sorted from a database, rows worked by keyboard, and cards on phones; a pager. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
 | `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, and reorder by dragging or with Alt and the arrow keys. |
@@ -100,6 +102,22 @@ create_window(BrowserWindow, {
 // web page
 window.x_notes = notes_bridge.web_rpc((method, args) => post_json(`api/${method}`, args));
 ```
+
+A page that must reach another site, such as an API that sends no CORS headers, sends its requests through the main
+process with `electron/fetch`. The main process allows only the hosts it lists; the page gets a `fetch` to hand to a
+library.
+
+```ts
+// shared
+export const media_bridge = define_bridge<{ http_fetch: FetchMethod }>("x_media", ["http_fetch"]);
+// main
+media_bridge.handle(ipcMain, { http_fetch: create_main_fetch({ hosts: ["api.example.com", "*.cdn.example.com"] }) });
+// web page
+const page_fetch = create_page_fetch((request) => window.x_media.http_fetch(request), { pinned_headers: { Origin: "https://example.com" } });
+```
+
+`create_window` keeps the app's own pages in the window: a link or a navigation to another site opens in the browser,
+and only web and mail links leave the app.
 
 ## The app and its tasks
 

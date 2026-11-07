@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { create_window, type WindowOptions, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type Rectangle } from "../../src/electron/window.ts";
+import { create_window, is_app_page, is_external_link, type WindowOptions, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type NavigationEventLike, type Rectangle } from "../../src/electron/window.ts";
 
 // A stand-in for BrowserWindow that records what it was asked and lets a test fire its events.
 class FakeWindow implements BrowserWindowLike {
@@ -15,7 +15,11 @@ class FakeWindow implements BrowserWindowLike {
   shown = false;
   loaded = "";
   background = "";
-  webContents = { setWindowOpenHandler: (handler: (details: { url: string }) => { action: "deny" }) => { this.open_handler = handler; } };
+  navigate_handler: ((event: NavigationEventLike, url: string) => void) | undefined;
+  webContents = {
+    setWindowOpenHandler: (handler: (details: { url: string }) => { action: "deny" }) => { this.open_handler = handler; },
+    on: (_event: "will-navigate", listener: (event: NavigationEventLike, url: string) => void) => { this.navigate_handler = listener; },
+  };
 
   options: BrowserWindowOptionsLike;
 
@@ -67,7 +71,17 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  shell.openExternal.mockClear();
+});
+
+// Fires a navigation and says whether the window stopped it.
+function navigate(window: FakeWindow, url: string): boolean {
+  let is_stopped = false;
+  window.navigate_handler!({ preventDefault: () => { is_stopped = true; } }, url);
+  return is_stopped;
+}
 
 describe("create_window", () => {
   test("opens at the default size, hidden until ready, and loads the built page", () => {
@@ -92,6 +106,33 @@ describe("create_window", () => {
 
     expect(window.open_handler!({ url: "https://example.org" })).toEqual({ action: "deny" });
     expect(shell.openExternal).toHaveBeenCalledWith("https://example.org");
+  });
+
+  test("sends only web and mail links to the browser", () => {
+    const { window } = open();
+
+    window.open_handler!({ url: "file:///home/someone/notes.txt" });
+    window.open_handler!({ url: "mailto:someone@example.org" });
+
+    expect(shell.openExternal.mock.calls).toEqual([["mailto:someone@example.org"]]);
+  });
+
+  test("keeps the app's own pages in the window and opens other sites in the browser", () => {
+    const { window } = open();
+
+    expect(navigate(window, "file:///app/index.html#/settings")).toBe(false);
+    expect(navigate(window, "file:///app/other.html")).toBe(false);
+    expect(navigate(window, "https://example.org/")).toBe(true);
+    expect(navigate(window, "file:///home/someone/notes.txt")).toBe(true);
+
+    expect(shell.openExternal.mock.calls).toEqual([["https://example.org/"]]);
+  });
+
+  test("treats the dev server's origin as the app's own", () => {
+    expect(is_app_page("http://localhost:5173/#/search", { dev_url: "http://localhost:5173", file: "/app/index.html" })).toBe(true);
+    expect(is_app_page("http://localhost:5174/", { dev_url: "http://localhost:5173", file: "/app/index.html" })).toBe(false);
+    expect(is_external_link("javascript:alert(1)")).toBe(false);
+    expect(is_external_link("not a url")).toBe(false);
   });
 
   test("follows the system theme until the window closes", () => {

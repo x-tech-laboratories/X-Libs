@@ -78,3 +78,10 @@ export function count_change(value: number | null | undefined): string {
 export function plural(count: number, word: string): string {
   return `${count.toLocaleString()} ${word}${plurals.select(count) === "one" ? "" : "s"}`;
 }
+
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+// A count in a few characters, such as "1.4M", "150K" or "950".
+export function compact_count(count: number): string {
+  return compact.format(count);
+}

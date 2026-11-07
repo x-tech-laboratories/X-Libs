@@ -1,7 +1,8 @@
-// An Electron app's main window: links open in the browser, the background follows the system theme, and its size and place are remembered.
+// An Electron app's main window: links and pages of other sites open in the browser, the background follows the system theme, and its size and place are remembered.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // ── Electron's shapes ────────────────────────────────────────────────────────
 
@@ -28,8 +29,15 @@ export interface BrowserWindowOptionsLike {
   webPreferences: { preload?: string; sandbox: boolean; contextIsolation: boolean; nodeIntegration: boolean; backgroundThrottling: boolean };
 }
 
+export interface NavigationEventLike {
+  preventDefault(): void;
+}
+
 export interface BrowserWindowLike {
-  webContents: { setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void };
+  webContents: {
+    setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+    on(event: "will-navigate", listener: (event: NavigationEventLike, url: string) => void): unknown;
+  };
   on(event: string, listener: () => void): unknown;
   once(event: string, listener: () => void): unknown;
   show(): void;
@@ -125,6 +133,35 @@ function overlaps(first: Rectangle, second: Rectangle): boolean {
   return first.x < second.x + second.width && second.x < first.x + first.width && first.y < second.y + second.height && second.y < first.y + first.height;
 }
 
+// ── Links ────────────────────────────────────────────────────────────────────
+
+const EXTERNAL_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+
+// Only web and mail links reach the browser, never a file or another app's scheme.
+export function is_external_link(url: string): boolean {
+  try {
+    return EXTERNAL_SCHEMES.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+// True for the app's own pages: the dev server's origin, or files beside the built page.
+export function is_app_page(url: string, options: Pick<WindowOptions, "dev_url" | "file">): boolean {
+  try {
+    const target = new URL(url);
+    if (options.dev_url) return target.origin === new URL(options.dev_url).origin;
+    const page_folder = new URL(".", pathToFileURL(options.file)).href;
+    return target.protocol === "file:" && target.href.startsWith(page_folder);
+  } catch {
+    return false;
+  }
+}
+
+function open_outside(shell: ShellLike, url: string): void {
+  if (is_external_link(url)) void shell.openExternal(url);
+}
+
 // ── Window ───────────────────────────────────────────────────────────────────
 
 export function create_window<Window extends BrowserWindowLike>(
@@ -157,8 +194,15 @@ export function create_window<Window extends BrowserWindowLike>(
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void options.shell.openExternal(url);
+    open_outside(options.shell, url);
     return { action: "deny" };
+  });
+
+  // A link that would load another site in the window opens in the browser instead.
+  window.webContents.on("will-navigate", (event, url) => {
+    if (is_app_page(url, options)) return;
+    event.preventDefault();
+    open_outside(options.shell, url);
   });
 
   const follow_theme = () => window.setBackgroundColor(background_color());
