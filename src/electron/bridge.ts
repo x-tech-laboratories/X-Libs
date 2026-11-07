@@ -85,3 +85,25 @@ export function define_bridge<Methods extends Record<keyof Methods, AnyMethod>>(
     web_rpc: client_through,
   };
 }
+
+// ── Cloning ──────────────────────────────────────────────────────────────────
+
+// A value that survives structured clone passes as it is, and anything else, such as a Proxy, crosses as plain JSON.
+export function to_cloneable(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  try {
+    structuredClone(value);
+    return value;
+  } catch {
+    return JSON.parse(JSON.stringify(value));
+  }
+}
+
+// The same client with every argument made cloneable first, since Electron clones arguments before the preload sees them.
+export function with_cloneable_arguments<Methods extends Record<keyof Methods, AnyMethod>>(client: Client<Methods>): Client<Methods> {
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, method] of Object.entries(client) as [string, (...args: unknown[]) => unknown][]) {
+    wrapped[name] = (...args: unknown[]) => method(...args.map(to_cloneable));
+  }
+  return wrapped as Client<Methods>;
+}

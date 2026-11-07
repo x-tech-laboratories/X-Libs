@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { create_window, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type Rectangle } from "../../src/electron/window.ts";
+import { create_window, type WindowOptions, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type Rectangle } from "../../src/electron/window.ts";
 
 // A stand-in for BrowserWindow that records what it was asked and lets a test fire its events.
 class FakeWindow implements BrowserWindowLike {
@@ -52,11 +52,11 @@ let folder = "";
 let state_file = "";
 const shell = { openExternal: vi.fn(async () => {}) };
 
-function open(extra: { dev_url?: string; dark?: boolean } = {}) {
+function open(extra: { dev_url?: string; dark?: boolean; more?: Partial<WindowOptions> } = {}) {
   const native_theme = fake_theme(extra.dark ?? false);
   const window = create_window(FakeWindow, {
     title: "X-Notes", file: "/app/index.html", dev_url: extra.dev_url, default_size: { width: 1100, height: 700 }, min_size: { width: 640, height: 400 },
-    preload: "/app/preload.mjs", state_file, native_theme, shell,
+    preload: "/app/preload.mjs", state_file, native_theme, shell, ...extra.more,
   });
   return { window, native_theme };
 }
@@ -74,7 +74,8 @@ describe("create_window", () => {
     const { window } = open();
 
     expect(window.options).toMatchObject({ title: "X-Notes", width: 1100, height: 700, minWidth: 640, minHeight: 400, show: false, backgroundColor: "#f5f6f8" });
-    expect(window.options.webPreferences).toEqual({ preload: "/app/preload.mjs", sandbox: false, contextIsolation: true, nodeIntegration: false });
+    expect(window.options.webPreferences).toEqual({ preload: "/app/preload.mjs", sandbox: false, contextIsolation: true, nodeIntegration: false, backgroundThrottling: true });
+    expect(window.options.titleBarStyle).toBeUndefined();
     expect(window.options.x).toBeUndefined();
     expect(window.loaded).toBe("/app/index.html");
 
@@ -136,5 +137,26 @@ describe("create_window", () => {
     writeFileSync(state_file, "{ not json");
 
     expect(open().window.options).toMatchObject({ width: 1100, height: 700 });
+  });
+
+  test("keeps timers running while hidden and sets the title bar when asked", () => {
+    const { window } = open({ more: { background_throttling: false, title_bar_style: "hiddenInset" } });
+
+    expect(window.options.webPreferences.backgroundThrottling).toBe(false);
+    expect(window.options.titleBarStyle).toBe("hiddenInset");
+  });
+
+  test("runs the write guard before each save, and skips a save it refuses", () => {
+    const guarded: string[] = [];
+    let refuse = true;
+    const { window } = open({ more: { before_write: (path) => { guarded.push(path); if (refuse) throw new Error("read-only"); } } });
+
+    expect(() => window.emit("close")).not.toThrow();
+    expect(() => readFileSync(state_file)).toThrow();
+    refuse = false;
+    window.emit("close");
+
+    expect(guarded).toEqual([state_file, state_file]);
+    expect(JSON.parse(readFileSync(state_file, "utf8")).is_maximized).toBe(false);
   });
 });

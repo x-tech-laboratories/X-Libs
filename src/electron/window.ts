@@ -24,7 +24,8 @@ export interface BrowserWindowOptionsLike {
   minHeight?: number;
   show: boolean;
   backgroundColor: string;
-  webPreferences: { preload?: string; sandbox: boolean; contextIsolation: boolean; nodeIntegration: boolean };
+  titleBarStyle?: "default" | "hidden" | "hiddenInset";
+  webPreferences: { preload?: string; sandbox: boolean; contextIsolation: boolean; nodeIntegration: boolean; backgroundThrottling: boolean };
 }
 
 export interface BrowserWindowLike {
@@ -81,6 +82,11 @@ export interface WindowOptions {
   background?: { light: string; dark: string };
   // An ES module preload needs the sandbox off.
   sandbox?: boolean;
+  // Whether timers slow down while the window is hidden; a player turns this off to keep time.
+  background_throttling?: boolean;
+  title_bar_style?: "default" | "hidden" | "hiddenInset";
+  // Runs before every write of the state file, such as the app's write guard; a throw skips that save.
+  before_write?: (path: string) => void;
   save_delay_ms?: number;
 }
 
@@ -141,7 +147,8 @@ export function create_window<Window extends BrowserWindowLike>(
     minHeight: options.min_size?.height,
     show: false,
     backgroundColor: background_color(),
-    webPreferences: { preload: options.preload, sandbox: options.sandbox ?? false, contextIsolation: true, nodeIntegration: false },
+    ...(options.title_bar_style ? { titleBarStyle: options.title_bar_style } : {}),
+    webPreferences: { preload: options.preload, sandbox: options.sandbox ?? false, contextIsolation: true, nodeIntegration: false, backgroundThrottling: options.background_throttling ?? true },
   });
 
   window.once("ready-to-show", () => {
@@ -158,7 +165,7 @@ export function create_window<Window extends BrowserWindowLike>(
   options.native_theme.on("updated", follow_theme);
   window.on("closed", () => options.native_theme.removeListener("updated", follow_theme));
 
-  if (options.state_file) remember_state(window, options.state_file, options.save_delay_ms ?? DEFAULT_SAVE_DELAY_MS);
+  if (options.state_file) remember_state(window, options.state_file, options.save_delay_ms ?? DEFAULT_SAVE_DELAY_MS, options.before_write);
 
   if (options.dev_url) void window.loadURL(options.dev_url);
   else void window.loadFile(options.file);
@@ -167,13 +174,18 @@ export function create_window<Window extends BrowserWindowLike>(
 }
 
 // Saves a moment after the last move or resize, and at once when the window closes.
-function remember_state(window: BrowserWindowLike, state_file: string, save_delay_ms: number): void {
+function remember_state(window: BrowserWindowLike, state_file: string, save_delay_ms: number, before_write?: (path: string) => void): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const save_now = () => {
     clearTimeout(timer);
     timer = undefined;
-    write_window_state(state_file, { bounds: window.getNormalBounds(), is_maximized: window.isMaximized() });
+    try {
+      before_write?.(state_file);
+      write_window_state(state_file, { bounds: window.getNormalBounds(), is_maximized: window.isMaximized() });
+    } catch {
+      // A refused or failed save keeps the last one, and the window carries on.
+    }
   };
   const save_soon = () => {
     clearTimeout(timer);

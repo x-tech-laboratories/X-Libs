@@ -6,10 +6,12 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 
 | Import                                   | What it holds                                                                 |
 | ---------------------------------------- | ----------------------------------------------------------------------------- |
-| `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds, `format_age`. |
+| `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds, `format_age`, and `format_clock` for a playing time such as `"3:07"`. |
+| `log`                                    | Loggers by scope and level from a setting such as `"warn,play:debug"`; a malformed setting falls back instead of silencing logging, and a setting read through a function applies to loggers made before it arrived. |
 | `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
-| `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server. |
-| `electron/window`                        | `create_window`: links open in the browser, the background follows the system theme, and the size and place are remembered. |
+| `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server; `with_cloneable_arguments` flattens what structured clone refuses, such as a Proxy. |
+| `electron/events`                        | `define_events`: messages the main process pushes to its pages, such as progress, on one channel and subscribed to by name. |
+| `electron/window`                        | `create_window`: links open in the browser, the background follows the system theme, and the size and place are remembered, through the app's write guard if it has one; timers can keep running while hidden. |
 | `agent/commands`                         | `run_command` and `stream_command`: one shell command, in its own process group. |
 | `agent/long_runs`                        | `LongRuns`: commands that outlive the agent, their output and exit code kept on disk. |
 | `agent/keys`                             | Reads and makes OpenSSH ed25519 agent keys; signs and checks the login challenge. |
@@ -23,10 +25,13 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice, kept in this browser or the app's settings. |
 | `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; sorting by several columns, trees and column order; menu items, placement and keys; pane sizing. |
 | `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, and where a dropped or keyed row lands. |
+| `web/watch`, `web/react/watch`           | `create_watch`: a change counter a store bumps; `use_watch` redraws only the components that read that store. |
+| `web/prefs`, `web/react/prefs`           | Remembered view settings that read as their default when stored corrupt, stale or of the wrong shape; `use_pref` keeps one as component state. |
+| `web/selection`, `web/virtual`           | Picking rows with plain, Ctrl and Shift clicks from a fixed anchor, the row an arrow or page key moves to; which rows of a long list a viewport needs. |
 | `web/react/shell`                        | `Shell`: top bar, section links or the app's own sidebar, resizable, theme button, toasts, dialogs and menus; `use_route`. |
 | `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover. |
-| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, and cards on phones; a pager. |
+| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, rows that come sorted from a database, rows worked by keyboard, and cards on phones; a pager. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
 | `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, and reorder by dragging or with Alt and the arrow keys. |
 | `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed; modal, confirm and text dialogs openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere; resize handles and splits. |

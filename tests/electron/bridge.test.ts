@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { define_bridge, type ContextBridgeLike, type IpcMainLike, type IpcRendererLike } from "../../src/electron/bridge.ts";
+import { define_bridge, to_cloneable, with_cloneable_arguments, type ContextBridgeLike, type IpcMainLike, type IpcRendererLike } from "../../src/electron/bridge.ts";
 
 interface NotesApi {
   list_notes: () => string[];
@@ -71,5 +71,32 @@ describe("define_bridge", () => {
 
   test("the server refuses a method outside the table", async () => {
     await expect(notes_bridge.dispatch(implementation, "toString", [])).rejects.toThrow("x_notes has no method toString");
+  });
+});
+
+describe("cloneable arguments", () => {
+  test("passes primitives and cloneable objects through as they are", () => {
+    for (const value of [1, "x", true, null, undefined]) expect(to_cloneable(value)).toBe(value);
+    const plain = { a: 1, b: [2, 3] };
+    expect(to_cloneable(plain)).toBe(plain);
+  });
+
+  test("flattens a Proxy, alone or inside an object, which structured clone refuses", () => {
+    const proxy = new Proxy([1, 2, 3], {});
+    expect(() => structuredClone(proxy)).toThrow();
+
+    expect(to_cloneable(proxy)).toEqual([1, 2, 3]);
+    const flattened = to_cloneable({ ids: new Proxy([7, 8], {}), survivor: 7 });
+    expect(() => structuredClone(flattened)).not.toThrow();
+    expect(flattened).toEqual({ ids: [7, 8], survivor: 7 });
+  });
+
+  test("a wrapped client flattens every argument before the call", async () => {
+    const add_note = vi.fn(async (title: string, pinned: boolean) => ({ id: pinned ? 1 : 2, title }));
+    const client = with_cloneable_arguments<NotesApi>({ list_notes: async () => [], add_note });
+
+    await client.add_note(new Proxy({ toJSON: () => "Groceries" }, {}) as unknown as string, true);
+
+    expect(add_note).toHaveBeenCalledWith("Groceries", true);
   });
 });
