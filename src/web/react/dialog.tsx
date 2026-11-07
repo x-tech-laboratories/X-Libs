@@ -1,20 +1,19 @@
 // Modal dialogs on the native one: any body and buttons, one that asks before an action, and one that shows a long text.
 
-import { Fragment, type ComponentChildren } from "preact";
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "./toasts.tsx";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
 interface DialogProps {
-  title: ComponentChildren;
+  title: ReactNode;
   on_close: () => void;
   // The row of buttons at the foot, such as Cancel and Save.
-  buttons?: ComponentChildren;
+  buttons?: ReactNode;
   wide?: boolean;
   // A class that sets the dialog's own width or look.
   class_name?: string;
-  children: ComponentChildren;
+  children: ReactNode;
 }
 
 // Shown while it is rendered: the page behind it is inert, focus stays inside, and Escape calls on_close.
@@ -33,7 +32,7 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
   return (
     <dialog
       ref={dialog}
-      class={["dialog", wide && "wide", class_name].filter(Boolean).join(" ")}
+      className={["dialog", wide && "wide", class_name].filter(Boolean).join(" ")}
       aria-labelledby={title_id}
       onCancel={(event) => {
         // Escape asks the owner to close, so the dialog never closes behind its owner's back.
@@ -43,8 +42,8 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
       }}
     >
       <h2 id={title_id}>{title}</h2>
-      <div class="dialog-body">{children}</div>
-      {buttons && <div class="dialog-buttons">{buttons}</div>}
+      <div className="dialog-body">{children}</div>
+      {buttons && <div className="dialog-buttons">{buttons}</div>}
     </dialog>
   );
 }
@@ -53,7 +52,7 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
 
 export interface ConfirmOptions {
   title: string;
-  message: ComponentChildren;
+  message: ReactNode;
   confirm_label: string;
   busy_label?: string;
   danger?: boolean;
@@ -85,16 +84,16 @@ export function ConfirmDialog({ options, on_close }: { options: ConfirmOptions; 
       wide={options.wide}
       buttons={<>
         <button disabled={busy} onClick={on_close}>Cancel</button>
-        <button class={options.danger ? "danger solid" : "accent solid"} disabled={!ready || busy} onClick={confirm} autoFocus={options.type_to_confirm === undefined}>
+        <button className={options.danger ? "danger solid" : "accent solid"} disabled={!ready || busy} onClick={confirm} autoFocus={options.type_to_confirm === undefined}>
           {busy ? options.busy_label ?? "Working…" : options.confirm_label}
         </button>
       </>}
     >
       {typeof options.message === "string" ? <p>{options.message}</p> : options.message}
       {options.type_to_confirm !== undefined && (
-        <label class="type-confirm">
+        <label className="type-confirm">
           <span>Type <strong>{options.type_to_confirm}</strong> to confirm:</span>
-          <input type="text" class="filter" autocomplete="off" autoFocus aria-label={`Type ${options.type_to_confirm} to confirm`} value={typed} onInput={(event) => set_typed((event.currentTarget as HTMLInputElement).value)} />
+          <input type="text" className="filter" autoComplete="off" autoFocus aria-label={`Type ${options.type_to_confirm} to confirm`} value={typed} onChange={(event) => set_typed(event.currentTarget.value)} />
         </label>
       )}
     </Dialog>
@@ -106,16 +105,16 @@ export function TextDialog({ title, text, on_close }: { title: string; text: str
   return (
     <Dialog title={title} on_close={on_close} wide buttons={<>
       <button onClick={() => void navigator.clipboard?.writeText(text).then(() => toast("Copied."))}>Copy</button>
-      <button class="accent solid" onClick={on_close}>Close</button>
+      <button className="accent solid" onClick={on_close}>Close</button>
     </>}>
-      <pre class="output">{text}</pre>
+      <pre className="output">{text}</pre>
     </Dialog>
   );
 }
 
 // ── Opening from anywhere ────────────────────────────────────────────────────
 
-type Builder = (close: () => void) => ComponentChildren;
+type Builder = (close: () => void) => ReactNode;
 
 let open: { id: number; build: Builder }[] = [];
 let next_id = 1;

@@ -1,6 +1,6 @@
-// A Preact table drawn like the page's own: it sorts by a column's header and turns into cards on phones.
+// A React table drawn like the page's own: it sorts by a column's header and turns into cards on phones.
 
-import type { ComponentChildren } from "preact";
+import type { ReactNode } from "react";
 import { sorted_rows, type Sorting } from "../tables.ts";
 
 export type { Sorting } from "../tables.ts";
@@ -9,7 +9,7 @@ export type { Sorting } from "../tables.ts";
 
 export interface TableColumn<Row> {
   label: string;
-  cell: (row: Row) => ComponentChildren;
+  cell: (row: Row) => ReactNode;
   // A value to sort by; a column without one does not sort.
   sort?: (row: Row) => string | number | null;
   class?: string;
@@ -29,12 +29,12 @@ export function DataTable<Row>({ columns, rows, row_key, sorting, on_sort, capti
   const sort_column = sorting ? columns.find((column) => column.label === sorting.key && column.sort) : undefined;
 
   function header(column: TableColumn<Row>) {
-    if (!column.sort || !on_sort) return <th key={column.label} class={column.class} scope="col">{column.label}</th>;
+    if (!column.sort || !on_sort) return <th key={column.label} className={column.class} scope="col">{column.label}</th>;
     const active = sort_column === column;
     const descending = active && sorting!.descending;
     return (
-      <th key={column.label} class={column.class} scope="col" aria-sort={active ? (descending ? "descending" : "ascending") : "none"}>
-        <button class="sort" onClick={() => on_sort({ key: column.label, descending: active ? !descending : false })}>
+      <th key={column.label} className={column.class} scope="col" aria-sort={active ? (descending ? "descending" : "ascending") : "none"}>
+        <button className="sort" onClick={() => on_sort({ key: column.label, descending: active ? !descending : false })}>
           {column.label}{active ? (descending ? " ↓" : " ↑") : ""}
         </button>
       </th>
@@ -42,14 +42,14 @@ export function DataTable<Row>({ columns, rows, row_key, sorting, on_sort, capti
   }
 
   return (
-    <div class="table-wrap">
-      <table class="responsive">
-        {caption && <caption class="visually-hidden">{caption}</caption>}
+    <div className="table-wrap">
+      <table className="responsive">
+        {caption && <caption className="visually-hidden">{caption}</caption>}
         <thead><tr>{columns.map(header)}</tr></thead>
         <tbody>
-          {sorted_rows(columns, rows, sorting).map((row) => (
-            <tr key={row_key ? row_key(row) : undefined}>
-              {columns.map((column) => <td key={column.label} class={column.class} data-label={column.label}>{column.cell(row)}</td>)}
+          {sorted_rows(columns, rows, sorting).map((row, index) => (
+            <tr key={row_key ? row_key(row) : index}>
+              {columns.map((column) => <td key={column.label} className={column.class} data-label={column.label}>{column.cell(row)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -64,9 +64,9 @@ export function DataTable<Row>({ columns, rows, row_key, sorting, on_sort, capti
 export function Pager({ page, has_more, go }: { page: number; has_more: boolean; go: (page: number) => void }) {
   if (page === 1 && !has_more) return null;
   return (
-    <nav class="pager" aria-label="Pages">
+    <nav className="pager" aria-label="Pages">
       <button disabled={page <= 1} onClick={() => go(page - 1)}>← Newer</button>
-      <span class="muted">Page {page}</span>
+      <span className="muted">Page {page}</span>
       <button disabled={!has_more} onClick={() => go(page + 1)}>Older →</button>
     </nav>
   );

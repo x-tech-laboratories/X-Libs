@@ -1,31 +1,30 @@
 // What a part of the page shows while it loads, when it has nothing, and when loading failed, and the hook that loads it.
 
-import type { ComponentChildren } from "preact";
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { pass_login_needed } from "../states.ts";
 
 // ── States ───────────────────────────────────────────────────────────────────
 
 export function Skeleton({ lines = 3 }: { lines?: number }) {
   return (
-    <div class="skeleton" aria-busy="true" aria-label="Loading">
-      {Array.from({ length: lines }, (_, index) => <div key={index} class="skeleton-line" style={{ width: `${90 - index * 15}%` }} />)}
+    <div className="skeleton" aria-busy="true" aria-label="Loading">
+      {Array.from({ length: lines }, (_, index) => <div key={index} className="skeleton-line" style={{ width: `${90 - index * 15}%` }} />)}
     </div>
   );
 }
 
-export function Empty({ title, hint }: { title: string; hint?: ComponentChildren }) {
+export function Empty({ title, hint }: { title: string; hint?: ReactNode }) {
   return (
-    <div class="empty">
-      <p class="empty-title">{title}</p>
-      {hint && <p class="muted">{hint}</p>}
+    <div className="empty">
+      <p className="empty-title">{title}</p>
+      {hint && <p className="muted">{hint}</p>}
     </div>
   );
 }
 
 export function Failure({ error, retry }: { error: unknown; retry: () => void }) {
   return (
-    <div class="failure" role="alert">
+    <div className="failure" role="alert">
       <p>Could not load this: {error instanceof Error ? error.message : String(error)}</p>
       <button onClick={retry}>Retry</button>
     </div>
@@ -78,7 +77,7 @@ export function use_resource<Data>(work: () => Promise<Data>, dependencies: unkn
 }
 
 // Shows a skeleton while the resource first loads, an error with Retry if that fails, and what children build from it after.
-export function Loaded<Data>({ resource, lines, children }: { resource: Resource<Data>; lines?: number; children: (data: Data) => ComponentChildren }) {
+export function Loaded<Data>({ resource, lines, children }: { resource: Resource<Data>; lines?: number; children: (data: Data) => ReactNode }) {
   if (resource.data !== null) return <>{children(resource.data)}</>;
   if (resource.error !== null) return <Failure error={resource.error} retry={() => void resource.reload()} />;
   return <Skeleton lines={lines} />;

@@ -1,7 +1,6 @@
-// Preact resize handles: one on a panel's edge, and a split whose panes share a container and remember their sizes.
+// React resize handles: one on a panel's edge, and a split whose panes share a container and remember their sizes.
 
-import { Fragment, type ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { Fragment, useEffect, useRef, useState, type PointerEvent, type KeyboardEvent, type ReactNode } from "react";
 import { distribute, fit, follow_drag, key_step, resize_at, store_sizes, stored_sizes, type Axis, type PaneSpec } from "../split.ts";
 
 export type { PaneSpec } from "../split.ts";
@@ -28,17 +27,17 @@ export function ResizeHandle({ side, size, min, max, default_size, on_resize, on
   const direction = side === "left" || side === "top" ? 1 : -1;
   const clamp = (value: number): number => Math.round(Math.min(max, Math.max(min, value)));
 
-  function start_drag(event: PointerEvent): void {
+  function start_drag(event: PointerEvent<HTMLDivElement>): void {
     const start_size = size;
     let latest = size;
-    follow_drag(event.currentTarget as HTMLElement, event, axis, (moved) => {
+    follow_drag(event.currentTarget, event.nativeEvent, axis, (moved) => {
       latest = clamp(start_size + direction * moved);
       on_resize(latest);
     }, () => on_resize_end(latest));
   }
 
-  function nudge(event: KeyboardEvent): void {
-    const step = key_step(event, axis);
+  function nudge(event: KeyboardEvent<HTMLDivElement>): void {
+    const step = key_step(event.nativeEvent, axis);
     if (step === null) return;
     event.preventDefault();
     on_resize_end(clamp(size + direction * step));
@@ -46,7 +45,7 @@ export function ResizeHandle({ side, size, min, max, default_size, on_resize, on
 
   return (
     <div
-      class={["resize-handle", axis === "vertical" && "vertical", class_name].filter(Boolean).join(" ")}
+      className={["resize-handle", axis === "vertical" && "vertical", class_name].filter(Boolean).join(" ")}
       role="separator"
       aria-orientation={axis === "horizontal" ? "vertical" : "horizontal"}
       aria-label={label}
@@ -55,7 +54,7 @@ export function ResizeHandle({ side, size, min, max, default_size, on_resize, on
       aria-valuemax={max}
       tabIndex={0}
       onPointerDown={start_drag}
-      onDblClick={() => on_resize_end(default_size)}
+      onDoubleClick={() => on_resize_end(default_size)}
       onKeyDown={nudge}
     />
   );
@@ -69,7 +68,7 @@ interface SplitProps {
   axis?: Axis;
   specs: PaneSpec[];
   preferred?: (number | undefined)[];
-  panes: ComponentChildren[];
+  panes: ReactNode[];
 }
 
 // Panes side by side or stacked, with a handle between each two; double-clicking a handle restores the first sizes.
@@ -120,17 +119,17 @@ export function Split({ storage_key, axis = "horizontal", specs, preferred, pane
     };
   }, []);
 
-  function start_drag(index: number, event: PointerEvent): void {
+  function start_drag(index: number, event: PointerEvent<HTMLDivElement>): void {
     const before = [...latest.current];
     let moved_to = before;
-    follow_drag(event.currentTarget as HTMLElement, event, axis, (moved) => {
+    follow_drag(event.currentTarget, event.nativeEvent, axis, (moved) => {
       moved_to = resize_at(before, index, moved, specs);
       change(moved_to, false);
     }, () => store_sizes(storage_key, moved_to));
   }
 
-  function nudge(index: number, event: KeyboardEvent): void {
-    const step = key_step(event, axis);
+  function nudge(index: number, event: KeyboardEvent<HTMLDivElement>): void {
+    const step = key_step(event.nativeEvent, axis);
     if (step === null) return;
     event.preventDefault();
     change(resize_at(sizes, index, step, specs), true);
@@ -141,12 +140,12 @@ export function Split({ storage_key, axis = "horizontal", specs, preferred, pane
     : specs.map(() => "1fr").join(" auto ");
 
   return (
-    <div ref={container} class={`split ${axis}`} style={axis === "horizontal" ? { gridTemplateColumns: template } : { gridTemplateRows: template }}>
+    <div ref={container} className={`split ${axis}`} style={axis === "horizontal" ? { gridTemplateColumns: template } : { gridTemplateRows: template }}>
       {panes.map((pane, index) => (
         <Fragment key={index}>
           {index > 0 && (
             <div
-              class={axis === "horizontal" ? "resize-handle" : "resize-handle vertical"}
+              className={axis === "horizontal" ? "resize-handle" : "resize-handle vertical"}
               role="separator"
               tabIndex={0}
               aria-orientation={axis === "horizontal" ? "vertical" : "horizontal"}
@@ -154,10 +153,10 @@ export function Split({ storage_key, axis = "horizontal", specs, preferred, pane
               aria-valuenow={sizes[index - 1] ?? 0}
               onPointerDown={(event) => start_drag(index - 1, event)}
               onKeyDown={(event) => nudge(index - 1, event)}
-              onDblClick={() => change(distribute(extent(), specs, preferred), true)}
+              onDoubleClick={() => change(distribute(extent(), specs, preferred), true)}
             />
           )}
-          <div class="split-pane">{pane}</div>
+          <div className="split-pane">{pane}</div>
         </Fragment>
       ))}
     </div>

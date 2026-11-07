@@ -1,7 +1,6 @@
 // Menus and popovers on the native popover: closed by Escape or a click elsewhere, and here also by scrolling or leaving the window.
 
-import { Fragment, type ComponentChildren, type RefObject } from "preact";
-import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { on_screen_position, type MenuItem } from "../menus.ts";
 
 export type { MenuItem } from "../menus.ts";
@@ -9,7 +8,7 @@ export type { MenuItem } from "../menus.ts";
 // ── Opening ──────────────────────────────────────────────────────────────────
 
 // Shows the element as a popover while it is rendered, calling the latest on_close once it closes for any reason.
-function use_popover(on_close: () => void): RefObject<HTMLDivElement> {
+function use_popover(on_close: () => void): RefObject<HTMLDivElement | null> {
   const element = useRef<HTMLDivElement>(null);
   const close = useRef(on_close);
   close.current = on_close;
@@ -58,13 +57,13 @@ export function ContextMenu({ x, y, items, on_close }: ContextMenuProps) {
   }, [x, y]);
 
   return (
-    <div ref={menu} popover="auto" class="menu" role="menu" tabIndex={-1}>
+    <div ref={menu} popover="auto" className="menu" role="menu" tabIndex={-1}>
       {items.map((item) => (
         <Fragment key={item.label}>
-          {item.separator_before && <div class="menu-separator" role="separator" />}
+          {item.separator_before && <div className="menu-separator" role="separator" />}
           <button
             type="button"
-            class={item.danger ? "menu-item danger" : "menu-item"}
+            className={item.danger ? "menu-item danger" : "menu-item"}
             role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
             aria-checked={item.checked}
             disabled={item.disabled}
@@ -73,8 +72,8 @@ export function ContextMenu({ x, y, items, on_close }: ContextMenuProps) {
               item.run();
             }}
           >
-            <span class="menu-label">{item.label}</span>
-            {item.hint && <span class="menu-hint">{item.hint}</span>}
+            <span className="menu-label">{item.label}</span>
+            {item.hint && <span className="menu-hint">{item.hint}</span>}
           </button>
         </Fragment>
       ))}
@@ -91,7 +90,7 @@ interface PopoverProps {
   y?: number;
   label: string;
   on_close: () => void;
-  children: ComponentChildren;
+  children: ReactNode;
 }
 
 // Holds any content, such as a column's filter, with its first field ready to type into.
@@ -110,11 +109,11 @@ export function Popover({ anchor, x = 0, y = 0, label, on_close, children }: Pop
       show_at(element, x, y);
     }
     element.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
-    return () => anchor?.style.removeProperty("anchor-name");
+    return () => void anchor?.style.removeProperty("anchor-name");
   }, [anchor, x, y]);
 
   return (
-    <div ref={popover} popover="auto" class={anchor ? "popover anchored" : "popover"} role="dialog" aria-label={label}>
+    <div ref={popover} popover="auto" className={anchor ? "popover anchored" : "popover"} role="dialog" aria-label={label}>
       {children}
     </div>
   );

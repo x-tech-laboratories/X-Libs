@@ -11,8 +11,7 @@
     "outDir": "dist/web",
     "declaration": true,
     "composite": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "preact"
+    "jsx": "react-jsx"
   },
   "include": ["src/web"]
 }

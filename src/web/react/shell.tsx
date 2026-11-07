@@ -1,7 +1,6 @@
 // The frame around every view: the top bar, the sidebar that slides in on phones, the theme button, and the toasts and dialogs.
 
-import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
 import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
 import { Dialogs } from "./dialog.tsx";
@@ -30,7 +29,7 @@ export function ThemeButton({ choice }: { choice: ThemeChoice }) {
   useEffect(() => choice.on_change(set_theme), []);
   const [icon, text] = theme_labels[theme];
   return (
-    <button id="theme" class="icon" title={`${text} (click to change)`} aria-label={`${text}, click to change`} onClick={() => choice.set(next_theme(choice.get()))}>
+    <button id="theme" className="icon" title={`${text} (click to change)`} aria-label={`${text}, click to change`} onClick={() => choice.set(next_theme(choice.get()))}>
       {icon}
     </button>
   );
@@ -57,12 +56,12 @@ interface ShellProps {
   user_href?: string;
   on_logout?: () => void;
   // More in the top bar after the brand, such as a search box or the runs in progress.
-  tools?: ComponentChildren;
+  tools?: ReactNode;
   // What sits at the foot of the sidebar, such as whether the live updates are connected.
-  sidebar_foot?: ComponentChildren;
+  sidebar_foot?: ReactNode;
   // Changes whenever the view does, so focus and scroll move to the new page.
   view_key?: string;
-  children: ComponentChildren;
+  children: ReactNode;
 }
 
 export function Shell({ brand, sections, active, theme, user, user_href, on_logout, tools, sidebar_foot, view_key, children }: ShellProps) {
@@ -103,25 +102,25 @@ export function Shell({ brand, sections, active, theme, user, user_href, on_logo
 
   return (
     <>
-      <a class="skip" href="#main">Skip to content</a>
-      <header class="topbar">
-        <button ref={menu_button} class="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
-        <a href="#/" class="brand">{brand}</a>
+      <a className="skip" href="#main">Skip to content</a>
+      <header className="topbar">
+        <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
+        <a href="#/" className="brand">{brand}</a>
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
-        {!logged_out && (user_href ? <a class="account-link" href={user_href}>{user}</a> : <span class="user-name">{user}</span>)}
+        {!logged_out && (user_href ? <a className="account-link" href={user_href}>{user}</a> : <span className="user-name">{user}</span>)}
         {!logged_out && on_logout && <button onClick={on_logout}>Log out</button>}
       </header>
-      <div class="layout">
-        <nav ref={sidebar} id="sidebar" class="sidebar" aria-label="Main">
+      <div className="layout">
+        <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
           {sections.map((section) => (
-            <a key={section.id} href={section.href} data-section={section.id} class={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
+            <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
               {section.label}
             </a>
           ))}
           {sidebar_foot}
         </nav>
-        <div class="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
+        <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
         <main ref={main} id="main" tabIndex={-1}>{children}</main>
       </div>
       <Toasts />

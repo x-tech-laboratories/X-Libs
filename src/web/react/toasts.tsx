@@ -1,6 +1,6 @@
 // Short notes in the page's corner after something happened, with an optional link or action such as Undo.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState } from "react";
 
 // ── Toasts ───────────────────────────────────────────────────────────────────
 
@@ -48,16 +48,16 @@ export function Toasts() {
   }, []);
 
   return (
-    <div id="toasts" class="toasts">
+    <div id="toasts" className="toasts">
       {toasts.map((item) => {
         const tone = item.tone ?? "info";
         const close = () => publish(shown.filter((other) => other.id !== item.id));
         return (
-          <div key={item.id} class={`toast tone-${tone}`} role={tone === "bad" ? "alert" : "status"}>
+          <div key={item.id} className={`toast tone-${tone}`} role={tone === "bad" ? "alert" : "status"}>
             <span>{item.message}</span>
             {item.link && <a href={item.link.href} onClick={close}>{item.link.text}</a>}
-            {item.action && <button class="toast-action" onClick={() => { close(); item.action!.run(); }}>{item.action.text}</button>}
-            <button class="icon" aria-label="Dismiss" onClick={close}>×</button>
+            {item.action && <button className="toast-action" onClick={() => { close(); item.action!.run(); }}>{item.action.text}</button>}
+            <button className="icon" aria-label="Dismiss" onClick={close}>×</button>
           </div>
         );
       })}

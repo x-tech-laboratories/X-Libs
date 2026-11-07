@@ -1,7 +1,6 @@
-// Preact controls drawn like the page's own: segmented choices, switches and search fields.
+// React controls drawn like the page's own: segmented choices, switches and search fields.
 
-import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 // ── Choices ──────────────────────────────────────────────────────────────────
 
@@ -17,7 +16,7 @@ interface SegmentedProps<Value extends string> {
 // One of a few choices side by side; the chosen one takes the accent.
 export function Segmented<Value extends string>({ label, choices, value, on_change, class_name }: SegmentedProps<Value>) {
   return (
-    <div class={class_name ? `segmented ${class_name}` : "segmented"} role="radiogroup" aria-label={label}>
+    <div className={class_name ? `segmented ${class_name}` : "segmented"} role="radiogroup" aria-label={label}>
       {choices.map((choice) => (
         <button key={choice.value} type="button" role="radio" aria-checked={value === choice.value} onClick={() => on_change(choice.value)}>
           {choice.label}
@@ -28,8 +27,8 @@ export function Segmented<Value extends string>({ label, choices, value, on_chan
 }
 
 // Buttons joined into one control, such as zoom out, zoom in and fit.
-export function ButtonGroup({ label, children }: { label: string; children: ComponentChildren }) {
-  return <div class="segmented" role="group" aria-label={label}>{children}</div>;
+export function ButtonGroup({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="segmented" role="group" aria-label={label}>{children}</div>;
 }
 
 // ── Switches ─────────────────────────────────────────────────────────────────
@@ -45,8 +44,8 @@ interface SwitchProps {
 export function Switch({ label, checked, on_change, disabled = false }: SwitchProps) {
   const [busy, set_busy] = useState(false);
 
-  async function change(event: Event): Promise<void> {
-    const box = event.currentTarget as HTMLInputElement;
+  async function change(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const box = event.currentTarget;
     const on = box.checked;
     set_busy(true);
     try {
@@ -77,13 +76,13 @@ export function SearchBox({ label, value, on_input }: SearchBoxProps) {
   return (
     <input
       type="search"
-      class="filter"
+      className="filter"
       placeholder={label}
       aria-label={label}
       defaultValue={value}
-      onInput={(event) => {
+      onChange={(event) => {
         clearTimeout(timer.current);
-        const text = (event.currentTarget as HTMLInputElement).value;
+        const text = event.currentTarget.value;
         timer.current = window.setTimeout(() => on_input(text), 200);
       }}
     />
@@ -99,9 +98,9 @@ interface SelectProps<Value extends string> {
 
 export function Select<Value extends string>({ label, options, value, on_change }: SelectProps<Value>) {
   return (
-    <label class="field">
-      <span class="field-label">{label}</span>
-      <select value={value} onChange={(event) => on_change((event.currentTarget as HTMLSelectElement).value as Value)}>
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <select value={value} onChange={(event) => on_change(event.currentTarget.value as Value)}>
         {options.map(([option, text]) => <option key={option} value={option}>{text}</option>)}
       </select>
     </label>
