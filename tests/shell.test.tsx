@@ -72,3 +72,41 @@ describe("shell sidebar", () => {
     expect(on_change).toHaveBeenCalledWith(480, true);
   });
 });
+
+// ============================================================================
+// Top bar and menu
+// ============================================================================
+
+describe("shell top bar", () => {
+  it("without logins shows the tools and theme but no user or logout", () => {
+    render(<Shell brand="X-Test" brand_href="#/today" sidebar={<button>My Day</button>} tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} on_logout={() => {}} main_class="panes">Page</Shell>);
+
+    expect(screen.getByRole("link", { name: "X-Test" }).getAttribute("href")).toBe("#/today");
+    expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();
+    expect(document.getElementById("theme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+    expect(document.body.classList.contains("logged-out")).toBe(false);
+    expect(screen.getByRole("main").className).toBe("panes");
+  });
+
+  it("on the login page hides the tools", () => {
+    render(<Shell brand="X-Test" tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} user={null}>Page</Shell>);
+
+    expect(screen.queryByRole("textbox", { name: "Search" })).toBeNull();
+    expect(document.body.classList.contains("logged-out")).toBe(true);
+  });
+
+  it("hands the phone menu to an app that holds it", () => {
+    const on_menu_open_change = vi.fn();
+    const { rerender } = render(<Shell brand="X-Test" menu_open={false} on_menu_open_change={on_menu_open_change} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu" }));
+    expect(on_menu_open_change).toHaveBeenLastCalledWith(true);
+    expect(document.body.classList.contains("menu-open")).toBe(false);
+
+    rerender(<Shell brand="X-Test" menu_open={true} on_menu_open_change={on_menu_open_change} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+    expect(document.body.classList.contains("menu-open")).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(on_menu_open_change).toHaveBeenLastCalledWith(false);
+  });
+});

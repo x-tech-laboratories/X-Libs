@@ -149,3 +149,41 @@ describe("moving", () => {
     ]);
   });
 });
+
+// ── Picking, classes and outside drops ───────────────────────────────────────
+
+describe("picking and outside drops", () => {
+  test("shows several rows selected, the first being the tab stop, and opens a row on double-click", () => {
+    const on_activate = vi.fn();
+    render(
+      <Tree items={rows} label="Tags" render_item={(row) => row.name} collapsed={new Set()} on_collapsed_change={() => {}}
+        selected_ids={new Set(["c", "e"])} on_activate={on_activate} row_class={(row) => row.parent_id === null ? "group-heading" : undefined} />,
+    );
+
+    expect(screen.getByRole("tree").getAttribute("aria-multiselectable")).toBe("true");
+    expect(screen.getAllByRole("treeitem").filter((item) => item.getAttribute("aria-selected") === "true").map((item) => item.dataset.id)).toEqual(["c", "e"]);
+    expect(item_named("Office").tabIndex).toBe(0);
+    expect(row_named("Work").className).toContain("group-heading");
+    expect(row_named("Clients").className).not.toContain("group-heading");
+
+    fireEvent.doubleClick(row_named("Home"));
+    expect(on_activate).toHaveBeenCalledWith(rows[3]);
+  });
+
+  test("takes a drop from outside on a row that accepts it", () => {
+    const on_external_drop = vi.fn();
+    render(
+      <Tree items={rows} label="Tags" render_item={(row) => row.name} collapsed={new Set()} on_collapsed_change={() => {}}
+        accepts_external={(_event, row) => row.id !== "e"} on_external_drop={(_event, row) => on_external_drop(row.id)} />,
+    );
+
+    drag(row_named("Home"), "dragOver");
+    expect(row_named("Home").className).not.toContain("drop-");
+    drag(row_named("Office"), "dragOver");
+    expect(row_named("Office").className).toContain("drop-inside");
+    drag(row_named("Office"), "drop");
+
+    expect(on_external_drop).toHaveBeenCalledWith("c");
+    expect(row_named("Office").className).not.toContain("drop-");
+  });
+});

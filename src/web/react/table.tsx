@@ -1,13 +1,15 @@
 // A React table drawn like the page's own on TanStack Table: sorting by one column or several, columns the user moves, resizes,
-// hides and filters, rows nested under rows, and cards on phones.
+// hides and filters, rows nested under rows, rows in groups under headings, rows dragged by the app's rules, and cards on phones.
 
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
 import { clamp_width, column_id, compare_values, move_column, ordered_columns, sort_after_click, sorting_list, type Sorting, type SortValue } from "../tables.ts";
+import { placement_at, type DropPlacement } from "../tree.ts";
 import { ContextMenu, Popover } from "./menus.tsx";
 import { ResizeHandle } from "./split.tsx";
 
 export type { Sorting } from "../tables.ts";
+export type { DropPlacement } from "../tree.ts";
 
 // ── Columns ──────────────────────────────────────────────────────────────────
 
@@ -34,9 +36,18 @@ export interface TableColumn<Row> {
   filter_active?: boolean;
 }
 
+export interface RowGroup<Row> {
+  key: string;
+  label: ReactNode;
+  rows: Row[];
+  class_name?: string;
+}
+
 interface DataTableProps<Row> {
   columns: TableColumn<Row>[];
   rows: Row[];
+  // Rows under headings, each group sorted on its own; used in place of `rows`.
+  groups?: RowGroup<Row>[];
   // A row's stable key, such as its id; rows keep their place when there is none.
   row_key?: (row: Row) => string | number;
   caption?: string;
@@ -82,6 +93,21 @@ interface DataTableProps<Row> {
   row_selected?: (row: Row) => boolean;
   // A class for a row, such as one that marks it picked.
   row_class?: (row: Row) => string | undefined;
+  // A row's hover text.
+  row_title?: (row: Row) => string | undefined;
+  // Inline style for a row, such as a custom property its cells read for a tint.
+  row_style?: (row: Row) => CSSProperties | undefined;
+  // A full-width row after a row, such as an inline form for a new child.
+  render_after_row?: (row: Row) => ReactNode;
+
+  // Makes rows draggable; the app decides what moves, such as every picked row.
+  on_row_drag_start?: (row: Row, event: DragEvent<HTMLTableRowElement>) => void;
+  on_row_drag_end?: () => void;
+  // Where a dragged row may land on this row; without it only a drag started in this table lands, anywhere.
+  can_drop_on_row?: (row: Row, placement: DropPlacement) => boolean;
+  // Whether a row's middle drops inside it, splitting rows into quarters, or only beside it, splitting them into halves.
+  allow_inside_drop?: boolean;
+  on_row_drop?: (row: Row, placement: DropPlacement, event: DragEvent<HTMLTableRowElement>) => void;
 }
 
 const is_empty = (value: SortValue): boolean => value === null || value === undefined || value === "";
@@ -98,7 +124,8 @@ function filtered_tree<Row>(rows: Row[], passes: (row: Row) => boolean, get_chil
 // ── Table ────────────────────────────────────────────────────────────────────
 
 export function DataTable<Row>(props: DataTableProps<Row>) {
-  const { columns, rows, row_key, caption, get_children, row_passes } = props;
+  const { columns, row_key, caption, get_children, row_passes, groups, allow_inside_drop = true } = props;
+  const rows = useMemo(() => groups ? groups.flatMap((group) => group.rows) : props.rows, [groups, props.rows]);
   const [own_expanded, set_own_expanded] = useState<string[] | true>(true);
   const [open_filter, set_open_filter] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   const filter_closed = useRef({ id: "", at: 0 });
@@ -108,6 +135,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const resizing = useRef(false);
   const header_cells = useRef(new Map<string, HTMLTableCellElement>());
   const [measured, set_measured] = useState<Record<string, number>>({});
+  const [row_dragging, set_row_dragging] = useState(false);
+  const [row_drop, set_row_drop] = useState<{ id: string; placement: DropPlacement } | null>(null);
 
   const by_id = useMemo(() => new Map(columns.map((column) => [column_id(column), column])), [columns]);
   const all_ids = columns.map(column_id);
@@ -263,6 +292,48 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     return { label: column.label, checked: visible, disabled: fixed, keep_open: true, run: () => props.on_hidden_columns_change!(visible ? [...hidden, id] : hidden.filter((each) => each !== id)) };
   });
 
+  // ── Dragging rows ──
+
+  // A drag started in this table lands anywhere, and any drag lands where the app's rule allows it.
+  function row_placement(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): DropPlacement | null {
+    if (!props.on_row_drop) return null;
+    const box = event.currentTarget.getBoundingClientRect();
+    const placement = placement_at(box.height > 0 ? (event.clientY - box.top) / box.height : 0.5, allow_inside_drop);
+    const allowed = props.can_drop_on_row ? props.can_drop_on_row(row.original, placement) : row_dragging;
+    return allowed ? placement : null;
+  }
+
+  function row_drag_start(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+    set_row_dragging(true);
+    props.on_row_drag_start!(row.original, event);
+    // Some browsers start a drag only once it carries data.
+    if (event.dataTransfer && event.dataTransfer.types.length === 0) event.dataTransfer.setData("text/plain", row.id);
+  }
+
+  function row_drag_over(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+    const placement = row_placement(row, event);
+    if (!placement) {
+      if (row_drop?.id === row.id) set_row_drop(null);
+      return;
+    }
+    event.preventDefault();
+    if (row_drop?.id !== row.id || row_drop.placement !== placement) set_row_drop({ id: row.id, placement });
+  }
+
+  function row_drag_drop(row: TanstackRow<Row>, event: DragEvent<HTMLTableRowElement>): void {
+    const placement = row_placement(row, event);
+    set_row_drop(null);
+    if (!placement) return;
+    event.preventDefault();
+    props.on_row_drop!(row.original, placement, event);
+  }
+
+  function row_drag_end(): void {
+    set_row_dragging(false);
+    set_row_drop(null);
+    props.on_row_drag_end?.();
+  }
+
   // ── Drawing ──
 
   function header(column: TableColumn<Row>) {
@@ -346,40 +417,72 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   function body_row(row: TanstackRow<Row>) {
     const original = row.original;
-    const extra = props.row_class?.(original);
+    const row_class = [props.row_class?.(original), row_drop?.id === row.id && `drop-${row_drop.placement}`].filter(Boolean).join(" ") || undefined;
+    const after = props.render_after_row?.(original);
+    const draggable = Boolean(props.on_row_drag_start);
     const keyed = props.on_row_key_down !== undefined;
     const key = row_key ? String(row_key(original)) : row.id;
     return (
-      <tr
-        key={row.id}
-        className={extra}
-        data-row-key={keyed ? key : undefined}
-        tabIndex={keyed ? (props.active_row !== undefined && String(props.active_row) === key ? 0 : -1) : undefined}
-        aria-selected={props.row_selected ? props.row_selected(original) : undefined}
-        onClick={props.on_row_click && ((event) => props.on_row_click!(original, event))}
-        onDoubleClick={props.on_row_double_click && ((event) => props.on_row_double_click!(original, event))}
-        onKeyDown={props.on_row_key_down && ((event) => props.on_row_key_down!(original, event))}
-        onContextMenu={props.on_row_context_menu && ((event) => props.on_row_context_menu!(original, event))}
-      >
-        {shown.map((column, index) => {
-          const label = column.label;
-          if (!tree || index > 0) return <td key={column_id(column)} className={column.class} data-label={label}>{column.cell(original)}</td>;
-          const open = row.getIsExpanded();
-          const count = row.subRows.length;
-          return (
-            <td key={column_id(column)} className={[column.class, "tree-cell"].filter(Boolean).join(" ")} data-label={label} style={{ "--tree-depth": row.depth } as CSSProperties}>
-              {count > 0 ? (
-                <button type="button" className="icon tree-toggle" aria-expanded={open} aria-label={open ? "Collapse" : "Expand"} onClick={(event) => { event.stopPropagation(); toggle_row(row); }}>
-                  {open ? "▾" : "▸"}
-                </button>
-              ) : <span className="tree-spacer" />}
-              {column.cell(original)}
-              {count > 0 && !open && <span className="tree-count" title={`${count} inside`}>{count}</span>}
-            </td>
-          );
-        })}
-      </tr>
+      <Fragment key={row.id}>
+        <tr
+          className={row_class}
+          title={props.row_title?.(original)}
+          style={props.row_style?.(original)}
+          data-row-key={keyed ? key : undefined}
+          tabIndex={keyed ? (props.active_row !== undefined && String(props.active_row) === key ? 0 : -1) : undefined}
+          aria-selected={props.row_selected ? props.row_selected(original) : undefined}
+          draggable={draggable || undefined}
+          onDragStart={draggable ? (event) => row_drag_start(row, event) : undefined}
+          onDragEnd={draggable ? row_drag_end : undefined}
+          onDragOver={props.on_row_drop && ((event) => row_drag_over(row, event))}
+          onDragLeave={props.on_row_drop && (() => { if (row_drop?.id === row.id) set_row_drop(null); })}
+          onDrop={props.on_row_drop && ((event) => row_drag_drop(row, event))}
+          onClick={props.on_row_click && ((event) => props.on_row_click!(original, event))}
+          onDoubleClick={props.on_row_double_click && ((event) => props.on_row_double_click!(original, event))}
+          onKeyDown={props.on_row_key_down && ((event) => props.on_row_key_down!(original, event))}
+          onContextMenu={props.on_row_context_menu && ((event) => props.on_row_context_menu!(original, event))}
+        >
+          {shown.map((column, index) => {
+            const label = column.label;
+            if (!tree || index > 0) return <td key={column_id(column)} className={column.class} data-label={label}>{column.cell(original)}</td>;
+            const open = row.getIsExpanded();
+            const count = row.subRows.length;
+            return (
+              <td key={column_id(column)} className={[column.class, "tree-cell"].filter(Boolean).join(" ")} data-label={label} style={{ "--tree-depth": row.depth } as CSSProperties}>
+                {count > 0 ? (
+                  <button type="button" className="icon tree-toggle" aria-expanded={open} aria-label={open ? "Collapse" : "Expand"} onClick={(event) => { event.stopPropagation(); toggle_row(row); }}>
+                    {open ? "▾" : "▸"}
+                  </button>
+                ) : <span className="tree-spacer" />}
+                {column.cell(original)}
+                {count > 0 && !open && <span className="tree-count" title={`${count} inside`}>{count}</span>}
+              </td>
+            );
+          })}
+        </tr>
+        {after !== undefined && after !== null && typeof after !== "boolean" && <tr className="row-extra"><td colSpan={shown.length}>{after}</td></tr>}
+      </Fragment>
     );
+  }
+
+  // Each group's heading and then its rows, which keep the order of the sorted whole, so each group is sorted on its own.
+  function grouped_body(groups: RowGroup<Row>[]) {
+    const group_of = new Map<Row, number>();
+    groups.forEach((group, index) => group.rows.forEach((row) => { if (!group_of.has(row)) group_of.set(row, index); }));
+    const rows_by_group = groups.map((): TanstackRow<Row>[] => []);
+    let current = 0;
+    for (const row of table.getRowModel().rows) {
+      if (row.depth === 0) current = group_of.get(row.original) ?? current;
+      rows_by_group[current]!.push(row);
+    }
+    return groups.map((group, index) => (
+      <Fragment key={group.key}>
+        <tr className={group.class_name ? `group-row ${group.class_name}` : "group-row"}>
+          <th scope="colgroup" colSpan={shown.length}>{group.label}</th>
+        </tr>
+        {rows_by_group[index]!.map(body_row)}
+      </Fragment>
+    ));
   }
 
   const filtered_column = open_filter ? by_id.get(open_filter.id) : undefined;
@@ -398,7 +501,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         <table className="responsive">
           {caption && <caption className="visually-hidden">{caption}</caption>}
           <thead onContextMenu={props.on_hidden_columns_change && open_columns_menu}><tr>{shown.map(header)}</tr></thead>
-          <tbody>{table.getRowModel().rows.map(body_row)}</tbody>
+          <tbody>{groups ? grouped_body(groups) : table.getRowModel().rows.map(body_row)}</tbody>
         </table>
       </div>
       {open_filter && filtered_column && filter_body !== undefined && (

@@ -61,6 +61,28 @@ export function nest<Item extends TreeItem>(shown: Item[], all: Item[] = shown):
   return top_nodes;
 }
 
+// Every item in tree order: each followed by the items below it, siblings by position, each set of siblings reversed when asked.
+export function in_tree_order<Item extends TreeItem>(items: Item[], reversed = false): Item[] {
+  const sorted = [...items].sort(by_position);
+  if (reversed) sorted.reverse();
+  const walk = (nodes: TreeNode<Item>[]): Item[] => nodes.flatMap((node) => [node.item, ...walk(node.children)]);
+  const ordered = walk(nest(sorted, items));
+  const reached = new Set(ordered);
+  return [...ordered, ...sorted.filter((item) => !reached.has(item))];
+}
+
+// The names from the top of the tree down to the item, such as ["Work", "Clients"]; stops at a missing parent or a loop.
+export function path_names<Item extends TreeItem>(item: Item, items: Item[], name_of: (item: Item) => string): string[] {
+  const item_by_id = new Map(items.map((each) => [each.id, each]));
+  const path = [item];
+  let parent = item.parent_id === null ? undefined : item_by_id.get(item.parent_id);
+  while (parent && !path.includes(parent)) {
+    path.unshift(parent);
+    parent = parent.parent_id === null ? undefined : item_by_id.get(parent.parent_id);
+  }
+  return path.map(name_of);
+}
+
 // ── Dropping ─────────────────────────────────────────────────────────────────
 
 // The top and bottom quarters of a row drop beside it and the middle drops into it, or halves when nothing drops inside.

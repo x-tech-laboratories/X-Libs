@@ -69,11 +69,18 @@ interface ShellProps {
   // Makes the sidebar's edge draggable on wide screens.
   sidebar_width?: SidebarWidth;
   theme: ThemeChoice;
-  // Who is logged in, or null on the login page, which hides the sidebar and the top bar's tools.
-  user: string | null;
+  // Who is logged in, or null on the login page, which hides the sidebar and the top bar's tools; left out when the app has no logins.
+  user?: string | null;
   // Makes the user's name a link, such as to their account page.
   user_href?: string;
   on_logout?: () => void;
+  // Where the brand links to.
+  brand_href?: string;
+  // Whether the phone menu is open, for an app that opens and closes it itself; the Shell keeps it when this is left out.
+  menu_open?: boolean;
+  on_menu_open_change?: (open: boolean) => void;
+  // A class for the main element, such as one that lays it out as panes.
+  main_class?: string;
   // More in the top bar after the brand, such as a search box or the runs in progress.
   tools?: ReactNode;
   // What sits at the foot of the sidebar, such as whether the live updates are connected.
@@ -95,14 +102,25 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
   return [width, change];
 }
 
-export function Shell({ brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, user_href, on_logout, tools, sidebar_foot, view_key, children }: ShellProps) {
-  const [menu_open, set_menu_open] = useState(false);
+export function Shell({
+  brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, view_key,
+  menu_open: held_menu_open, on_menu_open_change, main_class, children,
+}: ShellProps) {
+  const [own_menu_open, set_own_menu_open] = useState(false);
+  const menu_open = held_menu_open ?? own_menu_open;
   const main = useRef<HTMLElement>(null);
   const menu_button = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const first_view = useRef(true);
   const logged_out = user === null;
   const [width, change_width] = use_sidebar_width(sidebar_width);
+
+  // Every opening and closing of the phone menu goes through here, so an app that holds it hears each one.
+  function set_menu_open(open: boolean): void {
+    if (open === menu_open) return;
+    if (held_menu_open === undefined) set_own_menu_open(open);
+    on_menu_open_change?.(open);
+  }
 
   // The login page has no theme button, so the saved theme is set here.
   useEffect(() => theme.apply(), []);
@@ -137,11 +155,11 @@ export function Shell({ brand, sections = [], active, sidebar: sidebar_content, 
       <a className="skip" href="#main">Skip to content</a>
       <header className="topbar">
         <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
-        <a href="#/" className="brand">{brand}</a>
+        <a href={brand_href} className="brand">{brand}</a>
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
-        {!logged_out && (user_href ? <a className="account-link" href={user_href}>{user}</a> : <span className="user-name">{user}</span>)}
-        {!logged_out && on_logout && <button onClick={on_logout}>Log out</button>}
+        {typeof user === "string" && (user_href ? <a className="account-link" href={user_href}>{user}</a> : <span className="user-name">{user}</span>)}
+        {typeof user === "string" && on_logout && <button onClick={on_logout}>Log out</button>}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
@@ -166,7 +184,7 @@ export function Shell({ brand, sections = [], active, sidebar: sidebar_content, 
           )}
         </nav>
         <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
-        <main ref={main} id="main" tabIndex={-1}>{children}</main>
+        <main ref={main} id="main" className={main_class} tabIndex={-1}>{children}</main>
       </div>
       <Toasts />
       <Dialogs />

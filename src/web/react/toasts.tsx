@@ -48,6 +48,56 @@ export function toast(message: string, options: ToastOptions = {}): () => void {
   return () => close_toast(id, "closed");
 }
 
+// ── Undo ─────────────────────────────────────────────────────────────────────
+
+export interface UndoableOptions {
+  // Carries the action out for good, once the toast closes any way but Undo, or when finished early.
+  commit: () => void;
+  // Takes the action back when Undo is pressed.
+  undo: () => void;
+  duration_in_milliseconds?: number;
+  undo_label?: string;
+}
+
+export interface Undoable {
+  // Commits now and closes the toast, such as before a newer action or when the page closes; does nothing once settled.
+  finish: () => void;
+  // Undoes now and closes the toast, such as for Ctrl+Z; does nothing once settled.
+  undo: () => void;
+  readonly settled: boolean;
+}
+
+// Shows the message with an Undo button, then either undoes or commits the action, exactly once.
+export function undoable(message: string, { commit, undo, duration_in_milliseconds = 8000, undo_label = "Undo" }: UndoableOptions): Undoable {
+  let settled = false;
+  let undo_wanted = false;
+
+  const settle = (reason: ToastCloseReason) => {
+    if (settled) return;
+    settled = true;
+    if (reason === "action" || undo_wanted) undo();
+    else commit();
+  };
+
+  const close = toast(message, {
+    action: { text: undo_label, run: () => {} },
+    duration_in_milliseconds,
+    on_close: settle,
+  });
+
+  return {
+    finish: () => close(),
+    undo: () => {
+      if (settled) return;
+      undo_wanted = true;
+      close();
+    },
+    get settled() {
+      return settled;
+    },
+  };
+}
+
 // ── Host ─────────────────────────────────────────────────────────────────────
 
 // Where toasts stack; the Shell holds one, and a page without the Shell renders its own.

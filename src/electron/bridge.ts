@@ -27,7 +27,7 @@ export type Client<Methods extends Record<keyof Methods, AnyMethod>> = {
 
 // The methods as the main process or a server answers them, at once or later.
 export type Implementation<Methods extends Record<keyof Methods, AnyMethod>> = {
-  [Name in keyof Methods]: (...args: Parameters<Methods[Name]>) => ReturnType<Methods[Name]> | Promise<Awaited<ReturnType<Methods[Name]>>>;
+  [Name in keyof Methods]: (...args: Parameters<Methods[Name]>) => Awaited<ReturnType<Methods[Name]>> | Promise<Awaited<ReturnType<Methods[Name]>>>;
 };
 
 // Sends one call to wherever the methods are answered, such as a POST to the server, and gives back its answer.

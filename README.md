@@ -9,8 +9,10 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds, `format_age`, and `format_clock` for a playing time such as `"3:07"`. |
 | `log`                                    | Loggers by scope and level from a setting such as `"warn,play:debug"`; a malformed setting falls back instead of silencing logging, and a setting read through a function applies to loggers made before it arrived. |
 | `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
+| `backups`                                | Named backups of an app's data in any store, newest first, with daily automatic ones kept to a set number. |
 | `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server; `with_cloneable_arguments` flattens what structured clone refuses, such as a Proxy. |
 | `electron/events`                        | `define_events`: messages the main process pushes to its pages, such as progress, on one channel and subscribed to by name. |
+| `electron/app`                           | `hold_single_instance`, `bring_to_front`, and `first_argument` for a link handed over on the command line. |
 | `electron/window`                        | `create_window`: links and other sites open in the browser, the background follows the system theme, and the size and place are remembered, through the app's write guard if it has one; timers can keep running while hidden. |
 | `electron/fetch`                         | `create_main_fetch` and `create_page_fetch`: the page's requests sent from the main process past cross-origin rules, to an allow-list of hosts, with headers such as `Origin` pinned. |
 | `agent/commands`                         | `run_command` and `stream_command`: one shell command, in its own process group. |
@@ -23,20 +25,21 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/agents/connection`, `agent`, `local`, `route` | One connected agent, the `Agent` interface, `LocalAgent`, and the Fastify route. |
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
+| `server/backup_files`                    | `file_backup_store`: the `backups` store as files in a folder on disk.        |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters (including `compact_count`, such as `"1.4M"`), hash router and theme choice, kept in this browser or the app's settings. |
 | `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; sorting by several columns, trees and column order; menu items, placement and keys; pane sizing. |
-| `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, and where a dropped or keyed row lands. |
+| `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, tree order, paths, and where a dropped or keyed row lands. |
 | `web/watch`, `web/react/watch`           | `create_watch`: a change counter a store bumps; `use_watch` redraws only the components that read that store. |
 | `web/prefs`, `web/react/prefs`           | Remembered view settings that read as their default when stored corrupt, stale or of the wrong shape; `use_pref` keeps one as component state. |
-| `web/selection`, `web/virtual`           | Picking rows with plain, Ctrl and Shift clicks from a fixed anchor, the row an arrow or page key moves to; which rows of a long list a viewport needs. |
-| `web/react/shell`                        | `Shell`: top bar, section links or the app's own sidebar, resizable, theme button, toasts, dialogs and menus; `use_route`. |
-| `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
-| `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover. |
+| `web/selection`, `web/virtual`, `web/drag` | Picking rows with plain, Ctrl and Shift clicks from a fixed anchor, or as lists of ids with the anchor kept by id, the row an arrow or page key moves to; which rows of a long list a viewport needs; a badge such as "3 tasks" as the drag image. |
+| `web/react/shell`                        | `Shell`: top bar, section links or the app's own sidebar, resizable, theme button, toasts, dialogs and menus, with or without logins, its phone menu held by the Shell or the app; `use_route`. |
+| `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows, `RowActions` and `moved` for ordered lists, `SelectionBar` for picked rows; badges and chips; `use_resource` and its loading states. |
+| `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover; `use_now`, the time read again each minute. |
 | `web/react/reveal`                       | `use_reveal`: a long list shown a page at a time, the next page added as its end scrolls into view. |
-| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, rows that come sorted from a database, rows worked by keyboard, and cards on phones; a pager. |
+| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes that can take focus and follow a value cleared from outside, selects, `CommitInput`, `DateTimeField`, `ColorPicker`, `TreeSelect`; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, groups under headings, rows the app drags and styles, rows that come sorted from a database, rows worked by keyboard, and cards on phones; a pager. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
-| `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, and reorder by dragging or with Alt and the arrow keys. |
-| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed; modal, confirm and text dialogs openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere; resize handles and splits. |
+| `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, reorder by dragging or with Alt and the arrow keys, show several picked, and take drops from outside. |
+| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed, and `undoable` actions that commit or undo exactly once; modal, confirm and text dialogs openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere; resize handles and splits. |
 
 ```ts
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";

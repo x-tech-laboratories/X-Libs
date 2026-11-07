@@ -104,6 +104,14 @@ export function move_column(order: readonly string[], column: string, target: st
   return [...rest.slice(0, index), column, ...rest.slice(index)];
 }
 
+// Moves the item at from to to, such as for a list's up and down buttons.
+export function moved<Item>(items: readonly Item[], from: number, to: number): Item[] {
+  if (from < 0 || from >= items.length) return [...items];
+  const rest = items.filter((_, index) => index !== from);
+  rest.splice(Math.max(0, Math.min(to, rest.length)), 0, items[from]!);
+  return rest;
+}
+
 // A width held between the column's narrowest and widest.
 export function clamp_width(width: number, min = 48, max = 960): number {
   return Math.round(Math.min(max, Math.max(min, width)));

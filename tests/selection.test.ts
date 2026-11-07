@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Selection, intent_for, row_after_key } from "../src/web/selection.ts";
+import { Selection, intent_for, row_after_key, still_shown, toggled, with_range } from "../src/web/selection.ts";
 
 const rows = [10, 20, 30, 40, 50, 60];
 
@@ -94,5 +94,29 @@ describe("intents and keys", () => {
     expect(row_after_key("Home", 4, 5, 3)).toBe(0);
     expect(row_after_key("End", 1, 5, 3)).toBe(5);
     expect(row_after_key("a", 1, 5, 3)).toBeNull();
+  });
+});
+
+describe("picking by id", () => {
+  const order = ["a", "b", "c", "d", "e"];
+
+  it("toggles one id in and out", () => {
+    expect(toggled(["a"], "c")).toEqual(["a", "c"]);
+    expect(toggled(["a", "c"], "a")).toEqual(["c"]);
+  });
+
+  it("adds the run between the anchor and the id, either way round", () => {
+    expect(with_range(order, ["a"], "b", "d")).toEqual(["a", "b", "c", "d"]);
+    expect(with_range(order, ["e"], "d", "b")).toEqual(["e", "b", "c", "d"]);
+    expect(with_range(order, ["c"], "b", "d")).toEqual(["b", "c", "d"]);
+  });
+
+  it("picks just the id when the anchor is missing or not shown", () => {
+    expect(with_range(order, ["a"], null, "c")).toEqual(["c"]);
+    expect(with_range(order, ["a"], "gone", "c")).toEqual(["c"]);
+  });
+
+  it("keeps only the picked ids still shown, in the shown order", () => {
+    expect(still_shown(order, ["d", "gone", "a"])).toEqual(["a", "d"]);
   });
 });

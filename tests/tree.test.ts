@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  by_position, can_drop, children_of, move_for_drop, move_for_key, moves_for_drop, nest, placement_at, position_for_drop, subtree_ids, type TreeItem,
+  by_position, can_drop, children_of, in_tree_order, move_for_drop, move_for_key, moves_for_drop, nest, path_names, placement_at, position_for_drop, subtree_ids,
+  type TreeItem,
 } from "../src/web/tree.ts";
 
 // root a (1) holds b (1) and c (2); c holds d (1); root e (2)
@@ -37,6 +38,40 @@ describe("tree shape", () => {
 
   test("puts a row whose parent is missing at the top", () => {
     expect(nest([{ id: "x", parent_id: "gone", position: 1 }]).map((node) => node.item.id)).toEqual(["x"]);
+  });
+});
+
+// ── Order and paths ──────────────────────────────────────────────────────────
+
+describe("tree order and paths", () => {
+  const ids = (list: TreeItem[]) => list.map((each) => each.id);
+  const name_of = (each: TreeItem) => each.id.toUpperCase();
+
+  test("lists each item before the items below it, siblings by position", () => {
+    expect(ids(in_tree_order([...items].reverse()))).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  test("reverses each set of siblings when asked", () => {
+    expect(ids(in_tree_order(items, true))).toEqual(["e", "a", "c", "d", "b"]);
+  });
+
+  test("keeps items caught in a loop, at the end", () => {
+    const looped: TreeItem[] = [...items, { id: "x", parent_id: "y", position: 1 }, { id: "y", parent_id: "x", position: 2 }];
+
+    expect(ids(in_tree_order(looped))).toEqual(["a", "b", "c", "d", "e", "x", "y"]);
+  });
+
+  test("names the path from the top down to an item", () => {
+    expect(path_names(item("d"), items, name_of)).toEqual(["A", "C", "D"]);
+    expect(path_names(item("e"), items, name_of)).toEqual(["E"]);
+  });
+
+  test("stops at a missing parent or a loop", () => {
+    const orphan = { id: "o", parent_id: "gone", position: 1 };
+    const looped: TreeItem[] = [{ id: "x", parent_id: "y", position: 1 }, { id: "y", parent_id: "x", position: 1 }];
+
+    expect(path_names(orphan, [...items, orphan], name_of)).toEqual(["O"]);
+    expect(path_names(looped[0]!, looped, name_of)).toEqual(["Y", "X"]);
   });
 });
 

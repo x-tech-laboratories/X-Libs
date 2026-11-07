@@ -80,6 +80,30 @@ export class Selection<Id = number> {
   }
 }
 
+// ── Ids ──────────────────────────────────────────────────────────────────────
+
+// The same picking as plain lists of ids held in an app's state, the anchor kept by id so it survives the rows moving between clicks.
+
+// Adds the id when missing and takes it out when there.
+export function toggled(picked: readonly string[], id: string): string[] {
+  return picked.includes(id) ? picked.filter((each) => each !== id) : [...picked, id];
+}
+
+// Every id between the anchor and the id in the shown order, both included, added to those picked; just the id when the anchor is not shown.
+export function with_range(order: readonly string[], picked: readonly string[], anchor_id: string | null, id: string): string[] {
+  const anchor_index = anchor_id === null ? -1 : order.indexOf(anchor_id);
+  const index = order.indexOf(id);
+  if (anchor_index === -1 || index === -1) return [id];
+  const run = order.slice(Math.min(anchor_index, index), Math.max(anchor_index, index) + 1);
+  return [...picked.filter((each) => !run.includes(each)), ...run];
+}
+
+// Keeps only the picked ids still shown, in the shown order.
+export function still_shown(order: readonly string[], picked: readonly string[]): string[] {
+  const picked_ids = new Set(picked);
+  return order.filter((id) => picked_ids.has(id));
+}
+
 // ── Keys ─────────────────────────────────────────────────────────────────────
 
 // The row an arrow, page, Home or End key moves to, held inside the list, or null for any other key.

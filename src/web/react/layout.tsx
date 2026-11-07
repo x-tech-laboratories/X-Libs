@@ -1,13 +1,23 @@
-// The pieces a page is laid out with: panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers and settings rows.
+// The pieces a page is laid out with: panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings rows and list row buttons.
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type MouseEvent, type ReactNode } from "react";
 import type { Tone } from "./badges.tsx";
+
+export { moved } from "../tables.ts";
 
 // ── Panels ───────────────────────────────────────────────────────────────────
 
-export function Section({ title, tools, children }: { title: ReactNode; tools?: ReactNode; children?: ReactNode }) {
+interface SectionProps {
+  title: ReactNode;
+  tools?: ReactNode;
+  class_name?: string;
+  on_context_menu?: (event: MouseEvent<HTMLElement>) => void;
+  children?: ReactNode;
+}
+
+export function Section({ title, tools, class_name, on_context_menu, children }: SectionProps) {
   return (
-    <section className="panel">
+    <section className={class_name ? `panel ${class_name}` : "panel"} onContextMenu={on_context_menu}>
       <div className="panel-head">
         <h2>{title}</h2>
         {tools && <div className="panel-tools">{tools}</div>}
@@ -151,7 +161,7 @@ export function Stepper({ label, previous, position, next }: { label: string; pr
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-export function SettingsGroup({ heading, hint, children }: { heading: string; hint?: ReactNode; children: ReactNode }) {
+export function SettingsGroup({ heading, hint, children }: { heading: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (
     <section className="settings-group">
       <h3 className="settings-heading">{heading}</h3>
@@ -162,12 +172,58 @@ export function SettingsGroup({ heading, hint, children }: { heading: string; hi
 }
 
 // A setting's name and hint on one side and its control on the other; as a label, clicking anywhere works its one control.
-export function SettingRow({ label, hint, as_label = false, children }: { label: ReactNode; hint?: ReactNode; as_label?: boolean; children: ReactNode }) {
+export function SettingRow({ label, hint, as_label = false, class_name, children }: { label: ReactNode; hint?: ReactNode; as_label?: boolean; class_name?: string; children: ReactNode }) {
+  const row_class = class_name ? `setting-row ${class_name}` : "setting-row";
   const text = (
     <span className="setting-text">
       <span className="setting-label">{label}</span>
       {hint && <span className="setting-hint">{hint}</span>}
     </span>
   );
-  return as_label ? <label className="setting-row">{text}{children}</label> : <div className="setting-row">{text}{children}</div>;
+  return as_label ? <label className={row_class}>{text}{children}</label> : <div className={row_class}>{text}{children}</div>;
+}
+
+interface RowActionsProps {
+  index: number;
+  count: number;
+  on_move: (from: number, to: number) => void;
+  on_remove?: () => void;
+  // The remove button's name, such as "Remove Weekly".
+  remove_label: string;
+}
+
+// The up, down and remove buttons of a row in an ordered list.
+export function RowActions({ index, count, on_move, on_remove, remove_label }: RowActionsProps) {
+  return (
+    <span className="row-actions">
+      <button type="button" className="icon" aria-label="Move up" disabled={index === 0} onClick={() => on_move(index, index - 1)}>↑</button>
+      <button type="button" className="icon" aria-label="Move down" disabled={index === count - 1} onClick={() => on_move(index, index + 1)}>↓</button>
+      {on_remove && <button type="button" className="icon danger" aria-label={remove_label} onClick={on_remove}>×</button>}
+    </span>
+  );
+}
+
+// ── Picked rows ──────────────────────────────────────────────────────────────
+
+interface SelectionBarProps {
+  // How many rows are picked, and how many are on screen to pick from.
+  count: number;
+  total: number;
+  on_clear: () => void;
+  on_select_all: () => void;
+  // The actions for every picked row, such as Mark done and Delete.
+  children: ReactNode;
+}
+
+// A bar floating at the foot of the page while rows are picked: how many, Select all, the actions, and a button that lets them go.
+export function SelectionBar({ count, total, on_clear, on_select_all, children }: SelectionBarProps) {
+  return (
+    <div className="selection-bar" role="toolbar" aria-label="Selected rows">
+      <button type="button" className="icon" aria-label="Clear selection" title="Clear selection (Esc)" onClick={on_clear}>✕</button>
+      <span className="selection-count">{count} selected</span>
+      {count < total && <button type="button" onClick={on_select_all}>Select all</button>}
+      <span className="selection-divider" aria-hidden="true" />
+      {children}
+    </div>
+  );
 }

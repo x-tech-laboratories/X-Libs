@@ -21,7 +21,13 @@ interface TreeProps<Item extends TreeItem> {
   collapsed: ReadonlySet<string>;
   on_collapsed_change: (collapsed: Set<string>) => void;
   selected_id?: string | null;
+  // Several rows shown selected at once, beside selected_id.
+  selected_ids?: ReadonlySet<string>;
   on_select?: (item: Item) => void;
+  // Called when a row is double-clicked, such as to open its editor.
+  on_activate?: (item: Item) => void;
+  // A class for a row, such as one that marks a group heading.
+  row_class?: (item: Item) => string | undefined;
   // Called when a row is dropped or moved with Alt and an arrow key; the tree reorders only once items change.
   on_move?: (item: Item, move: TreeMove) => void;
   // Narrows where a row may land; a row never lands on itself or anything below it.
@@ -31,6 +37,10 @@ interface TreeProps<Item extends TreeItem> {
   // An inline form for a new row, shown last among the children of parent_id, or last in the tree when that is null.
   new_item?: { parent_id: string | null; form: ReactNode } | null;
   on_context_menu?: (event: MouseEvent<HTMLElement>, item: Item) => void;
+  // Called while something not from this tree is dragged over a row; return true to accept it there.
+  accepts_external?: (event: DragEvent<HTMLElement>, item: Item) => boolean;
+  // Called when such a drag is dropped on a row that accepted it; the row shows drop-inside while hovered.
+  on_external_drop?: (event: DragEvent<HTMLElement>, item: Item) => void;
 }
 
 const KEY_MOVES: Record<string, KeyMove> = { ArrowUp: "up", ArrowDown: "down", ArrowRight: "indent", ArrowLeft: "outdent" };
@@ -41,8 +51,8 @@ function visible_nodes<Item extends TreeItem>(nodes: TreeNode<Item>[], collapsed
 }
 
 export function Tree<Item extends TreeItem>({
-  items, label, render_item, render_extra, name_of, collapsed, on_collapsed_change, selected_id = null, on_select, on_move,
-  can_drop, allow_inside = true, new_item = null, on_context_menu,
+  items, label, render_item, render_extra, name_of, collapsed, on_collapsed_change, selected_id = null, selected_ids, on_select, on_activate, row_class: class_of,
+  on_move, can_drop, allow_inside = true, new_item = null, on_context_menu, accepts_external, on_external_drop,
 }: TreeProps<Item>) {
   const [focused_id, set_focused_id] = useState<string | null>(null);
   const [dragged_id, set_dragged_id] = useState<string | null>(null);
@@ -52,7 +62,9 @@ export function Tree<Item extends TreeItem>({
 
   const roots = nest([...items].sort(by_position), items);
   const shown = visible_nodes(roots, collapsed);
-  const tab_stop = [focused_id, selected_id].find((id) => id !== null && shown.some((node) => node.item.id === id)) ?? shown[0]?.item.id;
+  const is_selected = (id: string) => selected_id === id || Boolean(selected_ids?.has(id));
+  const first_selected = shown.find((node) => selected_ids?.has(node.item.id))?.item.id ?? null;
+  const tab_stop = [focused_id, selected_id, first_selected].find((id) => id !== null && shown.some((node) => node.item.id === id)) ?? shown[0]?.item.id;
 
   useEffect(() => {
     if (!moves_focus.current || focused_id === null) return;
@@ -91,15 +103,28 @@ export function Tree<Item extends TreeItem>({
     return is_allowed(dragged, target, placement) ? placement : null;
   }
 
+  // A drag from outside the tree, such as a task, lands inside the row that accepts it.
+  function accepts_from_outside(event: DragEvent<HTMLElement>, target: Item): boolean {
+    return dragged_id === null && Boolean(accepts_external?.(event, target));
+  }
+
   function drag_over(event: DragEvent<HTMLElement>, target: Item): void {
-    const placement = placement_over(event, target);
+    const external = accepts_from_outside(event, target);
+    const placement = external ? "inside" : placement_over(event, target);
     if (!placement) return;
     event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    // An outside drag keeps the effect its source allowed, which may not include a move.
+    if (event.dataTransfer && !external) event.dataTransfer.dropEffect = "move";
     if (drop_target?.id !== target.id || drop_target.placement !== placement) set_drop_target({ id: target.id, placement });
   }
 
   function drop(event: DragEvent<HTMLElement>, target: Item): void {
+    if (accepts_from_outside(event, target)) {
+      event.preventDefault();
+      end_drag();
+      on_external_drop?.(event, target);
+      return;
+    }
     const placement = placement_over(event, target);
     const dragged = items.find((item) => item.id === dragged_id);
     end_drag();
@@ -170,6 +195,7 @@ export function Tree<Item extends TreeItem>({
     const new_child = new_item_row(item.id);
     const row_class = [
       "tree-row",
+      class_of?.(item),
       dragged_id === item.id && "dragging",
       drop_target?.id === item.id && `drop-${drop_target.placement}`,
     ].filter(Boolean).join(" ");
@@ -183,7 +209,7 @@ export function Tree<Item extends TreeItem>({
         data-id={item.id}
         aria-level={depth + 1}
         aria-expanded={has_children ? !is_collapsed : undefined}
-        aria-selected={on_select ? selected_id === item.id : undefined}
+        aria-selected={on_select || selected_ids ? is_selected(item.id) : undefined}
         tabIndex={tab_stop === item.id ? 0 : -1}
         onFocus={(event) => { if (event.target === event.currentTarget) set_focused_id(item.id); }}
       >
@@ -200,6 +226,7 @@ export function Tree<Item extends TreeItem>({
           onDragLeave={() => { if (drop_target?.id === item.id) set_drop_target(null); }}
           onDrop={(event) => drop(event, item)}
           onClick={() => { focus_row(item.id); on_select?.(item); }}
+          onDoubleClick={on_activate && (() => on_activate(item))}
           onContextMenu={on_context_menu && ((event) => on_context_menu(event, item))}
         >
           {has_children
@@ -229,7 +256,7 @@ export function Tree<Item extends TreeItem>({
   }
 
   return (
-    <ul role="tree" className="tree" aria-label={label} onKeyDown={key_down}>
+    <ul role="tree" className="tree" aria-label={label} aria-multiselectable={selected_ids ? true : undefined} onKeyDown={key_down}>
       {roots.map((node) => branch(node, 0))}
       {new_item_row(null)}
     </ul>

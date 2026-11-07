@@ -1,6 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { define_bridge, to_cloneable, with_cloneable_arguments, type ContextBridgeLike, type IpcMainLike, type IpcRendererLike } from "../../src/electron/bridge.ts";
+import {
+  define_bridge, to_cloneable, with_cloneable_arguments, type ContextBridgeLike, type Implementation, type IpcMainLike, type IpcRendererLike,
+} from "../../src/electron/bridge.ts";
 
 interface NotesApi {
   list_notes: () => string[];
@@ -98,5 +100,15 @@ describe("cloneable arguments", () => {
     await client.add_note(new Proxy({ toJSON: () => "Groceries" }, {}) as unknown as string, true);
 
     expect(add_note).toHaveBeenCalledWith("Groceries", true);
+  });
+});
+
+describe("implementation", () => {
+  test("answers a method the page awaits with a plain value", async () => {
+    interface PageApi { count_notes: () => Promise<number> }
+    const page_bridge = define_bridge<PageApi>("x_notes", ["count_notes"]);
+    const answers: Implementation<PageApi> = { count_notes: () => 3 };
+
+    expect(await page_bridge.dispatch(answers, "count_notes", [])).toBe(3);
   });
 });

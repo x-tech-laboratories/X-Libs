@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "./dom_stubs.ts";
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DataTable, type Sorting, type TableColumn } from "../src/web/react/table.tsx";
@@ -254,5 +254,106 @@ describe("table rows by keyboard", () => {
   it("leaves rows out of the Tab order when no keys are wanted", () => {
     render(<DataTable columns={columns} rows={tasks} row_key={(task) => task.id} />);
     expect(screen.getAllByRole("row")[1]!.getAttribute("tabindex")).toBeNull();
+  });
+});
+
+// ============================================================================
+// Groups
+// ============================================================================
+
+const body_rows = () => [...document.querySelectorAll("tbody tr")].map((row) => row.classList.contains("group-row") ? `# ${row.textContent}` : within(row as HTMLElement).getAllByRole("cell")[0]!.textContent);
+
+describe("table groups", () => {
+  const groups = [
+    { key: "now", label: "Now", rows: [tasks[1]!, tasks[0]!], class_name: "group-now" },
+    { key: "later", label: "Later", rows: [tasks[2]!] },
+  ];
+
+  it("shows each group under its heading, sorted on its own", () => {
+    render(<DataTable columns={columns} rows={[]} groups={groups} row_key={(task) => task.id} sorting={{ key: "Title", descending: true }} on_sort={() => {}} />);
+
+    expect(body_rows()).toEqual(["# Now", "Bake", "Answer", "# Later", "Clean"]);
+    const heading = screen.getByRole("columnheader", { name: "Now" });
+    expect(heading.getAttribute("scope")).toBe("colgroup");
+    expect(heading.getAttribute("colspan")).toBe("3");
+    expect(heading.parentElement!.className).toBe("group-row group-now");
+  });
+
+  it("nests and filters within each group", () => {
+    render(<DataTable columns={columns} rows={[]} groups={groups} row_key={(task) => task.id} get_children={(task) => task.children} row_passes={(task) => task.title !== "Answer" && task.title !== "Dust"} />);
+
+    expect(body_rows().map((title) => title!.replace(/[▸▾\d]/g, ""))).toEqual(["# Now", "Bake", "Weigh", "Mix", "# Later", "Clean", "Air"]);
+  });
+});
+
+// ============================================================================
+// Rows
+// ============================================================================
+
+// jsdom has no drag events or layout, so the drag carries its own clientY and each row a fixed 40px box.
+function drag_row(title: string, type: "dragStart" | "dragOver" | "drop" | "dragEnd", client_y = 0): void {
+  const row = screen.getByText(title).closest("tr")!;
+  row.getBoundingClientRect = () => ({ top: 100, height: 40, bottom: 140, left: 0, right: 200, width: 200, x: 0, y: 100, toJSON: () => ({}) });
+  const event = createEvent[type](row, { dataTransfer: { types: [], setData: () => {} } });
+  Object.defineProperty(event, "clientY", { value: client_y });
+  fireEvent(row, event);
+}
+
+const row_of = (title: string) => screen.getByText(title).closest("tr")!;
+
+describe("table rows", () => {
+  it("gives a row the style the app asks for, such as a tint its cells read", () => {
+    render(<DataTable columns={columns} rows={tasks} row_style={(task) => (task.id === "a" ? { color: "red" } : undefined)} />);
+
+    expect(row_of("Answer").style.color).toBe("red");
+    expect(row_of("Bake").getAttribute("style")).toBeNull();
+  });
+
+  it("drops a row dragged in this table before, inside or after another", () => {
+    const on_row_drag_start = vi.fn();
+    const on_row_drag_end = vi.fn();
+    const on_row_drop = vi.fn();
+    render(<DataTable columns={columns} rows={tasks} row_key={(task) => task.id} on_row_drag_start={on_row_drag_start} on_row_drag_end={on_row_drag_end} on_row_drop={(row, placement) => on_row_drop(row.id, placement)} />);
+
+    expect(row_of("Answer").getAttribute("draggable")).toBe("true");
+    drag_row("Answer", "dragStart");
+    drag_row("Bake", "dragOver", 105);
+    expect(row_of("Bake").className).toBe("drop-before");
+    drag_row("Bake", "dragOver", 120);
+    expect(row_of("Bake").className).toBe("drop-inside");
+    drag_row("Bake", "drop", 135);
+    drag_row("Answer", "dragEnd");
+
+    expect(on_row_drag_start.mock.calls[0]![0].id).toBe("a");
+    expect(on_row_drop.mock.calls).toEqual([["b", "after"]]);
+    expect(on_row_drag_end).toHaveBeenCalled();
+    expect(row_of("Bake").className).toBe("");
+  });
+
+  it("refuses drags from elsewhere unless the app's rule takes them, split in halves without inside drops", () => {
+    const on_row_drop = vi.fn();
+    const { rerender } = render(<DataTable columns={columns} rows={tasks} on_row_drop={(row, placement) => on_row_drop(row.id, placement)} />);
+
+    drag_row("Bake", "drop", 120);
+    expect(on_row_drop).not.toHaveBeenCalled();
+
+    rerender(<DataTable columns={columns} rows={tasks} allow_inside_drop={false} can_drop_on_row={(row) => row.id !== "c"} on_row_drop={(row, placement) => on_row_drop(row.id, placement)} />);
+    drag_row("Clean", "drop", 110);
+    drag_row("Bake", "dragOver", 115);
+    expect(row_of("Bake").className).toBe("drop-before");
+    drag_row("Bake", "drop", 125);
+
+    expect(on_row_drop.mock.calls).toEqual([["b", "after"]]);
+  });
+
+  it("adds a full-width row after a row, and a title", () => {
+    render(<DataTable columns={columns} rows={tasks} row_title={(task) => `Task ${task.id}`} render_after_row={(task) => task.id === "a" ? <input aria-label="New subtask" /> : null} />);
+
+    const extra = screen.getByRole("textbox", { name: "New subtask" }).closest("tr")!;
+    expect(extra.className).toBe("row-extra");
+    expect(extra.previousElementSibling).toBe(row_of("Answer"));
+    expect(extra.firstElementChild!.getAttribute("colspan")).toBe("3");
+    expect(document.querySelectorAll(".row-extra")).toHaveLength(1);
+    expect(row_of("Clean").title).toBe("Task c");
   });
 });
