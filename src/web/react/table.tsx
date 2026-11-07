@@ -16,8 +16,10 @@ export interface TableColumn<Row> {
   // A name that stays put when the label changes, used by the sorting, order, widths and hidden columns; the label when not given.
   id?: string;
   cell: (row: Row) => ReactNode;
-  // A value to sort by; a column without one does not sort.
+  // A value to sort by; a column without one does not sort, unless the table's rows come sorted.
   sort?: (row: Row) => string | number | null;
+  // Set false to keep a click from sorting by it in a table whose rows come sorted.
+  sortable?: boolean;
   class?: string;
   // The width it starts at and the narrowest and widest a drag may make it, in pixels.
   width?: number;
@@ -41,6 +43,8 @@ interface DataTableProps<Row> {
 
   // One sorting or several, the first deciding first.
   sorting?: Sorting | Sorting[];
+  // The rows come already in order, such as from a database, so the table only shows and changes the sorting.
+  manual_sorting?: boolean;
   // A click sorts by one column, flipping it on a second click.
   on_sort?: (sorting: Sorting) => void;
   // A click sorts by one column and Shift+click adds or flips one; a third click takes a column out.
@@ -69,6 +73,13 @@ interface DataTableProps<Row> {
 
   on_row_click?: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
   on_row_context_menu?: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  on_row_double_click?: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  // Makes the rows focusable, the active one in the Tab order, and hands on their keys.
+  on_row_key_down?: (row: Row, event: KeyboardEvent<HTMLTableRowElement>) => void;
+  // The row_key of the row Tab reaches, such as the keyboard cursor.
+  active_row?: string | number;
+  // Marks a row picked for assistive technology.
+  row_selected?: (row: Row) => boolean;
   // A class for a row, such as one that marks it picked.
   row_class?: (row: Row) => string | undefined;
 }
@@ -100,7 +111,10 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   const by_id = useMemo(() => new Map(columns.map((column) => [column_id(column), column])), [columns]);
   const all_ids = columns.map(column_id);
-  const sorting = sorting_list(props.sorting).filter((key) => by_id.get(key.key)?.sort);
+  const manual = props.manual_sorting === true;
+  const is_sortable = (column: TableColumn<Row> | undefined): boolean => Boolean(column) && (manual ? column!.sortable !== false : Boolean(column!.sort));
+  // Rows that come sorted keep every key, even one naming no column, so a click never drops it.
+  const sorting = manual ? sorting_list(props.sorting) : sorting_list(props.sorting).filter((key) => is_sortable(by_id.get(key.key)));
   const hidden = props.hidden_columns ?? [];
   const widths = props.column_widths ?? {};
   const expanded = props.expanded ?? own_expanded;
@@ -136,7 +150,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     getRowId: row_key ? (row) => String(row_key(row)) : undefined,
     getSubRows: children_of ? (row) => children_of(row) ?? [] : undefined,
     state: {
-      sorting: sorting.map((key) => ({ id: key.key, desc: key.descending })),
+      sorting: sorting.filter((key) => by_id.has(key.key)).map((key) => ({ id: key.key, desc: key.descending })),
       columnOrder: ordered_columns(props.column_order ?? all_ids, all_ids),
       columnVisibility: Object.fromEntries(hidden.map((id) => [id, false])),
       expanded: expanded === true ? true : Object.fromEntries(expanded.map((id) => [id, true])) as ExpandedState,
@@ -145,6 +159,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
     getRowCanExpand: (row) => row.subRows.length > 0,
+    manualSorting: manual,
   });
 
   const shown = table.getVisibleLeafColumns().map((column) => by_id.get(column.id)!);
@@ -254,7 +269,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const id = column_id(column);
     const index = sorting.findIndex((key) => key.key === id);
     const key = sorting[index];
-    const sortable = Boolean(column.sort) && Boolean(props.on_sort || props.on_sorting_change);
+    const sortable = is_sortable(column) && Boolean(props.on_sort || props.on_sorting_change);
     const width = width_of(column);
     const movable = can_move(column);
     const class_name = [
@@ -332,11 +347,18 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   function body_row(row: TanstackRow<Row>) {
     const original = row.original;
     const extra = props.row_class?.(original);
+    const keyed = props.on_row_key_down !== undefined;
+    const key = row_key ? String(row_key(original)) : row.id;
     return (
       <tr
         key={row.id}
         className={extra}
+        data-row-key={keyed ? key : undefined}
+        tabIndex={keyed ? (props.active_row !== undefined && String(props.active_row) === key ? 0 : -1) : undefined}
+        aria-selected={props.row_selected ? props.row_selected(original) : undefined}
         onClick={props.on_row_click && ((event) => props.on_row_click!(original, event))}
+        onDoubleClick={props.on_row_double_click && ((event) => props.on_row_double_click!(original, event))}
+        onKeyDown={props.on_row_key_down && ((event) => props.on_row_key_down!(original, event))}
         onContextMenu={props.on_row_context_menu && ((event) => props.on_row_context_menu!(original, event))}
       >
         {shown.map((column, index) => {

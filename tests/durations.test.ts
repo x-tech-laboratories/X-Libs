@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { format_age, format_duration, parse_duration } from "../src/durations.ts";
+import { format_age, format_clock, format_duration, parse_duration } from "../src/durations.ts";
 
 describe("durations", () => {
   it("reads units, plain seconds and numbers", () => {
@@ -35,5 +35,20 @@ describe("durations", () => {
     expect(format_duration(9 * 86400 + 3 * 3600, { separator: " " })).toBe("1 week 2 days");
     expect(format_duration(35 * 86400, { separator: " ", largest_unit: "weeks" })).toBe("5 weeks");
     expect(format_duration(90 * 60, { separator: " ", largest_unit: "weeks" })).toBe("1 hour 30 minutes");
+  });
+});
+
+describe("format_clock", () => {
+  it("writes minutes and seconds, and hours from an hour", () => {
+    expect(format_clock(187_000)).toBe("3:07");
+    expect(format_clock(3_723_400)).toBe("1:02:03");
+    expect(format_clock(59_600)).toBe("1:00");
+  });
+
+  it("clamps negatives and writes the empty text for nothing", () => {
+    expect(format_clock(-5000)).toBe("0:00");
+    expect(format_clock(null)).toBe("0:00");
+    expect(format_clock(undefined, "—")).toBe("—");
+    expect(format_clock(Number.NaN, "—")).toBe("—");
   });
 });

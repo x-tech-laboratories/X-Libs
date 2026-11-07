@@ -193,3 +193,66 @@ describe("table trees", () => {
     expect(shown_titles()).toEqual(["Clean", "Dust"]);
   });
 });
+
+// ============================================================================
+// Rows that come sorted, and rows worked by keyboard
+// ============================================================================
+
+describe("table rows from a sorted source", () => {
+  const plain_columns: TableColumn<Task>[] = [
+    { label: "Title", cell: (task) => task.title },
+    { label: "Size", id: "size", cell: (task) => task.size ?? "" },
+    { label: "Note", cell: () => "", sortable: false },
+  ];
+  const flat = tasks.map(({ children: _children, ...task }) => task);
+
+  it("keeps the rows' own order while showing and changing the sort", () => {
+    const on_sorting_change = vi.fn();
+    render(<DataTable manual_sorting columns={plain_columns} rows={flat} sorting={[{ key: "size", descending: true }]} on_sorting_change={on_sorting_change} />);
+
+    expect(shown_titles()).toEqual(["Bake", "Answer", "Clean"]);
+    expect(screen.getAllByRole("columnheader")[1]!.getAttribute("aria-sort")).toBe("descending");
+
+    fireEvent.click(screen.getByRole("button", { name: /Title/ }), { shiftKey: true });
+    expect(on_sorting_change).toHaveBeenCalledWith([{ key: "size", descending: true }, { key: "Title", descending: false }]);
+    expect(screen.queryByRole("button", { name: /Note/ })).toBeNull();
+  });
+
+  it("keeps a sort key that names no column when another is added", () => {
+    const on_sorting_change = vi.fn();
+    render(<DataTable manual_sorting columns={plain_columns} rows={flat} sorting={[{ key: "disc", descending: false }]} on_sorting_change={on_sorting_change} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Size/ }), { shiftKey: true });
+
+    expect(on_sorting_change).toHaveBeenCalledWith([{ key: "disc", descending: false }, { key: "size", descending: false }]);
+  });
+});
+
+describe("table rows by keyboard", () => {
+  it("puts only the active row in the Tab order, marks picked rows and hands on keys and double-clicks", () => {
+    const on_row_key_down = vi.fn();
+    const on_row_double_click = vi.fn();
+    const flat = tasks.map(({ children: _children, ...task }) => task);
+    render(
+      <DataTable columns={columns} rows={flat} row_key={(task) => task.id} active_row="a" row_selected={(task) => task.id === "c"}
+        on_row_key_down={on_row_key_down} on_row_double_click={on_row_double_click} />,
+    );
+    const body_rows = screen.getAllByRole("row").slice(1);
+
+    expect(body_rows.map((row) => row.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+    expect(body_rows.map((row) => row.dataset.rowKey)).toEqual(["b", "a", "c"]);
+    expect(body_rows.map((row) => row.getAttribute("aria-selected"))).toEqual(["false", "false", "true"]);
+
+    fireEvent.keyDown(body_rows[1]!, { key: "Enter" });
+    fireEvent.doubleClick(body_rows[2]!);
+
+    expect(on_row_key_down.mock.calls[0]![0]).toMatchObject({ id: "a" });
+    expect(on_row_key_down.mock.calls[0]![1].key).toBe("Enter");
+    expect(on_row_double_click.mock.calls[0]![0]).toMatchObject({ id: "c" });
+  });
+
+  it("leaves rows out of the Tab order when no keys are wanted", () => {
+    render(<DataTable columns={columns} rows={tasks} row_key={(task) => task.id} />);
+    expect(screen.getAllByRole("row")[1]!.getAttribute("tabindex")).toBeNull();
+  });
+});

@@ -47,3 +47,13 @@ export function format_duration(seconds: number, wording: DurationWording = {}):
 export function format_age(seconds: number): string {
   return seconds < 0 ? "never" : `${format_duration(seconds)} ago`;
 }
+
+// A playing time as a clock, such as "3:07", or "1:02:03" from an hour.
+export function format_clock(milliseconds: number | null | undefined, empty = "0:00"): string {
+  if (milliseconds === null || milliseconds === undefined || !Number.isFinite(milliseconds)) return empty;
+  const total = Math.max(0, Math.round(milliseconds / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
+}
