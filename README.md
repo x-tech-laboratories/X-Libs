@@ -6,7 +6,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 
 | Import                                   | What it holds                                                                 |
 | ---------------------------------------- | ----------------------------------------------------------------------------- |
-| `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration`, `format_age`. |
+| `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds, `format_age`. |
 | `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
 | `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server. |
 | `electron/window`                        | `create_window`: links open in the browser, the background follows the system theme, and the size and place are remembered. |
@@ -20,16 +20,16 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/agents/connection`, `agent`, `local`, `route` | One connected agent, the `Agent` interface, `LocalAgent`, and the Fastify route. |
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
-| `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice. |
-| `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; table sorting; menu items and on-screen placement; pane sizing. |
+| `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice, kept in this browser or the app's settings. |
+| `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; sorting by several columns, trees and column order; menu items, placement and keys; pane sizing. |
 | `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, and where a dropped or keyed row lands. |
-| `web/react/shell`                        | `Shell`: top bar, sidebar, theme button, toasts and dialogs; `use_route`.       |
+| `web/react/shell`                        | `Shell`: top bar, section links or the app's own sidebar, resizable, theme button, toasts, dialogs and menus; `use_route`. |
 | `web/react/layout`, `badges`, `states`   | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover. |
-| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; sortable tables that turn into cards on phones, and a pager. |
+| `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes, selects; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, and cards on phones; a pager. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
 | `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, and reorder by dragging or with Alt and the arrow keys. |
-| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo; modal, confirm and text dialogs openable from anywhere; context menus and popovers; resize handles and splits. |
+| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed; modal, confirm and text dialogs openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere; resize handles and splits. |
 
 ```ts
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
@@ -49,7 +49,10 @@ import { toast } from "@x-tech-laboratories/x-libs/web/react/toasts";
 ```
 
 The widgets are React components, so a page renders with React through `createRoot` from `react-dom/client`; `Shell`
-holds the toasts and dialogs that `toast` and `confirm_dialog` open from anywhere. A request whose session has lapsed
+holds the toasts, dialogs and menus that `toast`, `confirm_dialog` and `open_context_menu` open from anywhere. `DataTable`
+is drawn on `@tanstack/react-table` with Halon's markup; its sorting, column order, widths, hidden columns and open rows
+are props with change callbacks, so the app keeps them in its own settings, and a column's filter is the app's own
+content in a popover X-Libs opens from the column's funnel. A request whose session has lapsed
 throws `LoginNeeded` from `web/states`, and `use_resource` passes it on as an unhandled rejection, which the page's
 login listens for.
 

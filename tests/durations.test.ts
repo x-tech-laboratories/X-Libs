@@ -24,4 +24,16 @@ describe("durations", () => {
     expect(format_age(-1)).toBe("never");
     expect(format_age(120)).toBe("2 minutes ago");
   });
+
+  it("counts weeks and 30-day months", () => {
+    expect(format_duration(9 * 86400)).toBe("1 week, 2 days");
+    expect(format_duration(35 * 86400)).toBe("1 month, 5 days");
+    expect(format_duration(65 * 86400 + 3600)).toBe("2 months, 5 days");
+  });
+
+  it("writes units with the separator given and stops at the largest unit asked for", () => {
+    expect(format_duration(9 * 86400 + 3 * 3600, { separator: " " })).toBe("1 week 2 days");
+    expect(format_duration(35 * 86400, { separator: " ", largest_unit: "weeks" })).toBe("5 weeks");
+    expect(format_duration(90 * 60, { separator: " ", largest_unit: "weeks" })).toBe("1 hour 30 minutes");
+  });
 });

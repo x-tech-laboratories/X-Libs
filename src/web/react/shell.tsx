@@ -1,9 +1,12 @@
-// The frame around every view: the top bar, the sidebar that slides in on phones, the theme button, and the toasts and dialogs.
+// The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, the theme button, and the toasts, dialogs and menus.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
+import { store_sizes, stored_sizes } from "../split.ts";
 import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
 import { Dialogs } from "./dialog.tsx";
+import { ContextMenus } from "./menus.tsx";
+import { ResizeHandle } from "./split.tsx";
 import { Toasts } from "./toasts.tsx";
 
 // ── Route ────────────────────────────────────────────────────────────────────
@@ -44,11 +47,27 @@ export interface ShellSection {
   href: string;
 }
 
+// How wide the sidebar may be dragged, kept under storage_key, or by the app when it passes width and on_change.
+export interface SidebarWidth {
+  default_width: number;
+  min: number;
+  max: number;
+  storage_key?: string;
+  width?: number;
+  // Called as the edge is dragged, then with done once it is let go.
+  on_change?: (width: number, done: boolean) => void;
+}
+
 interface ShellProps {
   brand: string;
-  sections: ShellSection[];
+  // The sidebar's links, unless `sidebar` gives its whole content.
+  sections?: ShellSection[];
   // The section to light up, such as the route's first part.
-  active: string;
+  active?: string;
+  // The sidebar's own content, such as views and tags, in place of the section links.
+  sidebar?: ReactNode;
+  // Makes the sidebar's edge draggable on wide screens.
+  sidebar_width?: SidebarWidth;
   theme: ThemeChoice;
   // Who is logged in, or null on the login page, which hides the sidebar and the top bar's tools.
   user: string | null;
@@ -64,13 +83,26 @@ interface ShellProps {
   children: ReactNode;
 }
 
-export function Shell({ brand, sections, active, theme, user, user_href, on_logout, tools, sidebar_foot, view_key, children }: ShellProps) {
+// The sidebar's width: the app's own, else the one kept in this browser, else the default.
+function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | undefined, change: (width: number, done: boolean) => void] {
+  const [kept, set_kept] = useState(() => spec?.storage_key ? stored_sizes(spec.storage_key, 1)?.[0] : undefined);
+  const width = spec ? Math.min(spec.max, Math.max(spec.min, spec.width ?? kept ?? spec.default_width)) : undefined;
+  const change = (next: number, done: boolean) => {
+    if (spec?.width === undefined) set_kept(next);
+    if (done && spec?.storage_key) store_sizes(spec.storage_key, [next]);
+    spec?.on_change?.(next, done);
+  };
+  return [width, change];
+}
+
+export function Shell({ brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, user_href, on_logout, tools, sidebar_foot, view_key, children }: ShellProps) {
   const [menu_open, set_menu_open] = useState(false);
   const main = useRef<HTMLElement>(null);
   const menu_button = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const first_view = useRef(true);
   const logged_out = user === null;
+  const [width, change_width] = use_sidebar_width(sidebar_width);
 
   // The login page has no theme button, so the saved theme is set here.
   useEffect(() => theme.apply(), []);
@@ -81,7 +113,7 @@ export function Shell({ brand, sections, active, theme, user, user_href, on_logo
   }, [logged_out, menu_open]);
 
   useEffect(() => {
-    if (menu_open) sidebar.current?.querySelector<HTMLElement>("a")?.focus();
+    if (menu_open) sidebar.current?.querySelector<HTMLElement>("a[href], button:not(:disabled), input, select, textarea, [tabindex='0']")?.focus();
     if (!menu_open) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -111,20 +143,34 @@ export function Shell({ brand, sections, active, theme, user, user_href, on_logo
         {!logged_out && (user_href ? <a className="account-link" href={user_href}>{user}</a> : <span className="user-name">{user}</span>)}
         {!logged_out && on_logout && <button onClick={on_logout}>Log out</button>}
       </header>
-      <div className="layout">
+      <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
-          {sections.map((section) => (
+          {sidebar_content ?? sections.map((section) => (
             <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
               {section.label}
             </a>
           ))}
           {sidebar_foot}
+          {sidebar_width && width !== undefined && (
+            <ResizeHandle
+              side="left"
+              size={width}
+              min={sidebar_width.min}
+              max={sidebar_width.max}
+              default_size={sidebar_width.default_width}
+              on_resize={(next) => change_width(next, false)}
+              on_resize_end={(next) => change_width(next, true)}
+              label="Resize the sidebar"
+              class_name="sidebar-resize"
+            />
+          )}
         </nav>
         <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
         <main ref={main} id="main" tabIndex={-1}>{children}</main>
       </div>
       <Toasts />
       <Dialogs />
+      <ContextMenus />
     </>
   );
 }

@@ -2,7 +2,17 @@
 
 import parse from "parse-duration";
 
-const unit_names = [["weeks", 604800], ["days", 86400], ["hours", 3600], ["minutes", 60], ["seconds", 1]] as const;
+// A month counts as 30 days.
+const unit_names = [["months", 2592000], ["weeks", 604800], ["days", 86400], ["hours", 3600], ["minutes", 60], ["seconds", 1]] as const;
+
+export type DurationUnit = (typeof unit_names)[number][0];
+
+export interface DurationWording {
+  // What goes between the units, such as " " for "1 week 2 days"; a comma when not given.
+  separator?: string;
+  // The largest unit used, such as "weeks" so 35 days read "5 weeks".
+  largest_unit?: DurationUnit;
+}
 
 const words = new Intl.DurationFormat("en", { style: "long" });
 
@@ -18,18 +28,20 @@ export function parse_duration(value: unknown, key: string): number {
   return Math.floor(seconds);
 }
 
-// The two largest whole units, such as "1 day, 2 hours".
-export function format_duration(seconds: number): string {
+// The two largest whole units, such as "1 day, 2 hours" or, with a space between, "1 week 2 days".
+export function format_duration(seconds: number, wording: DurationWording = {}): string {
   if (seconds < 1) return "0 seconds";
-  const parts: Partial<Record<(typeof unit_names)[number][0], number>> = {};
+  const first_unit = unit_names.findIndex(([name]) => name === (wording.largest_unit ?? "months"));
+  const parts: Partial<Record<DurationUnit, number>> = {};
   let remaining = Math.floor(seconds);
-  for (const [name, size] of unit_names) {
+  for (const [name, size] of unit_names.slice(first_unit)) {
     if (Object.keys(parts).length === 2) break;
     if (remaining < size) continue;
     parts[name] = Math.floor(remaining / size);
     remaining %= size;
   }
-  return words.format(parts);
+  if (wording.separator === undefined) return words.format(parts);
+  return Object.entries(parts).map(([name, count]) => words.format({ [name]: count })).join(wording.separator);
 }
 
 export function format_age(seconds: number): string {

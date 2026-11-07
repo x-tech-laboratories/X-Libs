@@ -16,7 +16,7 @@ interface DialogProps {
   children: ReactNode;
 }
 
-// Shown while it is rendered: the page behind it is inert, focus stays inside, and Escape calls on_close.
+// Shown while it is rendered: the page behind it is inert, focus stays inside, Escape calls on_close, and focus goes back to the opener after.
 export function Dialog({ title, on_close, buttons, wide = false, class_name, children }: DialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title_id = useId();
@@ -25,8 +25,13 @@ export function Dialog({ title, on_close, buttons, wide = false, class_name, chi
 
   useEffect(() => {
     const element = dialog.current!;
+    const opener = document.activeElement as HTMLElement | null;
     element.showModal();
-    return () => element.close();
+    return () => {
+      element.close();
+      // The dialog is already gone from the page here, so the browser cannot hand focus back by itself.
+      if (opener?.isConnected && opener !== document.body) opener.focus();
+    };
   }, []);
 
   return (

@@ -1,4 +1,4 @@
-// The light, dark or system theme, kept in this browser and set as data-theme on the page.
+// The light, dark or system theme, kept in this browser or the app's own settings, and set as data-theme on the page.
 
 export type Theme = "system" | "light" | "dark";
 
@@ -11,18 +11,40 @@ export interface ThemeChoice {
   apply(theme?: Theme): void;
 }
 
-// The choice kept under the storage key, such as "x-nix-theme".
-export function theme_choice(storage_key: string): ThemeChoice {
+// Where the choice is kept, such as the app's own settings; nothing read means the system theme.
+export interface ThemeStorage {
+  read(): Theme | undefined;
+  write(theme: Theme): void;
+}
+
+// The choice kept in this browser under the storage key, such as "x-nix-theme".
+export function local_theme_storage(storage_key: string): ThemeStorage {
+  return {
+    read: () => {
+      try {
+        const saved = localStorage.getItem(storage_key);
+        return saved === "light" || saved === "dark" ? saved : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    write: (theme) => {
+      try {
+        if (theme === "system") localStorage.removeItem(storage_key);
+        else localStorage.setItem(storage_key, theme);
+      } catch {
+        // Without storage the choice lasts until the page is closed.
+      }
+    },
+  };
+}
+
+// The choice kept under a storage key in this browser, or in the storage the app hands over.
+export function theme_choice(where: string | ThemeStorage): ThemeChoice {
+  const storage = typeof where === "string" ? local_theme_storage(where) : where;
   const listeners = new Set<(theme: Theme) => void>();
 
-  const get = (): Theme => {
-    try {
-      const saved = localStorage.getItem(storage_key);
-      return saved === "light" || saved === "dark" ? saved : "system";
-    } catch {
-      return "system";
-    }
-  };
+  const get = (): Theme => storage.read() ?? "system";
 
   const apply = (theme: Theme = get()): void => {
     if (theme === "system") delete document.documentElement.dataset.theme;
@@ -31,12 +53,7 @@ export function theme_choice(storage_key: string): ThemeChoice {
   };
 
   const set = (theme: Theme): void => {
-    try {
-      if (theme === "system") localStorage.removeItem(storage_key);
-      else localStorage.setItem(storage_key, theme);
-    } catch {
-      // Without storage the choice lasts until the page is closed.
-    }
+    storage.write(theme);
     apply(theme);
   };
 
