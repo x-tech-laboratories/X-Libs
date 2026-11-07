@@ -18,8 +18,8 @@ export interface TableColumn<Row> {
 interface DataTableProps<Row> {
   columns: TableColumn<Row>[];
   rows: Row[];
-  // A row's stable key, such as its id.
-  row_key: (row: Row) => string | number;
+  // A row's stable key, such as its id; rows keep their place when there is none.
+  row_key?: (row: Row) => string | number;
   sorting?: Sorting;
   on_sort?: (sorting: Sorting) => void;
   caption?: string;
@@ -48,12 +48,26 @@ export function DataTable<Row>({ columns, rows, row_key, sorting, on_sort, capti
         <thead><tr>{columns.map(header)}</tr></thead>
         <tbody>
           {sorted_rows(columns, rows, sorting).map((row) => (
-            <tr key={row_key(row)}>
+            <tr key={row_key ? row_key(row) : undefined}>
               {columns.map((column) => <td key={column.label} class={column.class} data-label={column.label}>{column.cell(row)}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ── Pages ────────────────────────────────────────────────────────────────────
+
+// Newer and older buttons around the page number, or nothing when everything fits on one page.
+export function Pager({ page, has_more, go }: { page: number; has_more: boolean; go: (page: number) => void }) {
+  if (page === 1 && !has_more) return null;
+  return (
+    <nav class="pager" aria-label="Pages">
+      <button disabled={page <= 1} onClick={() => go(page - 1)}>← Newer</button>
+      <span class="muted">Page {page}</span>
+      <button disabled={!has_more} onClick={() => go(page + 1)}>Older →</button>
+    </nav>
   );
 }

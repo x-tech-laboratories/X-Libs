@@ -18,11 +18,12 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters, hash router and theme choice. |
-| `web/layout`, `web/badges`, `web/states` | Panels, facts, tiles, cards, tabs, crumbs, toolbars, steppers; badges and chips; loading, empty and failed states. |
-| `web/controls`, `web/tables`             | Search boxes, selects, segmented choices, switches, button groups; sortable tables that turn into cards on phones, and a pager. |
-| `web/toasts`, `web/dialogs`, `web/menus` | Toasts with a link or Undo, modal and confirm dialogs, right-click menus and popovers kept on screen. |
-| `web/split`, `web/shell`                 | Pane sizing and resize handles; the sidebar menu, the section it lights up, and the theme button. |
-| `web/preact/*`                           | The same widgets as Preact components: menus, split, controls, layout, dialog, table. |
+| `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; table sorting; menu items and on-screen placement; pane sizing. |
+| `web/preact/shell`                       | `Shell`: top bar, sidebar, theme button, toasts and dialogs; `use_route`.       |
+| `web/preact/layout`, `badges`, `states`  | Panels, facts, tiles, cards, tabs, crumbs, steppers, settings rows; badges and chips; `use_resource` and its loading states. |
+| `web/preact/time`                        | `Age`: a time as how long ago, with the full stamp on hover. |
+| `web/preact/controls`, `table`           | Segmented choices, button groups, switches, search boxes, selects; sortable tables that turn into cards on phones, and a pager. |
+| `web/preact/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo; modal, confirm and text dialogs openable from anywhere; context menus and popovers; resize handles and splits. |
 
 ```ts
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
@@ -37,11 +38,13 @@ which an app imports once:
 ```ts
 import "@x-tech-laboratories/halon/halon-tokens.css";
 import "@x-tech-laboratories/halon/halon.css";
-import { data_table } from "@x-tech-laboratories/x-libs/web/tables";
-import { ContextMenu } from "@x-tech-laboratories/x-libs/web/preact/menus";
+import { DataTable } from "@x-tech-laboratories/x-libs/web/preact/table";
+import { toast } from "@x-tech-laboratories/x-libs/web/preact/toasts";
 ```
 
-A request whose session has lapsed throws `LoginNeeded` from `web/states`; `load` and `attempt` pass it on so the page can ask for a login.
+The widgets are Preact components, so a page renders with Preact; `Shell` holds the toasts and dialogs that `toast` and
+`confirm_dialog` open from anywhere. A request whose session has lapsed throws `LoginNeeded` from `web/states`, and
+`use_resource` passes it on as an unhandled rejection, which the page's login listens for.
 
 ## The app and its tasks
 

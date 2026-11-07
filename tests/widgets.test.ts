@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { on_screen_position } from "../src/web/menus.ts";
 import { distribute, fit, resize_at } from "../src/web/split.ts";
-import { sorted_rows, sorting_from, type Column } from "../src/web/tables.ts";
+import { sorted_rows, sorting_from, type SortableColumn } from "../src/web/tables.ts";
 
 // ============================================================================
 // Splits
@@ -53,10 +53,10 @@ describe("table sorting", () => {
     name: string;
     size: number | null;
   }
-  const columns: Column<Row>[] = [
-    { label: "Name", cell: (row) => row.name, sort: (row) => row.name },
-    { label: "Size", cell: (row) => row.size, sort: (row) => row.size },
-    { label: "Note", cell: () => "" },
+  const columns: SortableColumn<Row>[] = [
+    { label: "Name", sort: (row) => row.name },
+    { label: "Size", sort: (row) => row.size },
+    { label: "Note" },
   ];
   const rows: Row[] = [{ name: "b", size: 2 }, { name: "a", size: null }, { name: "c", size: 1 }];
 

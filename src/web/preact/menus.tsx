@@ -1,27 +1,49 @@
-// Preact menus and popovers opened at a point, kept on screen and closed the same way as the page's own.
+// Menus and popovers on the native popover: closed by Escape or a click elsewhere, and here also by scrolling or leaving the window.
 
-import { Fragment, type ComponentChildren } from "preact";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { dismiss_on_outside, menu_item_class, menu_item_role, place_on_screen, type MenuItem } from "../menus.ts";
+import { Fragment, type ComponentChildren, type RefObject } from "preact";
+import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks";
+import { on_screen_position, type MenuItem } from "../menus.ts";
 
 export type { MenuItem } from "../menus.ts";
 
-// ── Placing ──────────────────────────────────────────────────────────────────
+// ── Opening ──────────────────────────────────────────────────────────────────
 
-// Keeps the element on screen at the point, and calls the latest on_close when it should close.
-function use_floating(x: number, y: number, on_close: () => void) {
+// Shows the element as a popover while it is rendered, calling the latest on_close once it closes for any reason.
+function use_popover(on_close: () => void): RefObject<HTMLDivElement> {
   const element = useRef<HTMLDivElement>(null);
   const close = useRef(on_close);
   close.current = on_close;
 
-  useLayoutEffect(() => place_on_screen(element.current!, x, y), [x, y]);
-  useEffect(() => dismiss_on_outside(element.current!, () => close.current()), []);
+  useEffect(() => {
+    const popover = element.current!;
+    const hide = () => { if (popover.matches(":popover-open")) popover.hidePopover(); };
+    const toggled = (event: Event) => { if ((event as ToggleEvent).newState === "closed") close.current(); };
+    const outside_scroll = (event: Event) => { if (!popover.contains(event.target as Node)) hide(); };
+    popover.addEventListener("toggle", toggled);
+    window.addEventListener("blur", hide);
+    window.addEventListener("scroll", outside_scroll, true);
+    return () => {
+      popover.removeEventListener("toggle", toggled);
+      window.removeEventListener("blur", hide);
+      window.removeEventListener("scroll", outside_scroll, true);
+    };
+  }, []);
   return element;
+}
+
+// Shows the popover at the point, flipped or pushed back so it stays on screen.
+function show_at(popover: HTMLElement, x: number, y: number): void {
+  if (!popover.matches(":popover-open")) popover.showPopover();
+  const size = popover.getBoundingClientRect();
+  const position = on_screen_position(x, y, size.width, size.height);
+  popover.style.left = `${position.left}px`;
+  popover.style.top = `${position.top}px`;
 }
 
 // ── Context menu ─────────────────────────────────────────────────────────────
 
 interface ContextMenuProps {
+  // The point it opens at, such as a mouse event's clientX and clientY.
   x: number;
   y: number;
   items: MenuItem[];
@@ -29,19 +51,22 @@ interface ContextMenuProps {
 }
 
 export function ContextMenu({ x, y, items, on_close }: ContextMenuProps) {
-  const menu = use_floating(x, y, on_close);
-  useEffect(() => menu.current?.querySelector<HTMLElement>(".menu-item:not(:disabled)")?.focus(), []);
+  const menu = use_popover(on_close);
+  useLayoutEffect(() => {
+    show_at(menu.current!, x, y);
+    menu.current!.querySelector<HTMLElement>(".menu-item:not(:disabled)")?.focus();
+  }, [x, y]);
 
   return (
-    <div ref={menu} class="menu" role="menu" tabIndex={-1}>
+    <div ref={menu} popover="auto" class="menu" role="menu" tabIndex={-1}>
       {items.map((item) => (
         <Fragment key={item.label}>
           {item.separator_before && <div class="menu-separator" role="separator" />}
           <button
             type="button"
-            class={menu_item_class(item)}
-            role={menu_item_role(item)}
-            aria-checked={item.checked === undefined ? undefined : item.checked}
+            class={item.danger ? "menu-item danger" : "menu-item"}
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked}
             disabled={item.disabled}
             onClick={() => {
               on_close();
@@ -60,20 +85,36 @@ export function ContextMenu({ x, y, items, on_close }: ContextMenuProps) {
 // ── Popover ──────────────────────────────────────────────────────────────────
 
 interface PopoverProps {
-  x: number;
-  y: number;
+  // The element it hangs from, such as a column's filter button, or else the point it opens at.
+  anchor?: HTMLElement | null;
+  x?: number;
+  y?: number;
   label: string;
   on_close: () => void;
   children: ComponentChildren;
 }
 
 // Holds any content, such as a column's filter, with its first field ready to type into.
-export function Popover({ x, y, label, on_close, children }: PopoverProps) {
-  const popover = use_floating(x, y, on_close);
-  useEffect(() => popover.current?.querySelector<HTMLElement>("input, select, textarea, button")?.focus(), []);
+export function Popover({ anchor, x = 0, y = 0, label, on_close, children }: PopoverProps) {
+  const popover = use_popover(on_close);
+  const anchor_name = `--popover-${useId().replace(/[^\w-]/g, "")}`;
+
+  useLayoutEffect(() => {
+    const element = popover.current!;
+    if (anchor) {
+      // The anchor's name ties it to this popover, which CSS then hangs below it, flipping where there is no room.
+      anchor.style.setProperty("anchor-name", anchor_name);
+      element.style.setProperty("position-anchor", anchor_name);
+      element.showPopover();
+    } else {
+      show_at(element, x, y);
+    }
+    element.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+    return () => anchor?.style.removeProperty("anchor-name");
+  }, [anchor, x, y]);
 
   return (
-    <div ref={popover} class="popover" role="dialog" aria-label={label}>
+    <div ref={popover} popover="auto" class={anchor ? "popover anchored" : "popover"} role="dialog" aria-label={label}>
       {children}
     </div>
   );

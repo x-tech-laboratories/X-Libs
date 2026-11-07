@@ -5,7 +5,8 @@ export type Theme = "system" | "light" | "dark";
 export interface ThemeChoice {
   get(): Theme;
   set(theme: Theme): void;
-  on_change(listener: (theme: Theme) => void): void;
+  // Returns the function that stops listening.
+  on_change(listener: (theme: Theme) => void): () => void;
   // Sets the theme on the page, the saved one when none is given.
   apply(theme?: Theme): void;
 }
@@ -39,7 +40,10 @@ export function theme_choice(storage_key: string): ThemeChoice {
     apply(theme);
   };
 
-  return { get, set, apply, on_change: (listener) => void listeners.add(listener) };
+  return { get, set, apply, on_change: (listener) => {
+    listeners.add(listener);
+    return () => void listeners.delete(listener);
+  } };
 }
 
 // The header's button steps through system, light and dark.
