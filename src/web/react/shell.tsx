@@ -60,6 +60,8 @@ export interface SidebarWidth {
 
 interface ShellProps {
   brand: string;
+  // The app's icon, as an image URL, drawn before the brand.
+  brand_icon?: string;
   // The sidebar's links, unless `sidebar` gives its whole content.
   sections?: ShellSection[];
   // The section to light up, such as the route's first part.
@@ -111,7 +113,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, status_bar, view_key,
+  brand, brand_icon, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -167,7 +169,7 @@ export function Shell({
       <a className="skip" href="#main">Skip to content</a>
       <header className="topbar">
         <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
-        {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand}</a>}
+        {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
         {user_name !== undefined && (user_href ? <a className="account-link" href={user_href}>{user_name}</a> : <span className="user-name">{user_name}</span>)}
@@ -175,7 +177,7 @@ export function Shell({
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
-          {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand}</a>}
+          {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
           {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : sections.map((section) => (
             <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
               {section.label}
