@@ -30,6 +30,12 @@ if (typeof window !== "undefined") {
 
   window.scrollTo = () => {};
 
+  // Text has no boxes either, which a rich text field asks for to scroll its cursor into view.
+  const no_rects = (): DOMRectList => Object.assign([], { item: () => null }) as unknown as DOMRectList;
+  Range.prototype.getClientRects ??= no_rects;
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+  (Text.prototype as Text & { getClientRects?: () => DOMRectList }).getClientRects ??= no_rects;
+
   // Nothing is ever resized either, so an observer never reports.
   window.ResizeObserver ??= class {
     observe(): void {}
