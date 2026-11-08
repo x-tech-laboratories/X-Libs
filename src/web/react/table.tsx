@@ -497,7 +497,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     ].filter(Boolean).join(" ") || undefined;
     const marker = key && (
       <span className="sort-marker" aria-hidden="true">
-        {key.descending ? " ↓" : " ↑"}{sorting.length > 1 && <sup className="sort-rank">{index + 1}</sup>}
+        {key.descending ? " ▼" : " ▲"}{sorting.length > 1 && <sup className="sort-rank">{index + 1}</sup>}
       </span>
     );
 
@@ -687,18 +687,25 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   return (
     <>
-      {tools && (
-        <div className="table-tools">
-          {props.on_clear_filters && any_filter && <button type="button" onClick={props.on_clear_filters}>Clear filters</button>}
-          {props.on_hidden_columns_change && <button type="button" aria-haspopup="menu" onClick={open_columns_menu}>Columns</button>}
-        </div>
-      )}
       <div
         ref={wrap}
         className={cx("table-wrap", props.virtual && "virtual", props.wrap_class)}
         style={props.virtual ? { overflowY: "auto" } : undefined}
         onScroll={line_height === undefined ? undefined : measure}
       >
+        {/* The tools take no height of their own and sit over the right end of the heading band. */}
+        {tools && (
+          <div className="table-tools">
+            <span className="table-tools-inner">
+              {props.on_clear_filters && any_filter && <button type="button" aria-label="Clear filters" title="Clear filters" onClick={props.on_clear_filters}>Clear</button>}
+              {props.on_hidden_columns_change && (
+                <button type="button" className="icon columns-button" aria-label="Show or hide columns" title="Show or hide columns" aria-haspopup="menu" onClick={open_columns_menu}>
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 2h3v12H2zm4.5 0h3v12h-3zM11 2h3v12h-3z" /></svg>
+                </button>
+              )}
+            </span>
+          </div>
+        )}
         <table className={fill_last ? "responsive fill-last-column" : "responsive"} style={fills_by_fixed ? { tableLayout: "fixed" } : undefined}>
           {caption && <caption className="visually-hidden">{caption}</caption>}
           <thead ref={head} onContextMenu={props.on_hidden_columns_change && open_columns_menu}><tr>{shown.map(header)}</tr></thead>

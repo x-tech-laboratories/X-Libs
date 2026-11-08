@@ -221,13 +221,15 @@ describe("TreeSelect", () => {
     { id: "w", parent_id: null, position: 1, name: "Work" },
   ];
 
-  test("lists the tree indented with each path on hover, greying disabled ones", () => {
+  test("lists the tree indented by depth with each path, greying disabled ones", () => {
     const on_change = vi.fn();
     render(<TreeSelect label="Parent" items={tags} name_of={(tag) => tag.name} value="c" blank_label="No parent" disabled_ids={["w"]} on_change={on_change} />);
     const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Parent" });
     const options = [...select.options];
 
-    expect(options.map((option) => option.textContent)).toEqual(["No parent", "Work", " Clients", "Home"]);
+    expect(options.map((option) => option.querySelector(".tree-option-name")?.textContent ?? option.textContent)).toEqual(["No parent", "Work", "Clients", "Home"]);
+    expect(options.map((option) => option.style.getPropertyValue("--depth"))).toEqual(["", "0", "1", "0"]);
+    expect(options[2]!.querySelector(".tree-option-path")!.textContent).toBe("Work › Clients");
     expect(options[2]!.title).toBe("Work › Clients");
     expect(options[1]!.disabled).toBe(true);
     expect(select.value).toBe("c");

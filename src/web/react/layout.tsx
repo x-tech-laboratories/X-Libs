@@ -238,7 +238,7 @@ export function RowActions({ index, count, on_move, on_remove, remove_label }: R
     <span className="row-actions">
       <button type="button" className="icon" aria-label="Move up" disabled={index === 0} onClick={() => on_move(index, index - 1)}>↑</button>
       <button type="button" className="icon" aria-label="Move down" disabled={index === count - 1} onClick={() => on_move(index, index + 1)}>↓</button>
-      {on_remove && <button type="button" className="icon danger" aria-label={remove_label} onClick={on_remove}>×</button>}
+      {on_remove && <button type="button" className="icon remove" aria-label={remove_label} onClick={on_remove}>×</button>}
     </span>
   );
 }
@@ -259,7 +259,7 @@ interface SelectionBarProps {
 export function SelectionBar({ count, total, on_clear, on_select_all, children }: SelectionBarProps) {
   return (
     <div className="selection-bar" role="toolbar" aria-label="Selected rows">
-      <button type="button" className="icon" aria-label="Clear selection" title="Clear selection (Esc)" onClick={on_clear}>✕</button>
+      <button type="button" className="icon remove" aria-label="Clear selection" title="Clear selection (Esc)" onClick={on_clear}>✕</button>
       <span className="selection-count">{count} selected</span>
       {count < total && <button type="button" onClick={on_select_all}>Select all</button>}
       <span className="selection-divider" aria-hidden="true" />

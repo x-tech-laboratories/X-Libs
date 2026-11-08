@@ -91,6 +91,10 @@ interface ShellProps {
   status_bar?: ReactNode;
   // Changes whenever the view does, so focus and scroll move to the new page.
   view_key?: string;
+  // Keeps the window still so only main, or its panes, scroll, as in an app rather than a page.
+  contained?: boolean;
+  // Heads the sidebar with the brand and leaves the top bar to the tools.
+  brand_in_sidebar?: boolean;
   children: ReactNode;
 }
 
@@ -108,7 +112,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 
 export function Shell({
   brand, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, status_bar, view_key,
-  menu_open: held_menu_open, on_menu_open_change, main_class, children,
+  menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
   const menu_open = held_menu_open ?? own_menu_open;
@@ -134,7 +138,8 @@ export function Shell({
     document.body.classList.toggle("logged-out", logged_out);
     document.body.classList.toggle("menu-open", menu_open);
     document.body.classList.toggle("has-status-bar", status_bar !== undefined);
-  }, [logged_out, menu_open, status_bar !== undefined]);
+    document.body.classList.toggle("contained", contained);
+  }, [logged_out, menu_open, status_bar !== undefined, contained]);
 
   useEffect(() => {
     if (menu_open) sidebar.current?.querySelector<HTMLElement>("a[href], button:not(:disabled), input, select, textarea, [tabindex='0']")?.focus();
@@ -154,6 +159,7 @@ export function Shell({
     if (!first_view.current) main.current?.focus({ preventScroll: true });
     first_view.current = false;
     window.scrollTo(0, 0);
+    main.current?.scrollTo?.(0, 0);
   }, [view_key]);
 
   return (
@@ -161,7 +167,7 @@ export function Shell({
       <a className="skip" href="#main">Skip to content</a>
       <header className="topbar">
         <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
-        <a href={brand_href} className="brand">{brand}</a>
+        {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand}</a>}
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
         {user_name !== undefined && (user_href ? <a className="account-link" href={user_href}>{user_name}</a> : <span className="user-name">{user_name}</span>)}
@@ -169,6 +175,7 @@ export function Shell({
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
+          {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand}</a>}
           {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : sections.map((section) => (
             <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
               {section.label}

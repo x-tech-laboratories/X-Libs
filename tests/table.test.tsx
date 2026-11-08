@@ -135,7 +135,7 @@ describe("table headers", () => {
     const on_hidden_columns_change = vi.fn();
     render(<DataTable columns={columns} rows={tasks} hidden_columns={["Note"]} on_hidden_columns_change={on_hidden_columns_change} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show or hide columns" }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Note" }));
 
     expect(header_labels()).toEqual(["Title", "Size"]);

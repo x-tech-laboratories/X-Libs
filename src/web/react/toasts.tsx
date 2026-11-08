@@ -118,7 +118,7 @@ export function Toasts() {
             <span>{item.message}</span>
             {item.link && <a href={item.link.href} onClick={close}>{item.link.text}</a>}
             {item.action && <button className="toast-action" onClick={() => { close_toast(item.id, "action"); item.action!.run(); }}>{item.action.text}</button>}
-            <button className="icon" aria-label="Dismiss" onClick={close}>×</button>
+            <button className="icon remove" aria-label="Dismiss" onClick={close}>×</button>
           </div>
         );
       })}

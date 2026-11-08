@@ -129,4 +129,12 @@ describe("shell top bar", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(on_menu_open_change).toHaveBeenLastCalledWith(false);
   });
+
+  it("heads the sidebar with the brand and keeps the window still when asked", () => {
+    render(<Shell brand="X-Test" sidebar={<button>My Day</button>} brand_in_sidebar contained theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    expect(screen.getByRole("link", { name: "X-Test" }).className).toBe("sidebar-brand");
+    expect(document.querySelector(".topbar .brand")).toBeNull();
+    expect(document.body.classList.contains("contained")).toBe(true);
+  });
 });

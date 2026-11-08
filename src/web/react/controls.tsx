@@ -1,6 +1,6 @@
 // React controls drawn like the page's own: segmented choices, switches, search fields, selects, and date, colour and tree pickers.
 
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { createElement, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { in_tree_order, path_names, type TreeItem } from "../tree.ts";
 
 // ── Choices ──────────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ export function DateTimeField({ label, value, on_change, allow_time = true }: Da
       <div className="date-time-inputs">
         <input type="date" aria-label={`${label} date`} value={day} onChange={(event) => join(event.currentTarget.value, time)} />
         {day && allow_time && <input type="time" aria-label={`${label} time`} value={time} onChange={(event) => join(day, event.currentTarget.value)} />}
-        {day && <button type="button" className="icon" aria-label={`Clear ${label.toLowerCase()} date`} onClick={() => on_change(null)}>×</button>}
+        {day && <button type="button" className="icon remove" aria-label={`Clear ${label.toLowerCase()} date`} onClick={() => on_change(null)}>×</button>}
       </div>
     </div>
   );
@@ -332,12 +332,15 @@ export function TreeSelect<Item extends TreeItem>({ label, items, name_of, value
   const depth_of = (item: Item) => path_names(item, items, name_of).length - 1;
   const chosen = items.find((item) => item.id === value);
 
+  // The open list indents each name by its depth, and the closed face shows the picked choice's whole path.
   return (
     <select className="tree-select" aria-label={label} value={value} title={chosen ? path_names(chosen, items, name_of).join(" › ") : undefined} onChange={(event) => on_change(event.currentTarget.value)}>
+      <button type="button">{createElement("selectedcontent")}</button>
       <option value="">{blank_label}</option>
       {in_tree_order(items).map((item) => (
-        <option key={item.id} value={item.id} disabled={disabled_ids.includes(item.id)} title={path_names(item, items, name_of).join(" › ")}>
-          {`${"\u2003".repeat(depth_of(item))}${name_of(item)}`}
+        <option key={item.id} value={item.id} disabled={disabled_ids.includes(item.id)} title={path_names(item, items, name_of).join(" › ")} style={{ "--depth": depth_of(item) } as CSSProperties}>
+          <span className="tree-option-name">{name_of(item)}</span>
+          <span className="tree-option-path">{path_names(item, items, name_of).join(" › ")}</span>
         </option>
       ))}
     </select>
