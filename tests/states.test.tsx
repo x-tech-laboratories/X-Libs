@@ -79,3 +79,23 @@ describe("use_resource", () => {
     expect(latest?.data).toBe("load 2");
   });
 });
+
+describe("Loaded by status", () => {
+  const loaded_null: Resource<string | null> = { data: null, error: null, loading: false, status: "loaded", reload: async () => {} };
+
+  test("a load that found nothing shows the children, or the empty slot when given", () => {
+    const { rerender } = render(<Loaded resource={loaded_null}>{(data) => <p>{data === null ? "No roots" : data}</p>}</Loaded>);
+    expect(screen.getByText("No roots")).toBeTruthy();
+
+    rerender(<Loaded resource={loaded_null} empty={<p>Nothing yet</p>}>{(data) => <p>{data}</p>}</Loaded>);
+    expect(screen.getByText("Nothing yet")).toBeTruthy();
+  });
+
+  test("a failure shows the error with Retry, and loading a skeleton", () => {
+    const { rerender } = render(<Loaded resource={{ ...loaded_null, status: "failed", error: new Error("boom") }}>{(data) => <p>{data}</p>}</Loaded>);
+    expect(screen.getByRole("alert").textContent).toContain("boom");
+
+    rerender(<Loaded resource={{ ...loaded_null, status: "loading", loading: true }}>{(data) => <p>{data}</p>}</Loaded>);
+    expect(screen.getByLabelText("Loading")).toBeTruthy();
+  });
+});

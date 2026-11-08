@@ -18,12 +18,15 @@ interface PageHeadingProps {
   // The page's buttons, on the title's right.
   actions?: ReactNode;
   class_name?: string;
+  // The title's heading level, 1 for a page and 2 or 3 inside a dialog or panel.
+  level?: 1 | 2 | 3;
   // What follows the title, such as a description or the page's tabs.
   children?: ReactNode;
 }
 
 // A page's heading: an optional banner, the title with its icon and subtitle, and the page's buttons.
-export function PageHeading({ title, subtitle, icon, banner, actions, class_name, children }: PageHeadingProps) {
+export function PageHeading({ title, subtitle, icon, banner, actions, class_name, level = 1, children }: PageHeadingProps) {
+  const Title = `h${level}` as const;
   return (
     <header className={class_name ? `page-head ${class_name}` : "page-head"}>
       {typeof banner === "string" ? <img className="page-banner" src={banner} alt="" loading="lazy" /> : banner}
@@ -31,7 +34,7 @@ export function PageHeading({ title, subtitle, icon, banner, actions, class_name
         <div className="page-identity">
           {icon}
           <div>
-            <h1>{title}</h1>
+            <Title>{title}</Title>
             {subtitle && <p className="page-subtitle muted">{subtitle}</p>}
           </div>
         </div>

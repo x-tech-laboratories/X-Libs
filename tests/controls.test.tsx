@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ColorPicker, CommitInput, DateTimeField, SearchBox, Select, TreeSelect } from "../src/web/react/controls.tsx";
+import { ColorPicker, CommitInput, DateTimeField, PathInput, SearchBox, Select, TreeSelect } from "../src/web/react/controls.tsx";
 import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
@@ -235,5 +235,30 @@ describe("TreeSelect", () => {
 
     fireEvent.change(select, { target: { value: "" } });
     expect(on_change).toHaveBeenCalledWith("");
+  });
+});
+
+// ============================================================================
+// Path input
+// ============================================================================
+
+describe("PathInput", () => {
+  test("typing changes the path, and Browse takes what the picker chooses but not a cancel", async () => {
+    const on_change = vi.fn();
+    const pick = vi.fn<(current: string) => Promise<string | null>>().mockResolvedValueOnce("/music").mockResolvedValueOnce(null);
+    render(<PathInput label="Music folder" value="/home" on_change={on_change} pick={pick} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Music folder" }), { target: { value: "/tmp" } });
+    expect(on_change).toHaveBeenLastCalledWith("/tmp");
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse…" }));
+    await screen.findByRole("button", { name: "Browse…" });
+    await Promise.resolve();
+    expect(pick).toHaveBeenCalledWith("/home");
+    expect(on_change).toHaveBeenLastCalledWith("/music");
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse…" }));
+    await Promise.resolve();
+    expect(on_change).toHaveBeenCalledTimes(2);
   });
 });

@@ -453,3 +453,11 @@ describe("table virtual rows", () => {
     }
   });
 });
+
+describe("wrap class", () => {
+  it("adds the app's classes to the table's wrapper, such as Halon's scroll", () => {
+    const { container } = render(<DataTable columns={columns} rows={[]} wrap_class="scroll sticky-head" />);
+
+    expect(container.querySelector(".table-wrap")!.className).toBe("table-wrap scroll sticky-head");
+  });
+});

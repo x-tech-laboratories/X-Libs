@@ -1,4 +1,15 @@
-// Builds elements without innerHTML, so names from hosts and logs are always shown as text.
+// Builds elements without innerHTML, so names from hosts and logs are always shown as text, and joins class names.
+
+// ── Classes ──────────────────────────────────────────────────────────────────
+
+export type ClassValue = string | false | null | undefined;
+
+// Joins the class names that are set, so conditional classes read as one expression.
+export function cx(...names: ClassValue[]): string {
+  return names.filter(Boolean).join(" ");
+}
+
+// ── Elements ─────────────────────────────────────────────────────────────────
 
 export type Child = Node | string | number | null | undefined | false | Child[];
 

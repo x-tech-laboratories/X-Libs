@@ -245,6 +245,39 @@ export function DateTimeField({ label, value, on_change, allow_time = true }: Da
   );
 }
 
+interface PathInputProps {
+  label: string;
+  value: string;
+  on_change: (value: string) => void;
+  // Opens the app's file or folder picker and gives back the path chosen, or null when the user cancelled.
+  pick: (current: string) => Promise<string | null>;
+  placeholder?: string;
+  disabled?: boolean;
+  browse_label?: string;
+}
+
+// A path typed by hand or picked through a Browse button.
+export function PathInput({ label, value, on_change, pick, placeholder, disabled = false, browse_label = "Browse…" }: PathInputProps) {
+  const [picking, set_picking] = useState(false);
+
+  async function browse(): Promise<void> {
+    set_picking(true);
+    try {
+      const chosen = await pick(value);
+      if (chosen !== null) on_change(chosen);
+    } finally {
+      set_picking(false);
+    }
+  }
+
+  return (
+    <span className="path-row">
+      <input type="text" aria-label={label} spellCheck={false} placeholder={placeholder} disabled={disabled} value={value} onChange={(event) => on_change(event.currentTarget.value)} />
+      <button type="button" disabled={disabled || picking} onClick={() => void browse()}>{browse_label}</button>
+    </span>
+  );
+}
+
 // ── Pickers ──────────────────────────────────────────────────────────────────
 
 interface ColorPickerProps {

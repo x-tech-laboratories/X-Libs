@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
-  define_bridge, to_cloneable, with_cloneable_arguments, type ContextBridgeLike, type Implementation, type IpcMainLike, type IpcRendererLike,
+  clean_error_message, define_bridge, to_cloneable, to_envelope, with_cloneable_arguments, type ContextBridgeLike, type Implementation, type IpcMainLike, type IpcRendererLike,
 } from "../../src/electron/bridge.ts";
 
 interface NotesApi {
@@ -110,5 +110,31 @@ describe("implementation", () => {
     const answers: Implementation<PageApi> = { count_notes: () => 3 };
 
     expect(await page_bridge.dispatch(answers, "count_notes", [])).toBe(3);
+  });
+});
+
+describe("envelopes and errors", () => {
+  test("a handler in envelopes answers failures as messages, which the client throws as plain Errors", async () => {
+    const { ipc_main, ipc_renderer } = fake_ipc();
+    notes_bridge.handle(ipc_main, { ...implementation, list_notes: () => { throw new Error("database locked"); } }, { envelopes: true });
+    const client = notes_bridge.ipc_client(ipc_renderer, { envelopes: true });
+
+    await expect(client.add_note("milk", true)).resolves.toEqual({ id: 1, title: "milk" });
+    await expect(client.list_notes()).rejects.toThrow("database locked");
+    expect(await to_envelope(() => { throw new Error("nope"); })).toEqual({ ok: false, error: "nope" });
+  });
+
+  test("a trusted guard refuses calls from other pages", async () => {
+    const { ipc_main, ipc_renderer } = fake_ipc();
+    notes_bridge.handle(ipc_main, implementation, { trusted: (event) => event.senderFrame?.url === "app://page", envelopes: true });
+
+    await expect(notes_bridge.ipc_client(ipc_renderer, { envelopes: true }).list_notes()).rejects.toThrow("Untrusted sender.");
+  });
+
+  test("a plain client strips Electron's remote-method prefix from a rejection", async () => {
+    const ipc_renderer: IpcRendererLike = { invoke: async () => { throw new Error("Error invoking remote method 'x_notes:list_notes': Error: database locked"); } };
+
+    await expect(notes_bridge.ipc_client(ipc_renderer).list_notes()).rejects.toThrow(/^database locked$/);
+    expect(clean_error_message("plain")).toBe("plain");
   });
 });

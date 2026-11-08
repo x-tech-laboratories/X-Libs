@@ -96,3 +96,12 @@ describe("SelectionBar", () => {
     expect(screen.queryByRole("button", { name: "Select all" })).toBeNull();
   });
 });
+
+describe("page heading level", () => {
+  test("renders the title at the level given, for a heading inside a dialog or panel", () => {
+    render(<PageHeading title="Music folders" level={2} />);
+
+    expect(screen.getByRole("heading", { level: 2, name: "Music folders" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});

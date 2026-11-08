@@ -1,6 +1,7 @@
 // What a part of the page shows while it loads, when it has nothing, and when loading failed, and the hook that loads it.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { describe_error } from "../errors.ts";
 import { pass_login_needed } from "../states.ts";
 import type { Watch } from "../watch.ts";
 
@@ -26,7 +27,7 @@ export function Empty({ title, hint }: { title: string; hint?: ReactNode }) {
 export function Failure({ error, retry }: { error: unknown; retry: () => void }) {
   return (
     <div className="failure" role="alert">
-      <p>Could not load this: {error instanceof Error ? error.message : String(error)}</p>
+      <p>Could not load this: {describe_error(error)}</p>
       <button onClick={retry}>Retry</button>
     </div>
   );
@@ -107,13 +108,15 @@ interface LoadedProps<Data> {
   lines?: number;
   // What an idle resource shows, nothing unless given.
   idle?: ReactNode;
+  // What a load that found nothing, a null result, shows in place of the children.
+  empty?: ReactNode;
   children: (data: Data) => ReactNode;
 }
 
-// Shows a skeleton while the resource first loads, an error with Retry if that fails, and what children build from it after.
-export function Loaded<Data>({ resource, lines, idle = null, children }: LoadedProps<Data>) {
-  if (resource.data !== null) return <>{children(resource.data)}</>;
+// Shows a skeleton while the resource first loads, an error with Retry if that fails, and what children build from it after, going by its status so a null result still shows.
+export function Loaded<Data>({ resource, lines, idle = null, empty, children }: LoadedProps<Data>) {
+  if (resource.status === "loaded") return <>{resource.data === null && empty !== undefined ? empty : children(resource.data as Data)}</>;
   if (resource.status === "idle") return <>{idle}</>;
-  if (resource.error !== null) return <Failure error={resource.error} retry={() => void resource.reload()} />;
+  if (resource.status === "failed") return <Failure error={resource.error} retry={() => void resource.reload()} />;
   return <Skeleton lines={lines} />;
 }

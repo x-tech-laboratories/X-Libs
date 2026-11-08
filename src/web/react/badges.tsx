@@ -38,3 +38,26 @@ export function Verdict({ ok, label }: { ok: boolean | null | undefined; label: 
   const known = ok !== null && ok !== undefined;
   return <span className={`verdict tone-${known ? (ok ? "good" : "bad") : "none"}`}>{label}: {known ? (ok ? "pass" : "fail") : "no verdict"}</span>;
 }
+
+// ── Status pills ─────────────────────────────────────────────────────────────
+
+interface StatusPillProps {
+  // The dot's colour; busy makes it pulse while work is under way.
+  tone?: Tone;
+  busy?: boolean;
+  label: ReactNode;
+  // A button beside the text, such as Pause or Resume.
+  action?: ReactNode;
+  title?: string;
+}
+
+// A state dot and its text, such as "Idle" or "Researching", with an optional button, for a top bar.
+export function StatusPill({ tone = "none", busy = false, label, action, title }: StatusPillProps) {
+  return (
+    <span className="status-pill" title={title}>
+      <span className={busy ? `status-dot tone-${tone} busy` : `status-dot tone-${tone}`} aria-hidden="true" />
+      <span className="status-text small">{label}</span>
+      {action}
+    </span>
+  );
+}

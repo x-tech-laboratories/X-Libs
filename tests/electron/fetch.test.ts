@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { create_main_fetch, create_page_fetch, is_allowed_url, type FetchAnswer, type FetchRequest } from "../../src/electron/fetch.ts";
+import { create_main_fetch, create_main_stream_fetch, create_page_fetch, create_page_stream_fetch, is_allowed_url, type FetchAnswer, type FetchRequest, type StreamChunk } from "../../src/electron/fetch.ts";
 
 const policy = { hosts: ["www.youtube.com", "*.googlevideo.com"] };
 
@@ -106,5 +106,80 @@ describe("create_page_fetch", () => {
     controller.abort();
 
     await expect(pending).rejects.toThrow("aborted");
+  });
+});
+
+// ============================================================================
+// Streaming
+// ============================================================================
+
+// Joins the two halves the way the bridge and events do, chunks delivered on their own ticks.
+function streaming_pair(send: typeof fetch) {
+  const handlers = new Set<(chunk: StreamChunk) => void>();
+  const main = create_main_stream_fetch({ hosts: ["*.googlevideo.com"] }, (chunk) => { for (const handler of handlers) handler(chunk); }, send);
+  const page_fetch = create_page_stream_fetch({
+    start: main.start,
+    cancel: main.cancel,
+    on_chunk: (handler) => { handlers.add(handler); return () => void handlers.delete(handler); },
+  });
+  return { main, page_fetch };
+}
+
+function chunked_body(parts: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async pull(controller) {
+      const part = parts.shift();
+      if (part === undefined) controller.close();
+      else controller.enqueue(encoder.encode(part));
+    },
+  });
+}
+
+describe("streaming fetch", () => {
+  test("the page's Response body arrives chunk by chunk as the main process reads it", async () => {
+    const { page_fetch } = streaming_pair(async () => new Response(chunked_body(["seg", "ment", "s"]), { status: 200, headers: { "content-type": "video/mp4" } }));
+
+    const response = await page_fetch("https://rr1---sn.googlevideo.com/videoplayback");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("video/mp4");
+
+    const reader = response.body!.getReader();
+    const seen: string[] = [];
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) seen.push(new TextDecoder().decode(chunk.value));
+
+    expect(seen).toEqual(["seg", "ment", "s"]);
+  });
+
+  test("a bodiless status answers without a stream, and a refused URL never starts", async () => {
+    const send = vi.fn(async () => new Response(null, { status: 204 }));
+    const { page_fetch } = streaming_pair(send);
+
+    expect((await page_fetch("https://rr1---sn.googlevideo.com/x")).body).toBeNull();
+    await expect(page_fetch("https://example.com/")).rejects.toThrow("not allowed");
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  test("a failed body read reaches the page as a stream error", async () => {
+    const broken = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new Error("connection reset")); } });
+    const { page_fetch } = streaming_pair(async () => new Response(broken, { status: 200 }));
+
+    const response = await page_fetch("https://rr1---sn.googlevideo.com/x");
+
+    await expect(response.text()).rejects.toThrow("connection reset");
+  });
+
+  test("aborting cancels the main process's read and errors the body", async () => {
+    let seen_signal: AbortSignal | undefined;
+    const endless = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) });
+    const { page_fetch } = streaming_pair(async (_url, init) => { seen_signal = init?.signal ?? undefined; return new Response(endless, { status: 200 }); });
+    const controller = new AbortController();
+
+    const response = await page_fetch("https://rr1---sn.googlevideo.com/x", { signal: controller.signal });
+    const reading = response.body!.getReader().read();
+    controller.abort();
+
+    await expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    expect(seen_signal?.aborted).toBe(true);
   });
 });

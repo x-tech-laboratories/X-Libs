@@ -4,6 +4,7 @@
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
+import { cx } from "../dom.ts";
 import { clamp_width, column_id, compare_values, move_column, ordered_columns, sort_after_click, sorting_list, type Sorting, type SortValue } from "../tables.ts";
 import { placement_at, type DropPlacement } from "../tree.ts";
 import { virtual_window } from "../virtual.ts";
@@ -66,6 +67,8 @@ interface DataTableProps<Row> {
   virtual?: TableVirtual;
   // Lets the last column on show take the room the others' fixed widths leave.
   fill_last_column?: boolean;
+  // Classes added to the .table-wrap, such as Halon's scroll or sticky-head.
+  wrap_class?: string;
 
   // One sorting or several, the first deciding first.
   sorting?: Sorting | Sorting[];
@@ -690,7 +693,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       )}
       <div
         ref={wrap}
-        className={props.virtual ? "table-wrap virtual" : "table-wrap"}
+        className={cx("table-wrap", props.virtual && "virtual", props.wrap_class)}
         style={props.virtual ? { overflowY: "auto" } : undefined}
         onScroll={line_height === undefined ? undefined : measure}
       >
