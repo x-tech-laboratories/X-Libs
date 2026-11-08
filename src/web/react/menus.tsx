@@ -15,8 +15,8 @@ interface PopoverHandle {
   return_focus: () => void;
 }
 
-// Shows the element as a popover while it is rendered, calling the latest on_close once it closes for any reason.
-function use_popover(on_close: () => void, opener?: HTMLElement | null): PopoverHandle {
+// Shows the element as a popover while it is rendered, calling the latest on_close once it closes for any reason; a manual one closes itself on a press outside it.
+function use_popover(on_close: () => void, opener?: HTMLElement | null, manual = false): PopoverHandle {
   const element = useRef<HTMLDivElement>(null);
   const close = useRef(on_close);
   close.current = on_close;
@@ -26,14 +26,16 @@ function use_popover(on_close: () => void, opener?: HTMLElement | null): Popover
     const popover = element.current!;
     const hide = () => { if (popover.matches(":popover-open")) popover.hidePopover(); };
     const toggled = (event: Event) => { if ((event as ToggleEvent).newState === "closed") close.current(); };
-    const outside_scroll = (event: Event) => { if (!popover.contains(event.target as Node)) hide(); };
+    const outside = (event: Event) => { if (!popover.contains(event.target as Node)) hide(); };
     popover.addEventListener("toggle", toggled);
     window.addEventListener("blur", hide);
-    window.addEventListener("scroll", outside_scroll, true);
+    window.addEventListener("scroll", outside, true);
+    if (manual) window.addEventListener("pointerdown", outside, true);
     return () => {
       popover.removeEventListener("toggle", toggled);
       window.removeEventListener("blur", hide);
-      window.removeEventListener("scroll", outside_scroll, true);
+      window.removeEventListener("scroll", outside, true);
+      window.removeEventListener("pointerdown", outside, true);
     };
   }, []);
 
@@ -179,8 +181,9 @@ interface ContextMenuProps {
   label?: string;
 }
 
+// Manual, since on Linux the menu opens on the button's press and an auto popover would close on its release.
 export function ContextMenu({ x, y, items, on_close, label }: ContextMenuProps) {
-  const { element: menu, dismiss, return_focus } = use_popover(on_close);
+  const { element: menu, dismiss, return_focus } = use_popover(on_close, undefined, true);
   const keys = use_menu_keys(menu, dismiss, true);
 
   useLayoutEffect(() => {
@@ -189,7 +192,7 @@ export function ContextMenu({ x, y, items, on_close, label }: ContextMenuProps) 
   }, [x, y]);
 
   return (
-    <div ref={menu} popover="auto" className="menu" role="menu" aria-label={label} tabIndex={-1} onKeyDown={keys}>
+    <div ref={menu} popover="manual" className="menu" role="menu" aria-label={label} tabIndex={-1} onKeyDown={keys}>
       <MenuList items={items} on_close={() => { return_focus(); on_close(); }} />
     </div>
   );

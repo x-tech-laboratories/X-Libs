@@ -142,6 +142,20 @@ describe("context menu keys", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
   });
 
+  it("closes on a press outside it, not on one inside it nor on the release that opened it", () => {
+    const on_close = vi.fn();
+    render(<ContextMenu x={0} y={0} on_close={on_close} items={items()} />);
+    const menu = screen.getByRole("menu");
+    vi.spyOn(menu, "matches").mockReturnValue(true);
+
+    fireEvent.pointerUp(document.body);
+    fireEvent.pointerDown(screen.getByRole("menuitem", { name: "Open" }));
+    expect(on_close).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(document.body);
+    expect(on_close).toHaveBeenCalledOnce();
+  });
+
   it("opens from anywhere at the event's point", () => {
     render(<ContextMenus />);
 
