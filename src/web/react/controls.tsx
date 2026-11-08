@@ -1,6 +1,6 @@
 // React controls drawn like the page's own: segmented choices, switches, search fields, selects, and date, colour and tree pickers.
 
-import { createElement, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { createElement, useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { in_tree_order, path_names, type TreeItem } from "../tree.ts";
 
 // ── Choices ──────────────────────────────────────────────────────────────────
@@ -344,5 +344,163 @@ export function TreeSelect<Item extends TreeItem>({ label, items, name_of, value
         </option>
       ))}
     </select>
+  );
+}
+
+interface TreePickerProps<Item extends TreeItem> {
+  label: string;
+  items: Item[];
+  name_of: (item: Item) => string;
+  // The chosen item's id, or "" for none.
+  value: string;
+  // Shown in the empty field while nothing is chosen, such as "Choose a task…".
+  placeholder: string;
+  // Shown greyed and passed over, keeping their children in place.
+  disabled_ids?: readonly string[];
+  auto_focus?: boolean;
+  on_change: (id: string) => void;
+}
+
+interface TreePickerRow<Item> {
+  item: Item;
+  depth: number;
+  // False for a parent shown only to place a match under it.
+  is_match: boolean;
+}
+
+// The items whose names hold the search, in tree order with the parents above them.
+function tree_picker_rows<Item extends TreeItem>(items: Item[], name_of: (item: Item) => string, search: string): TreePickerRow<Item>[] {
+  const words = search.trim().toLocaleLowerCase();
+  const item_by_id = new Map(items.map((item) => [item.id, item]));
+  const matched_ids = new Set(items.filter((item) => name_of(item).toLocaleLowerCase().includes(words)).map((item) => item.id));
+  const shown_ids = new Set(matched_ids);
+
+  for (const id of matched_ids) {
+    let parent_id = item_by_id.get(id)!.parent_id;
+    while (parent_id !== null && item_by_id.has(parent_id) && !shown_ids.has(parent_id)) {
+      shown_ids.add(parent_id);
+      parent_id = item_by_id.get(parent_id)!.parent_id;
+    }
+  }
+
+  return in_tree_order(items)
+    .filter((item) => shown_ids.has(item.id))
+    .map((item) => ({ item, depth: path_names(item, items, name_of).length - 1, is_match: matched_ids.has(item.id) }));
+}
+
+// A search field over a tree: typing narrows the indented list to matching names under their parents, and arrows and Enter pick one.
+export function TreePicker<Item extends TreeItem>({ label, items, name_of, value, placeholder, disabled_ids = [], auto_focus, on_change }: TreePickerProps<Item>) {
+  const list_id = useId();
+  const anchor_name = `--tree-picker-${list_id.replace(/[^\w-]/g, "")}`;
+  const field = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // The text typed since the field took focus, or null while the list is closed.
+  const [search, set_search] = useState<string | null>(null);
+  const [active_id, set_active_id] = useState("");
+
+  const path_of = (item: Item) => path_names(item, items, name_of).join(" › ");
+  const chosen = items.find((item) => item.id === value);
+  const is_open = search !== null;
+  const rows = is_open ? tree_picker_rows(items, name_of, search) : [];
+  const can_pick = (row: TreePickerRow<Item>) => row.is_match && !disabled_ids.includes(row.item.id);
+  const pickable = rows.filter(can_pick);
+  const active = pickable.find((row) => row.item.id === active_id) ?? pickable.find((row) => row.item.id === value) ?? pickable[0];
+  const option_id = (item: Item) => `${list_id}-${item.id}`;
+
+  // The list hangs below the field in the top layer, so a dialog around it does not cut it off.
+  useLayoutEffect(() => {
+    if (!is_open || !field.current || !list.current) return;
+    field.current.style.setProperty("anchor-name", anchor_name);
+    list.current.style.setProperty("position-anchor", anchor_name);
+    list.current.showPopover();
+  }, [is_open]);
+
+  useEffect(() => {
+    if (active) document.getElementById(option_id(active.item))?.scrollIntoView?.({ block: "nearest" });
+  }, [active?.item.id]);
+
+  function open(): void {
+    set_search("");
+    set_active_id("");
+  }
+
+  function pick(item: Item): void {
+    set_search(null);
+    on_change(item.id);
+  }
+
+  function key_down(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!is_open) return open();
+      if (pickable.length === 0) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const index = active ? pickable.indexOf(active) : -1;
+      set_active_id(pickable[(index + step + pickable.length) % pickable.length]!.item.id);
+      return;
+    }
+    if (event.key === "Enter" && is_open) {
+      event.preventDefault();
+      if (active) pick(active.item);
+      return;
+    }
+    if (event.key === "Escape" && is_open) {
+      event.preventDefault();
+      event.stopPropagation();
+      set_search(null);
+    }
+  }
+
+  // The closed field shows the chosen path; the open one searches, with that path left as its placeholder.
+  return (
+    <div className="tree-picker">
+      <input
+        ref={field}
+        type="text"
+        role="combobox"
+        className="tree-picker-field"
+        aria-label={label}
+        aria-autocomplete="list"
+        aria-expanded={is_open}
+        aria-controls={list_id}
+        aria-activedescendant={active ? option_id(active.item) : undefined}
+        value={search ?? (chosen ? path_of(chosen) : "")}
+        placeholder={chosen ? path_of(chosen) : placeholder}
+        title={chosen ? path_of(chosen) : undefined}
+        autoFocus={auto_focus}
+        autoComplete="off"
+        onFocus={open}
+        onClick={() => !is_open && open()}
+        onBlur={() => set_search(null)}
+        onChange={(event) => {
+          set_search(event.currentTarget.value);
+          set_active_id("");
+        }}
+        onKeyDown={key_down}
+      />
+      {is_open && (
+        <ul ref={list} id={list_id} popover="manual" role="listbox" aria-label={label} className="menu tree-picker-list">
+          {rows.length === 0 && <li className="tree-picker-empty">No matches</li>}
+          {rows.map((row) => (
+            <li
+              key={row.item.id}
+              id={option_id(row.item)}
+              role="option"
+              className={row.item.id === value ? "menu-item chosen" : "menu-item"}
+              aria-selected={row === active}
+              aria-disabled={can_pick(row) ? undefined : true}
+              title={path_of(row.item)}
+              style={{ "--depth": row.depth } as CSSProperties}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                if (can_pick(row)) pick(row.item);
+              }}
+            >
+              {name_of(row.item)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
