@@ -72,4 +72,14 @@ describe("use_reveal", () => {
     act(() => screen.getByRole("button", { name: "Back to the top" }).click());
     expect(screen.getAllByRole("listitem")).toHaveLength(10);
   });
+
+  it("starts from the count it is given, such as the one shown before the page was left", () => {
+    function Returning() {
+      const { shown_count } = use_reveal(10, { initial_count: 20 });
+      return <ul>{items.slice(0, shown_count).map((item) => <li key={item}>{item}</li>)}</ul>;
+    }
+    render(<Returning />);
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(20);
+  });
 });

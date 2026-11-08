@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface RevealOptions {
   // How far before the end comes into view the next page is added, as a CSS margin.
   root_margin?: string;
+  // How many to show at first, such as the count shown before the page was left.
+  initial_count?: number;
 }
 
 export interface Reveal {
@@ -18,7 +20,7 @@ export interface Reveal {
 
 export function use_reveal(page_size: number, options: RevealOptions = {}): Reveal {
   const root_margin = options.root_margin ?? "200px";
-  const [shown_count, set_shown_count] = useState(page_size);
+  const [shown_count, set_shown_count] = useState(() => Math.max(page_size, options.initial_count ?? page_size));
   const observer = useRef<IntersectionObserver | null>(null);
   const marker = useRef<Element | null>(null);
 
