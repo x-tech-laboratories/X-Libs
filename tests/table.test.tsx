@@ -131,6 +131,19 @@ describe("table headers", () => {
     expect(on_column_widths_change).toHaveBeenCalledWith({ size: 200 }, true);
   });
 
+  it("shows a column's header in its heading and keeps its label for readers, hover, menus and phone cards", () => {
+    const iconic: TableColumn<Task>[] = [columns[0]!, { ...columns[1]!, header: "#" }];
+    render(<DataTable columns={iconic} rows={tasks} on_hidden_columns_change={() => {}} />);
+
+    const heading = screen.getAllByRole("columnheader")[1]!;
+    expect(heading.querySelector("[aria-hidden]")!.textContent).toBe("#");
+    expect(heading.querySelector(".column-header")!.getAttribute("title")).toBe("Size");
+    expect(heading.querySelector(".visually-hidden")!.textContent).toBe("Size");
+    expect(screen.getAllByRole("cell")[1]!.dataset.label).toBe("Size");
+    fireEvent.click(screen.getByRole("button", { name: "Show or hide columns" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Size" })).toBeTruthy();
+  });
+
   it("hides the hidden columns and offers every column in the Columns menu", () => {
     const on_hidden_columns_change = vi.fn();
     render(<DataTable columns={columns} rows={tasks} hidden_columns={["Note"]} on_hidden_columns_change={on_hidden_columns_change} />);

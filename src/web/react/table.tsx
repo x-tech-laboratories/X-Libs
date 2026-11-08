@@ -18,6 +18,8 @@ export type { DropPlacement } from "../tree.ts";
 
 export interface TableColumn<Row> {
   label: string;
+  // What the heading shows in place of the label, such as an icon; the label still names the column to screen readers, menus, filters and phone cards, and shows on hover.
+  header?: ReactNode;
   // A name that stays put when the label changes, used by the sorting, order, widths and hidden columns; the label when not given.
   id?: string;
   cell: (row: Row) => ReactNode;
@@ -126,6 +128,17 @@ interface DataTableProps<Row> {
   // Whether a row's middle drops inside it, splitting rows into quarters, or only beside it, splitting them into halves.
   allow_inside_drop?: boolean;
   on_row_drop?: (row: Row, placement: DropPlacement, event: DragEvent<HTMLTableRowElement>) => void;
+}
+
+// A column's heading: its header with the label kept for screen readers and hover, or the label alone.
+function heading<Row>(column: TableColumn<Row>): ReactNode {
+  if (column.header === undefined) return column.label;
+  return (
+    <span className="column-header" title={column.label}>
+      <span aria-hidden="true">{column.header}</span>
+      <span className="visually-hidden">{column.label}</span>
+    </span>
+  );
 }
 
 const is_empty = (value: SortValue): boolean => value === null || value === undefined || value === "";
@@ -530,11 +543,11 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
             onClick={(event) => sort_by(id, event.shiftKey)}
             onKeyDown={(event) => move_by_key(column, event)}
           >
-            {column.label}{marker}
+            {heading(column)}{marker}
           </button>
         ) : movable ? (
-          <span tabIndex={0} onKeyDown={(event) => move_by_key(column, event)}>{column.label}</span>
-        ) : column.label}
+          <span tabIndex={0} onKeyDown={(event) => move_by_key(column, event)}>{heading(column)}</span>
+        ) : heading(column)}
         {column.filter !== undefined && (
           <button
             type="button"
