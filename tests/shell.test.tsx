@@ -28,6 +28,13 @@ describe("shell sidebar", () => {
     expect(screen.getByRole("link", { name: "Skip to content" })).toBeTruthy();
   });
 
+  it("draws the brand's icon before its name", () => {
+    render(<Shell brand="X-Test" brand_icon="icon.svg" sections={sections} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    const brand = screen.getByRole("link", { name: "X-Test" });
+    expect(brand.firstElementChild?.getAttribute("src")).toBe("icon.svg");
+  });
+
   it("shows the app's own sidebar in place of the sections", () => {
     render(<Shell brand="X-Test" sections={sections} sidebar={<button>My Day</button>} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
 
