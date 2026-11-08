@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
 
-import { Badge, StatusPill } from "../src/web/react/badges.tsx";
+import { Badge, Chip, StatusPill } from "../src/web/react/badges.tsx";
 
 test("a badge shows its text with its tone as a class", () => {
   render(<Badge tone="good">Healthy</Badge>);
@@ -17,4 +17,15 @@ test("a status pill shows its dot's tone, its text and its action", () => {
   expect(pill.querySelector(".status-dot")!.className).toBe("status-dot tone-warn busy");
   expect(screen.getByText("Paused")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+});
+
+test("a chip in its item's colour is tinted with it and can be removed", () => {
+  const remove = vi.fn();
+  render(<Chip color="#ff0000" dashed on_remove={remove} remove_label="Remove tag Home">Home</Chip>);
+
+  const chip = screen.getByText("Home");
+  expect(chip.className).toBe("chip has-color dashed");
+  expect(chip.style.getPropertyValue("--item-color")).toBe("#ff0000");
+  fireEvent.click(screen.getByRole("button", { name: "Remove tag Home" }));
+  expect(remove).toHaveBeenCalledOnce();
 });

@@ -143,6 +143,13 @@ export function Shell({
     document.body.classList.toggle("contained", contained);
   }, [logged_out, menu_open, status_bar !== undefined, contained]);
 
+  // The width also reaches the top bar through the body, so the brand above the sidebar lines up with it.
+  useEffect(() => {
+    if (width === undefined) return;
+    document.body.style.setProperty("--sidebar-width", `${width}px`);
+    return () => void document.body.style.removeProperty("--sidebar-width");
+  }, [width]);
+
   useEffect(() => {
     if (menu_open) sidebar.current?.querySelector<HTMLElement>("a[href], button:not(:disabled), input, select, textarea, [tabindex='0']")?.focus();
     if (!menu_open) return;
@@ -183,7 +190,7 @@ export function Shell({
               {section.label}
             </a>
           ))}
-          {sidebar_foot}
+          {sidebar_foot !== undefined && sidebar_foot !== null && <div className="sidebar-foot">{sidebar_foot}</div>}
           {sidebar_width && width !== undefined && (
             <ResizeHandle
               side="left"

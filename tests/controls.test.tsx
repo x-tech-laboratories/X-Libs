@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ColorPicker, CommitInput, DateTimeField, PathInput, SearchBox, Select, TreeSelect } from "../src/web/react/controls.tsx";
+import { ColorPicker, CommitInput, DateTimeField, PathInput, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
 import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
@@ -237,6 +238,76 @@ describe("TreeSelect", () => {
 
     fireEvent.change(select, { target: { value: "" } });
     expect(on_change).toHaveBeenCalledWith("");
+  });
+});
+
+describe("TreePicker", () => {
+  interface Task extends TreeItem { name: string }
+  const tasks: Task[] = [
+    { id: "h", parent_id: null, position: 2, name: "Home" },
+    { id: "p", parent_id: "h", position: 1, name: "Paint fence" },
+    { id: "c", parent_id: "w", position: 1, name: "Call clients" },
+    { id: "w", parent_id: null, position: 1, name: "Work" },
+    { id: "r", parent_id: "w", position: 2, name: "Write report" },
+  ];
+  const names = () => screen.queryAllByRole("option").map((option) => option.textContent);
+
+  test("shows the chosen path closed, and the whole tree indented once it takes focus", () => {
+    render(<TreePicker label="Task" items={tasks} name_of={(task) => task.name} value="c" placeholder="Choose a task…" on_change={vi.fn()} />);
+    const field = screen.getByRole<HTMLInputElement>("combobox", { name: "Task" });
+
+    expect(field.value).toBe("Work › Call clients");
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.focus(field);
+    expect(field.value).toBe("");
+    expect(field.placeholder).toBe("Work › Call clients");
+    expect(names()).toEqual(["Work", "Call clients", "Write report", "Home", "Paint fence"]);
+    expect(screen.getAllByRole("option").map((option) => option.style.getPropertyValue("--depth"))).toEqual(["0", "1", "1", "0", "1"]);
+    expect(screen.getByRole("option", { name: "Call clients" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("narrows to matching names under their parents, which cannot be picked", () => {
+    const on_change = vi.fn();
+    render(<TreePicker label="Task" items={tasks} name_of={(task) => task.name} value="" placeholder="Choose a task…" on_change={on_change} />);
+    const field = screen.getByRole("combobox", { name: "Task" });
+
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "REPORT" } });
+    expect(names()).toEqual(["Work", "Write report"]);
+    expect(screen.getByRole("option", { name: "Work" }).getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.mouseDown(screen.getByRole("option", { name: "Work" }));
+    expect(on_change).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+  });
+
+  test("walks past disabled tasks with the arrows, picks with Enter and closes on Escape", () => {
+    const on_change = vi.fn();
+    const on_key_down = vi.fn();
+    render(
+      <div onKeyDown={on_key_down}>
+        <TreePicker label="Task" items={tasks} name_of={(task) => task.name} value="" placeholder="Choose a task…" disabled_ids={["w", "c"]} on_change={on_change} />
+      </div>
+    );
+    const field = screen.getByRole("combobox", { name: "Task" });
+
+    fireEvent.focus(field);
+    expect(screen.getByRole("option", { name: "Write report" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: "Paint fence" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(on_change).toHaveBeenCalledWith("p");
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(on_key_down.mock.calls.map(([event]) => event.key)).not.toContain("Escape");
   });
 });
 

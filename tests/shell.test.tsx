@@ -63,6 +63,7 @@ describe("shell sidebar", () => {
     expect(layout_width()).toBe("240px");
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(layout_width()).toBe("256px");
+    expect(document.body.style.getPropertyValue("--sidebar-width")).toBe("256px");
     expect(localStorage.getItem("x-test-sidebar")).toBe("[256]");
 
     fireEvent.doubleClick(handle);
@@ -115,9 +116,10 @@ describe("shell top bar", () => {
   });
 
   it("holds the app's sidebar in a content box and draws a status bar at the foot", () => {
-    render(<Shell brand="X-Test" sidebar={<p>Not a link</p>} status_bar={<span>3 picked</span>} theme={theme_choice("x-test-theme")}>Page</Shell>);
+    render(<Shell brand="X-Test" sidebar={<p>Not a link</p>} sidebar_foot={<p>Settings</p>} status_bar={<span>3 picked</span>} theme={theme_choice("x-test-theme")}>Page</Shell>);
 
     expect(screen.getByText("Not a link").parentElement!.className).toBe("sidebar-content");
+    expect(screen.getByText("Settings").parentElement!.className).toBe("sidebar-foot");
     expect(screen.getByRole("contentinfo").className).toBe("status-bar");
     expect(screen.getByRole("contentinfo").textContent).toBe("3 picked");
     expect(document.body.classList.contains("has-status-bar")).toBe(true);

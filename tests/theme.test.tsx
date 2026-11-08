@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ThemeButton } from "../src/web/react/shell.tsx";
-import { theme_choice, type Theme } from "../src/web/theme.ts";
+import { follow_host_theme, theme_choice, type Theme } from "../src/web/theme.ts";
 
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
@@ -43,5 +43,21 @@ describe("theme choice", () => {
 
     expect(choice.get()).toBe("system");
     expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+});
+
+describe("host theme", () => {
+  afterEach(() => document.documentElement.style.removeProperty("--sidebar-bg"));
+
+  it("follows the host's colours when it hands them over", () => {
+    document.documentElement.style.setProperty("--sidebar-bg", "#101010");
+
+    expect(follow_host_theme()).toBe(true);
+    expect(document.documentElement.classList.contains("follows-host-theme")).toBe(true);
+  });
+
+  it("keeps its own colours outside a host", () => {
+    expect(follow_host_theme()).toBe(false);
+    expect(document.documentElement.classList.contains("follows-host-theme")).toBe(false);
   });
 });
