@@ -26,6 +26,12 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `server/backup_files`                    | `file_backup_store`: the `backups` store as files in a folder on disk.        |
+| `server/sign_in`, `server/login_page`    | `register_token_sign_in`: a server with one secret signs browsers in on its own login page, keeps them in by an HMAC-derived cookie, takes the secret as a bearer header, waits after a wrong try, and turns the rest away (401 in text or JSON under the API prefix, 303 to the login page elsewhere, with open paths); `register_sign_in_guard` is the turning-away alone, for an app with its own sessions. |
+| `server/events`                          | `EventStream`: server-sent events with a client id per page, a heartbeat, `announce_change(except_client_id)` so the page that made a change is not told, nameless or named events to all or chosen clients, and every stream ended with the app. |
+| `server/web_folder`                      | `register_web_folder`: the built page from a folder, tuned for the Nix store (no etag or date, hashed `/assets/` kept a year, the page fetched fresh), a warning, error or nothing when the folder is missing, and the page for unknown paths when it routes itself. |
+| `server/replies`                         | `register_error_replies`: errors and unknown paths answered in plain text or as `{ error }`; `register_lenient_json_body`: an empty body as no arguments and bad JSON as `BAD_JSON`, for the route to refuse in its own words; `send_text`. |
+| `server/config`                          | `read_server_config`: host, port, web folder and the app's options from flags, then the environment, then defaults, with usage text for `--help`, the secret from `<PREFIX>_TOKEN_FILE` or `<PREFIX>_TOKEN`, and no listening beyond this machine without one; `read_secret_file`. |
+| `server/cors`                            | `register_open_cors`: any origin may call the API, as a native or mobile shell does from a page of its own, with the client id header allowed. |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder, formatters (including `compact_count`, such as `"1.4M"`), hash router and theme choice, kept in this browser or the app's settings. |
 | `web/states`, `web/tables`, `web/menus`, `web/split` | `LoginNeeded`; sorting by several columns, trees and column order; menu items, placement and keys; pane sizing. |
 | `web/tree`                               | Rows with `parent_id` and `position`: nesting, subtrees, tree order, paths, and where a dropped or keyed row lands, its siblings ordered by position or, with `by_list_order`, as the list gives them. |
@@ -38,7 +44,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/reveal`                       | `use_reveal`: a long list shown a page at a time, the next page added as its end scrolls into view, starting from the count shown before the page was left if given. |
 | `web/react/media`                        | `Avatar`, a round picture or the name's first letter; `MediaTile` and `MediaGrid`: videos, albums or playlists as tiles in a grid or as rows, with text over the picture's corner such as a length, lines under the title, a faded look, and buttons in the corner. |
 | `web/react/menu_button`                  | `MenuButton`: a ⋮ button that opens a menu under itself, even inside a link, saying through `aria-expanded` whether it is open. |
-| `web/react/test_stubs`                   | Stands in for `showPopover`, `hidePopover`, `showModal` and `close`, which jsdom lacks; an app's widget tests import it for its side effects. |
+| `web/react/test_stubs`                   | Stands in for `showPopover`, `hidePopover`, `showModal`, `close`, `matchMedia` and `scrollTo`, which jsdom lacks; an app's widget tests import it for its side effects. |
 | `web/react/list_picker`                  | `pick_list_dialog`: adds one thing to any of the app's lists, such as a video to playlists, ticking the lists that hold it and making a new one. |
 | `web/react/controls`, `table`            | Segmented choices, button groups, switches, search boxes that hand on typing as it pauses, submit on Enter or a button, clear on Escape, can take a paste whole, take focus and follow a value cleared from outside, selects, `CommitInput`, `DateTimeField`, `ColorPicker`, `TreeSelect`; `DataTable` on TanStack Table, sorting by several columns, with columns to move, resize, hide and filter, tree rows, groups under headings, rows the app drags and styles, rows that come sorted from a database, rows worked by keyboard, rows that draw again only when they change, `virtual` rows drawn only where they show, a last column that fills the room left, group headings that hide when the filter empties them, and cards on phones; a pager. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
@@ -49,6 +55,32 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
 import { parse_duration } from "@x-tech-laboratories/x-libs/durations";
 ```
+
+## A web app's server
+
+The server modules are small Fastify pieces an app registers one by one, so each app keeps only what it needs.
+
+```ts
+const config = read_server_config({
+  program: "x-tasks-server", summary: "Serves X-Tasks as a web app.", env_prefix: "X_TASKS", default_port: 3918,
+  web_folder_default: join(import.meta.dirname, "../web"),
+  options: { database: { variable: "X_TASKS_DB", help: "the task database; it is made if missing", placeholder: "<file>", required: true } },
+});
+const app = fastify({ forceCloseConnections: true });
+register_lenient_json_body(app);
+register_error_replies(app);
+await register_token_sign_in(app, { secret: config.secret, title: "X-Tasks" });
+const changes = new EventStream();
+await app.register(async (api) => {
+  await register_open_cors(api);
+  changes.register(api, "/events");
+  api.post("/add", async (request) => { ...; changes.announce_change(changes.client_id_of(request)); });
+}, { prefix: "/api" });
+await register_web_folder(app, { folder: config.web_folder });
+```
+
+An app with its own sessions, such as one logging in by name and password, uses `register_sign_in_guard` with its
+own `is_signed_in`, `login_path: null` so its page loads and logs in itself, and `refusal: "json"`.
 
 ## The page's widgets
 

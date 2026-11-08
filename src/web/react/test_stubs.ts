@@ -21,3 +21,9 @@ HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
 const shown_popovers = document.createElement("style");
 shown_popovers.textContent = "[popover][data-shown] { display: block; }";
 document.head.append(shown_popovers);
+
+// Media queries all say no and scrolling does nothing, since jsdom lays nothing out.
+window.matchMedia ??= (query: string) =>
+  ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false }) as MediaQueryList;
+
+window.scrollTo = () => {};

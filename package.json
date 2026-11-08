@@ -1,7 +1,7 @@
 {
   "name": "@x-tech-laboratories/x-libs",
   "version": "0.9.0",
-  "description": "Code the X-apps share: agents and their long runs, passwords, durations, and the web page's helpers and widgets",
+  "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -27,12 +27,28 @@
     "prepack": "npm run build"
   },
   "peerDependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/cors": "^11.4.1",
+    "@fastify/formbody": "^9.0.1",
+    "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
     "fastify": "^5.12.7",
     "react": "^19",
     "react-dom": "^19"
   },
   "peerDependenciesMeta": {
+    "@fastify/cookie": {
+      "optional": true
+    },
+    "@fastify/cors": {
+      "optional": true
+    },
+    "@fastify/formbody": {
+      "optional": true
+    },
+    "@fastify/static": {
+      "optional": true
+    },
     "@fastify/websocket": {
       "optional": true
     },
@@ -47,6 +63,10 @@
     }
   },
   "devDependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/cors": "^11.4.1",
+    "@fastify/formbody": "^9.0.1",
+    "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
