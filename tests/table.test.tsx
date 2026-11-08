@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "../src/web/react/test_stubs.ts";
 
-import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DataTable, type Sorting, type TableColumn } from "../src/web/react/table.tsx";
@@ -225,6 +226,27 @@ describe("table rows from a sorted source", () => {
     fireEvent.click(screen.getByRole("button", { name: /Size/ }), { shiftKey: true });
 
     expect(on_sorting_change).toHaveBeenCalledWith([{ key: "disc", descending: false }, { key: "size", descending: false }]);
+  });
+});
+
+describe("table renders", () => {
+  // TanStack resets its page index whenever the sorted rows are rebuilt, which was every render, so each reset drew the table again.
+  it("settles after its parent draws it again", async () => {
+    let commits = 0;
+    const table = () => (
+      <Profiler id="table" onRender={() => commits++}>
+        <DataTable columns={columns} rows={tasks} sorting={{ key: "Title", descending: false }} on_sort={() => {}} />
+      </Profiler>
+    );
+    const wait = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const { rerender } = render(table());
+    await wait();
+    rerender(table());
+    await wait();
+    const settled = commits;
+    await wait();
+
+    expect(commits).toBe(settled);
   });
 });
 

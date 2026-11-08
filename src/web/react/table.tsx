@@ -319,6 +319,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     getExpandedRowModel: getExpandedRowModel(),
     getRowCanExpand: (row) => row.subRows.length > 0,
     manualSorting: manual,
+    // The table never pages, and the state above is rebuilt each render, so TanStack's reset would draw the table again forever.
+    autoResetPageIndex: false,
   });
 
   const shown_ids = table.getVisibleLeafColumns().map((column) => column.id).join("\n");
