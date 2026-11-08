@@ -29,4 +29,11 @@ if (typeof window !== "undefined") {
     ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false }) as MediaQueryList;
 
   window.scrollTo = () => {};
+
+  // Nothing is ever resized either, so an observer never reports.
+  window.ResizeObserver ??= class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
 }
