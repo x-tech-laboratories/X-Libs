@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "./dom_stubs.ts";
+import "../src/web/react/test_stubs.ts";
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -55,7 +55,7 @@ describe("media tile", () => {
     );
 
     const tile = screen.getByRole("listitem");
-    expect(tile.className).toBe("media-tile dimmed");
+    expect(tile.className).toBe("media-tile media-dimmed dimmed");
     expect(tile.querySelector(".media-lead")!.textContent).toBe("1");
     expect(tile.querySelector(".media-blank")).not.toBeNull();
     expect(screen.getByRole("list").className).toBe("media-grid media-rows");
@@ -83,6 +83,24 @@ describe("menu button", () => {
     expect(outer_click).not.toHaveBeenCalled();
     expect(run).toHaveBeenCalled();
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("says whether its menu is open, also once the menu closes by Escape", () => {
+    render(
+      <>
+        <MenuButton label="Options" items={[{ label: "Copy link", run: () => {} }]} />
+        <ContextMenus />
+      </>,
+    );
+    const button = screen.getByRole("button", { name: "Options" });
+
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

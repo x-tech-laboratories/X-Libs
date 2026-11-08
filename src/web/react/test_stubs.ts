@@ -1,4 +1,4 @@
-// Stands in for the native popover and modal dialog, which jsdom does not draw.
+// Stands in for the native popover and modal dialog, which jsdom does not draw; a test imports it for its side effects.
 
 HTMLElement.prototype.showPopover = function (this: HTMLElement) {
   this.setAttribute("data-shown", "");

@@ -2,9 +2,35 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { moved, RowActions, Section, SelectionBar, SettingRow, SettingsGroup } from "../src/web/react/layout.tsx";
+import { moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup } from "../src/web/react/layout.tsx";
 
 afterEach(cleanup);
+
+describe("page heading", () => {
+  test("shows the title as the page's heading with its subtitle, banner, icon, actions and what follows", () => {
+    render(
+      <PageHeading title="Channels" subtitle="12 left" icon={<span>Icon</span>} banner="https://example.com/banner.png" actions={<button>Add</button>}>
+        <p>Description</p>
+      </PageHeading>,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeTruthy();
+    expect(screen.getByText("12 left").className).toBe("page-subtitle muted");
+    expect(screen.getByRole("banner").className).toBe("page-head");
+    expect(screen.getByRole("banner").querySelector("img.page-banner")?.getAttribute("src")).toBe("https://example.com/banner.png");
+    expect(screen.getByRole("button", { name: "Add" }).closest(".head-actions")).toBeTruthy();
+    expect(screen.getByText("Icon").closest(".page-identity")).toBeTruthy();
+    expect(screen.getByText("Description")).toBeTruthy();
+  });
+
+  test("takes a banner of the app's own and leaves out what it is not given", () => {
+    render(<PageHeading title="Settings" banner={<div>Own banner</div>} class_name="settings-head" />);
+
+    expect(screen.getByText("Own banner")).toBeTruthy();
+    expect(screen.getByRole("banner").className).toBe("page-head settings-head");
+    expect(screen.getByRole("banner").querySelector(".head-actions, .page-subtitle, img")).toBeNull();
+  });
+});
 
 describe("panels and settings", () => {
   test("a section takes a class and a context menu", () => {

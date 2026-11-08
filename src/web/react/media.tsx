@@ -42,7 +42,7 @@ interface MediaTileProps {
 export function MediaTile({ title, href, image, corner, lines = [], dimmed = false, actions, lead }: MediaTileProps) {
   const shown_lines = lines.filter((line) => line !== null && line !== undefined && line !== false && line !== "");
   return (
-    <div role="listitem" className={dimmed ? "media-tile dimmed" : "media-tile"}>
+    <div role="listitem" className={dimmed ? "media-tile media-dimmed dimmed" : "media-tile"}>
       {lead !== undefined && <span className="media-lead">{lead}</span>}
       <a className="media-picture" href={href} tabIndex={-1} aria-hidden="true">
         {image ? <img src={image} alt="" loading="lazy" /> : <span className="media-blank" />}

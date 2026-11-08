@@ -1,6 +1,6 @@
 // React controls drawn like the page's own: segmented choices, switches, search fields, selects, and date, colour and tree pickers.
 
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type InputHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { in_tree_order, path_names, type TreeItem } from "../tree.ts";
 
 // ── Choices ──────────────────────────────────────────────────────────────────
@@ -67,26 +67,88 @@ export function Switch({ label, checked, on_change, disabled = false }: SwitchPr
 interface SearchBoxProps {
   label: string;
   value: string;
-  on_input: (value: string) => void;
+  // Hands on the text as it is typed, once typing pauses, for a list filtered live.
+  on_input?: (value: string) => void;
+  // Hands on the text when Enter is pressed or the button is clicked, and "" once a submitted search is cleared.
+  on_submit?: (value: string) => void;
+  // Takes a whole paste instead of the field, such as a link that opens straight away; true means it did.
+  on_paste?: (text: string) => boolean;
+  // A button beside the field that submits it, such as "Search".
+  submit_label?: string;
+  // Empties the field once submitted, such as a search that leads to another page.
+  clear_on_submit?: boolean;
   // Takes focus when it first shows, such as on a page where searching comes first.
   auto_focus?: boolean;
 }
 
-// A search field that hands on what was typed once typing pauses; the field keeps its own text, so a redraw never wipes typing, and shows a value changed from outside, such as one cleared.
-export function SearchBox({ label, value, on_input, auto_focus = false }: SearchBoxProps) {
+// A search field that hands on what was typed once typing pauses and submits it on Enter; Escape clears it; the field keeps its own text, so a redraw never wipes typing, and shows a value changed from outside, such as one cleared.
+export function SearchBox({ label, value, on_input, on_submit, on_paste, submit_label, clear_on_submit = false, auto_focus = false }: SearchBoxProps) {
   const field = useRef<HTMLInputElement>(null);
   const timer = useRef<number | undefined>(undefined);
   const handed_on = useRef(value);
+  const submitted = useRef(value);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   useEffect(() => {
     if (value === handed_on.current || !field.current) return;
     clearTimeout(timer.current);
     handed_on.current = value;
+    submitted.current = value;
     field.current.value = value;
   }, [value]);
 
-  return (
+  function hand_on(text: string): void {
+    clearTimeout(timer.current);
+    if (text === handed_on.current) return;
+    handed_on.current = text;
+    on_input?.(text);
+  }
+
+  function submit(): void {
+    const text = field.current?.value ?? "";
+    hand_on(text);
+    submitted.current = clear_on_submit ? "" : text;
+    on_submit?.(text);
+    if (clear_on_submit && field.current) {
+      field.current.value = "";
+      handed_on.current = "";
+    }
+  }
+
+  function clear(): void {
+    if (!field.current) return;
+    field.current.value = "";
+    hand_on("");
+    if (submitted.current !== "") {
+      submitted.current = "";
+      on_submit?.("");
+    }
+  }
+
+  function typed(event: ChangeEvent<HTMLInputElement>): void {
+    clearTimeout(timer.current);
+    const text = event.currentTarget.value;
+    // An emptied field goes straight back to everything, taking back what was submitted.
+    if (text === "") return clear();
+    if (!on_input) return;
+    timer.current = window.setTimeout(() => hand_on(text), 200);
+  }
+
+  function keyed(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submit();
+    } else if (event.key === "Escape" && event.currentTarget.value !== "") {
+      event.preventDefault();
+      clear();
+    }
+  }
+
+  function pasted(event: ClipboardEvent<HTMLInputElement>): void {
+    if (on_paste?.(event.clipboardData.getData("text"))) event.preventDefault();
+  }
+
+  const input = (
     <input
       ref={field}
       type="search"
@@ -95,15 +157,17 @@ export function SearchBox({ label, value, on_input, auto_focus = false }: Search
       aria-label={label}
       defaultValue={value}
       autoFocus={auto_focus}
-      onChange={(event) => {
-        clearTimeout(timer.current);
-        const text = event.currentTarget.value;
-        timer.current = window.setTimeout(() => {
-          handed_on.current = text;
-          on_input(text);
-        }, 200);
-      }}
+      onChange={typed}
+      onKeyDown={keyed}
+      onPaste={on_paste && pasted}
     />
+  );
+  if (!submit_label) return input;
+  return (
+    <form className="search-box" role="search" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      {input}
+      <button type="submit" className="accent solid">{submit_label}</button>
+    </form>
   );
 }
 

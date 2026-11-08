@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "./dom_stubs.ts";
+import "../src/web/react/test_stubs.ts";
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";

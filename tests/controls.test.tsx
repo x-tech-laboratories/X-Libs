@@ -45,6 +45,70 @@ describe("SearchBox", () => {
     expect(on_input).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
+
+  test("submits on Enter without waiting, and clears on Escape, taking a submitted search back", () => {
+    vi.useFakeTimers();
+    const on_input = vi.fn();
+    const on_submit = vi.fn();
+    render(<SearchBox label="Search" value="" on_input={on_input} on_submit={on_submit} />);
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search" });
+
+    fireEvent.change(field, { target: { value: "milk" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(on_input).toHaveBeenCalledWith("milk");
+    expect(on_submit).toHaveBeenCalledWith("milk");
+
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(field.value).toBe("");
+    expect(on_input).toHaveBeenLastCalledWith("");
+    expect(on_submit).toHaveBeenLastCalledWith("");
+    expect(on_submit).toHaveBeenCalledTimes(2);
+
+    fireEvent.change(field, { target: { value: "tea" } });
+    fireEvent.change(field, { target: { value: "" } });
+    vi.advanceTimersByTime(200);
+    expect(on_submit).toHaveBeenCalledTimes(2);
+    expect(on_input).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  test("with only on_submit, typing hands nothing on until Enter, and an emptied draft submits nothing", () => {
+    vi.useFakeTimers();
+    const on_submit = vi.fn();
+    render(<SearchBox label="Search" value="" on_submit={on_submit} />);
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search" });
+
+    fireEvent.change(field, { target: { value: "milk" } });
+    vi.advanceTimersByTime(500);
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(on_submit).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: "tea" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(on_submit).toHaveBeenCalledWith("tea");
+    expect(on_submit).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  test("shows a submit button as a search form, empties itself after submitting, and lets a paste be taken whole", () => {
+    const on_submit = vi.fn();
+    const on_paste = vi.fn((text: string) => text.startsWith("https://"));
+    render(<SearchBox label="Search" value="" on_submit={on_submit} on_paste={on_paste} submit_label="Search" clear_on_submit />);
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search" });
+
+    expect(screen.getByRole("search")).toBeTruthy();
+    fireEvent.change(field, { target: { value: "milk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(on_submit).toHaveBeenCalledWith("milk");
+    expect(field.value).toBe("");
+
+    fireEvent.paste(field, { clipboardData: { getData: () => "https://example.com/v" } });
+    expect(on_paste).toHaveBeenCalledWith("https://example.com/v");
+    expect(field.value).toBe("");
+
+    fireEvent.change(field, { target: { value: "" } });
+    expect(on_submit).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ============================================================================

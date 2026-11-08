@@ -1,9 +1,46 @@
-// The pieces a page is laid out with: panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings rows and list row buttons.
+// The pieces a page is laid out with: the page heading, panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings rows and list row buttons.
 
 import { Fragment, type MouseEvent, type ReactNode } from "react";
 import type { Tone } from "./badges.tsx";
 
 export { moved } from "../tables.ts";
+
+// ── Heading ──────────────────────────────────────────────────────────────────
+
+interface PageHeadingProps {
+  title: ReactNode;
+  // A muted line under the title, such as a count or a date.
+  subtitle?: ReactNode;
+  // A picture before the title, such as a channel's avatar.
+  icon?: ReactNode;
+  // A wide picture above the title, as a URL or an element of the app's own.
+  banner?: string | ReactNode;
+  // The page's buttons, on the title's right.
+  actions?: ReactNode;
+  class_name?: string;
+  // What follows the title, such as a description or the page's tabs.
+  children?: ReactNode;
+}
+
+// A page's heading: an optional banner, the title with its icon and subtitle, and the page's buttons.
+export function PageHeading({ title, subtitle, icon, banner, actions, class_name, children }: PageHeadingProps) {
+  return (
+    <header className={class_name ? `page-head ${class_name}` : "page-head"}>
+      {typeof banner === "string" ? <img className="page-banner" src={banner} alt="" loading="lazy" /> : banner}
+      <div className="page-title spread">
+        <div className="page-identity">
+          {icon}
+          <div>
+            <h1>{title}</h1>
+            {subtitle && <p className="page-subtitle muted">{subtitle}</p>}
+          </div>
+        </div>
+        {actions && <div className="head-actions">{actions}</div>}
+      </div>
+      {children}
+    </header>
+  );
+}
 
 // ── Panels ───────────────────────────────────────────────────────────────────
 

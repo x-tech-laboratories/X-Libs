@@ -1,6 +1,6 @@
 // A button that opens a menu under itself, such as the ⋮ on a card; the Shell draws the menu.
 
-import type { MouseEvent, ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { open_context_menu, type MenuItem } from "./menus.tsx";
 
 interface MenuButtonProps {
@@ -13,16 +13,19 @@ interface MenuButtonProps {
 }
 
 export function MenuButton({ label, items, glyph = "⋮", class_name }: MenuButtonProps) {
-  function open(event: MouseEvent<HTMLButtonElement>): void {
+  const [open, set_open] = useState(false);
+
+  function open_menu(event: MouseEvent<HTMLButtonElement>): void {
     // The button may sit inside a link, such as a whole card that opens its video.
     event.preventDefault();
     event.stopPropagation();
     const box = event.currentTarget.getBoundingClientRect();
-    open_context_menu({ clientX: box.left, clientY: box.bottom, preventDefault: () => {} }, typeof items === "function" ? items() : items);
+    set_open(true);
+    open_context_menu({ clientX: box.left, clientY: box.bottom, preventDefault: () => {} }, typeof items === "function" ? items() : items, () => set_open(false));
   }
 
   return (
-    <button type="button" className={class_name ? `icon menu-trigger ${class_name}` : "icon menu-trigger"} aria-label={label} title={label} aria-haspopup="menu" onClick={open}>
+    <button type="button" className={class_name ? `icon menu-trigger ${class_name}` : "icon menu-trigger"} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={open_menu}>
       {glyph}
     </button>
   );

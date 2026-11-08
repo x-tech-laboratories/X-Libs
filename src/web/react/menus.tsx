@@ -202,6 +202,7 @@ interface OpenMenu {
   x: number;
   y: number;
   items: MenuItem[];
+  on_close?: () => void;
 }
 
 let open_menu: OpenMenu | null = null;
@@ -209,14 +210,16 @@ let next_menu_id = 1;
 const menu_listeners = new Set<(menu: OpenMenu | null) => void>();
 
 function publish_menu(menu: OpenMenu | null): void {
+  const before = open_menu;
   open_menu = menu;
   for (const listener of menu_listeners) listener(open_menu);
+  before?.on_close?.();
 }
 
-// Opens a menu where the event happened, such as a right-click, replacing any menu already open.
-export function open_context_menu(event: { clientX: number; clientY: number; preventDefault(): void }, items: MenuItem[]): void {
+// Opens a menu where the event happened, such as a right-click, replacing any menu already open; on_close hears when it closes for any reason.
+export function open_context_menu(event: { clientX: number; clientY: number; preventDefault(): void }, items: MenuItem[], on_close?: () => void): void {
   event.preventDefault();
-  publish_menu({ id: next_menu_id++, x: event.clientX, y: event.clientY, items });
+  publish_menu({ id: next_menu_id++, x: event.clientX, y: event.clientY, items, on_close });
 }
 
 // Where menus opened from anywhere are drawn; the Shell holds one.
