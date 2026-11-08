@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Code the X-apps share: agents and their long runs, passwords, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
