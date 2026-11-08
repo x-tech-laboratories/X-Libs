@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup } from "../src/web/react/layout.tsx";
+import { moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup, SettingsPage } from "../src/web/react/layout.tsx";
 
 afterEach(cleanup);
 
@@ -49,6 +49,32 @@ describe("panels and settings", () => {
 
     expect(screen.getByRole("heading").innerHTML).toBe("<em>Views</em>");
     expect(screen.getByText("Order").closest(".setting-row")!.className).toBe("setting-row list-row");
+  });
+});
+
+describe("settings page", () => {
+  const categories = [
+    { heading: "General", sections: [{ id: "views", heading: "Views", content: <p>Views body</p> }] },
+    { heading: "Data", sections: [{ id: "backups", heading: "Backups", hint: "Kept nightly", content: <p>Backups body</p> }] },
+  ];
+
+  test("lists every section in an outline under its category, marking the first as the one being read", () => {
+    render(<SettingsPage categories={categories} />);
+
+    const outline = screen.getByRole("navigation", { name: "Settings sections" });
+    expect([...outline.querySelectorAll("a")].map((link) => link.textContent)).toEqual(["Views", "Backups"]);
+    expect(screen.getByRole("link", { name: "Views" }).getAttribute("aria-current")).toBe("location");
+    expect(screen.getByRole("heading", { level: 2, name: "Data" }).className).toBe("settings-category-heading");
+    expect(screen.getByText("Backups body").closest(".settings-section")!.id).toBe("settings-backups");
+  });
+
+  test("marks the section clicked in the outline", () => {
+    render(<SettingsPage categories={categories} />);
+
+    fireEvent.click(screen.getByRole("link", { name: "Backups" }));
+
+    expect(screen.getByRole("link", { name: "Backups" }).getAttribute("aria-current")).toBe("location");
+    expect(screen.getByRole("link", { name: "Views" }).getAttribute("aria-current")).toBeNull();
   });
 });
 

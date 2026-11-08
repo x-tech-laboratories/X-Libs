@@ -67,3 +67,10 @@ export function theme_choice(where: string | ThemeStorage): ThemeChoice {
 export function next_theme(theme: Theme): Theme {
   return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
 }
+
+// Inside a host that hands over its own colours as --sidebar-* variables, such as the Linux sidebar, the page takes them; says whether it did.
+export function follow_host_theme(): boolean {
+  const is_hosted = getComputedStyle(document.documentElement).getPropertyValue("--sidebar-bg").trim() !== "";
+  document.documentElement.classList.toggle("follows-host-theme", is_hosted);
+  return is_hosted;
+}
