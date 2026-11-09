@@ -17,7 +17,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - From X-Music: facet pane, entity merge grid, outcome log, Cover, and the page-view tabs clipped under the header on first open.
 - From CODEX: Electron autostart, tray and sidecar; reducer/effects store; NumberField; caption heading; the data-empty pattern; force_graph wrapper; StepLog; a scrollIntoView stub; adopt use_shortcuts; a yes/no-with-note dialog.
 - From X-Stream: metadata cache with TTL, refresher, image-to-data-URI, parseViewCount and parseRelativeAge, loading overlay, sidebar entity list, threaded comments.
-- From X-Nix: forge webhook verification, Wake-on-LAN magic packets, EventsList, a state-to-tone badge.
+- From X-Nix: EventsList, a state-to-tone badge, the jobs table and job page.
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
 
 ## Unrelated, for the owner
