@@ -29,6 +29,20 @@ describe("the poller", () => {
     expect(busy.cycles.length).toBe(13);
   });
 
+  it("cycles an idle item by its own idle interval and a busy one by its own poll interval, when it has them", async () => {
+    vi.useFakeTimers();
+    const idle = { ...watched("idle"), idle_interval: () => 10 };
+    const busy = { ...watched("busy", true), poll_interval: () => 1 };
+    const poller = new CyclePoller(() => [idle, busy]);
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    poller.stop();
+
+    expect(idle.cycles.length).toBe(4);
+    expect(busy.cycles.length).toBe(31);
+  });
+
   it("refreshes with a forced cycle and polls soon after an action", async () => {
     vi.useFakeTimers();
     const item = watched("item");
