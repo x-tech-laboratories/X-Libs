@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 
+import { BoundedBuffer, kill_grace_in_milliseconds, signal_group, stderr_limit_in_bytes, stdout_limit_in_bytes } from "./programs.ts";
 import type { RunResult } from "./protocol.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -28,54 +29,12 @@ export interface CommandStream {
   stop: () => void;
 }
 
-// Give a stopped command this long to exit before it is killed outright.
-export const kill_grace_in_milliseconds = 5000;
-
 // A run keeps at most this much stdout, since it travels whole in one message.
-export const run_stdout_limit_in_bytes = 32 * 1024 * 1024;
+export const run_stdout_limit_in_bytes = stdout_limit_in_bytes;
 
-// Stderr is only ever an error message, so this much is plenty.
-export const stderr_limit_in_bytes = 64 * 1024;
+export { kill_grace_in_milliseconds, signal_group, stderr_limit_in_bytes };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-// Sends the signal to a process group, which may have ended already.
-export function signal_group(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (pid === undefined) return;
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // The process group is already gone.
-  }
-}
-
-// Collects chunks up to a size, noting whether any were dropped.
-class BoundedBuffer {
-  private readonly chunks: Buffer[] = [];
-  private size = 0;
-  truncated = false;
-  private readonly limit: number;
-
-  constructor(limit: number) {
-    this.limit = limit;
-  }
-
-  add(chunk: Buffer): void {
-    const room = this.limit - this.size;
-    if (room <= 0) {
-      this.truncated = true;
-      return;
-    }
-    const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
-    if (kept !== chunk) this.truncated = true;
-    this.chunks.push(kept);
-    this.size += kept.length;
-  }
-
-  text(): string {
-    return Buffer.concat(this.chunks).toString("utf8").trim();
-  }
-}
 
 // Its own process group, so stopping it stops the command's children too.
 function spawn_shell(command: string, stdin: string | null | undefined) {
@@ -103,8 +62,8 @@ export function run_command(command: string, options: RunOptions): Promise<RunRe
       kill_timer = setTimeout(() => signal_group(child.pid, "SIGKILL"), kill_grace_in_milliseconds);
     }, options.timeout_in_seconds * 1000);
 
-    child.stdout!.on("data", (chunk: Buffer) => stdout.add(chunk));
-    child.stderr!.on("data", (chunk: Buffer) => stderr.add(chunk));
+    child.stdout!.on("data", (chunk: Buffer) => stdout.write(chunk));
+    child.stderr!.on("data", (chunk: Buffer) => stderr.write(chunk));
 
     child.on("error", (error) => {
       clearTimeout(timeout_timer);
@@ -116,11 +75,11 @@ export function run_command(command: string, options: RunOptions): Promise<RunRe
       clearTimeout(timeout_timer);
       clearTimeout(kill_timer);
       if (timed_out) {
-        resolve({ exit_code: -1, stdout: stdout.text(), stderr: `Timed out after ${options.timeout_in_seconds}s` });
+        resolve({ exit_code: -1, stdout: stdout.text().trim(), stderr: `Timed out after ${options.timeout_in_seconds}s` });
         return;
       }
       const note = stdout.truncated ? `Output cut at ${run_stdout_limit_in_bytes} bytes` : "";
-      resolve({ exit_code: exit_code ?? -1, stdout: stdout.text(), stderr: [stderr.text(), note].filter(Boolean).join("\n") });
+      resolve({ exit_code: exit_code ?? -1, stdout: stdout.text().trim(), stderr: [stderr.text().trim(), note].filter(Boolean).join("\n") });
     });
   });
 }
@@ -134,7 +93,7 @@ export function stream_command(command: string, options: StreamOptions = {}): Co
   let ended = false;
   let kill_timer: NodeJS.Timeout | undefined;
 
-  child.stderr!.on("data", (chunk: Buffer) => stderr.add(chunk));
+  child.stderr!.on("data", (chunk: Buffer) => stderr.write(chunk));
 
   const done = new Promise<{ exit_code: number; stderr: string }>((resolve) => {
     child.on("error", (error) => {
@@ -144,7 +103,7 @@ export function stream_command(command: string, options: StreamOptions = {}): Co
     child.on("close", (exit_code) => {
       ended = true;
       clearTimeout(kill_timer);
-      resolve({ exit_code: exit_code ?? -1, stderr: stderr.text() });
+      resolve({ exit_code: exit_code ?? -1, stderr: stderr.text().trim() });
     });
   });
 

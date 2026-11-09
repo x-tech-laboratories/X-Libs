@@ -223,6 +223,18 @@ export function SettingRow({ label, hint, as_label = false, class_name, children
   return as_label ? <label className={row_class}>{text}{children}</label> : <div className={row_class}>{text}{children}</div>;
 }
 
+// ── Forms ────────────────────────────────────────────────────────────────────
+
+// One field of a form in Halon's .form-rows: its label beside the control, and a hint under it; the label names the control by id.
+export function FormRow({ label, id, hint, hidden = false, children }: { label: ReactNode; id: string; hint?: ReactNode; hidden?: boolean; children: ReactNode }) {
+  return (
+    <div className="form-row" hidden={hidden}>
+      <label htmlFor={id}>{label}</label>
+      <div>{children}{hint && <p className="muted small">{hint}</p>}</div>
+    </div>
+  );
+}
+
 export interface SettingsSection {
   // Names the section's anchor, such as "backups".
   id: string;
