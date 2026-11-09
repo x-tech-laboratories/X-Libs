@@ -103,6 +103,7 @@
     "@tiptap/pm": "^3.33.0",
     "@tiptap/react": "^3.33.0",
     "@tiptap/starter-kit": "^3.33.0",
+    "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
     "emojibase": "^18.0.0",
     "emojibase-data": "^18.0.0",
