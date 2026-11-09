@@ -12,5 +12,6 @@
     "composite": true
   },
   "include": ["src"],
-  "exclude": ["src/web"]
+  "exclude": ["src/web", "src/plugins.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
 }

@@ -10,6 +10,11 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `log`                                    | Loggers by scope and level from a setting such as `"warn,play:debug"`; a malformed setting falls back instead of silencing logging, and a setting read through a function applies to loggers made before it arrived. |
 | `dates`                                  | Local dates as `"2026-06-10"` or `"2026-06-10T09:30"`: reading, writing, adding days and months, overdue, and Yesterday/Today/Tomorrow labels. |
 | `backups`                                | Named backups of an app's data in any store, newest first, with daily automatic ones kept to a set number. |
+| `plugins`                                | `create_plugin_host`: plugins bundled with the app or loaded at run time, each a manifest and a `start(context)`, started in the order their `requires` need and refused when meant for another app or app version; through the context a plugin adds hooks the app calls (on hookable, chosen for its typed, ordered and parallel calls with nothing of its own to style), providers the app picks one of by id, commands with keys, slot contents and settings fields, all taken back when it stops, is turned off or fails to start; one plugin's failing hook is reported and the rest still run; on/off and settings kept through `json_plugin_storage`, stored values that no longer fit falling back to their defaults; versions checked with semver. |
+| `plugin_folder`                          | `load_plugin_folder`: the plugins in a folder's subfolders, each `package.json` naming its built entry per side under `"x-plugin"`, refused when it leads outside its subfolder, with a problem per broken subfolder instead of a throw. |
+| `server/plugin_files`                    | `register_plugin_files`: `/plugins/index.json` lists the folder's web entries, read afresh on each request, and each plugin's own files are served from its subfolder and nowhere else. |
+| `web/plugin_imports`                     | `load_plugin_modules`: imports the entries `register_plugin_files` lists, each one bundled file whose imports of modules the page hands over with `share_modules`, such as React, are pointed at the page's own copies, found with es-module-lexer. |
+| `web/react/plugins`                      | `PluginSlot` draws what running plugins put in a slot, each part behind react-error-boundary so one that throws is left out alone; `use_plugin_shortcuts` and `plugin_menu_items` for their commands; `PluginSettings`, a settings group per plugin with its on switch, state and why it waits or failed, and its fields as controls; `use_plugins`. |
 | `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server; `handle` takes a `trusted` guard on the sender frame and answers in `envelopes`, which the client unwraps into Errors with the message alone, and a plain client strips Electron's remote-method prefix; `to_envelope`; `with_cloneable_arguments` flattens what structured clone refuses, such as a Proxy. |
 | `electron/events`                        | `define_events`: messages the main process pushes to its pages, such as progress, on one channel and subscribed to by name. |
 | `electron/app`                           | `hold_single_instance`, `bring_to_front`, and `first_argument` for a link handed over on the command line. |
@@ -131,6 +136,64 @@ use_shortcuts([
 A shortcut stays quiet in text fields unless it has `when: "always"`, and while a dialog or popover is open unless it
 has `over_overlays: true`. The tree builds Halon's `.tree` markup; a row dropped onto its top or bottom quarter lands
 beside it, and onto its middle inside it.
+
+## Plugins
+
+```ts
+import { create_plugin_host, define_plugin, json_plugin_storage } from "@x-tech-laboratories/x-libs/plugins";
+
+// The app says what plugins may reach, once, in its shared types.
+interface TasksApi {
+  hooks: { "task.created": (task: Task) => void | Promise<void> };
+  providers: { importer: { label: string; import(file: File): Promise<Task[]> } };
+  slots: { task_sidebar: ComponentType<{ task: Task }> };
+  services: { tasks: TaskStore };
+}
+
+const host = create_plugin_host<TasksApi>({
+  app: { id: "x-tasks", version: APP_VERSION },
+  services: { tasks },
+  storage: json_plugin_storage({ get: () => localStorage.getItem("plugins"), set: (text) => localStorage.setItem("plugins", text) }),
+  on_error: (plugin_id, error) => log.warn(`plugin ${plugin_id}`, error),
+});
+await host.add(markdown_import);                      // bundled
+for (const plugin of (await load_plugin_modules()).plugins) await host.add(plugin);   // from the server's folder
+await host.start();
+
+await host.call("task.created", task);
+const importer = host.provider("importer", chosen_id)?.value;
+```
+
+```tsx
+export default define_plugin<TasksApi>({
+  id: "x-tasks.word-count", name: "Word count", version: "1.0.0", app: "x-tasks", app_versions: "^1.0.0",
+  settings: [{ key: "words_per_minute", label: "Reading speed", type: "number", default: 200, min: 50 }],
+  start(context) {
+    context.hook("task.created", (task) => console.info(task.title.split(" ").length));
+    context.fill_slot("task_sidebar", ({ task }) => <p>{Math.ceil(task.notes.split(" ").length / Number(context.settings().words_per_minute))} min</p>);
+    context.add_command({ id: "count", label: "Count words", keys: "mod+shift+w", run: count_words });
+  },
+});
+```
+
+```tsx
+<PluginSlot host={host} name="task_sidebar" props={{ task }} />
+use_plugin_shortcuts(host);
+<PluginSettings host={host} />
+```
+
+Once the host starts, a plugin is off, unsupported (meant for another app or app version), running, waiting while a
+plugin it `requires` is missing, of the wrong version or not running, and started as soon as that changes, or failed
+when its `start` threw, tried again once it is turned off and on. Turning one off stops the plugins that require it first. To veto an action, a hook's argument carries
+a flag the app reads after `call`, since a throwing hook is reported, not passed on.
+
+A plugins folder holds one subfolder per plugin: a `package.json` with `"type": "module"` and
+`"x-plugin": { "server": "dist/server.js", "web": "dist/web.js" }`, each side one bundled ESM file whose default export
+is the plugin. The server and agent read it with `load_plugin_folder(folder, "server")`; the page gets its side through
+`register_plugin_files` and `load_plugin_modules`, after `share_modules({ react: React, "react/jsx-runtime": jsx_runtime })`
+so a plugin's components use the page's React. A web entry is imported from a `data:` URL, so a page's
+Content-Security-Policy has to allow `data:` scripts for folder plugins. Folder plugins run with the app's full rights:
+install only ones you trust.
 
 ## Electron apps
 

@@ -13,5 +13,6 @@
     "composite": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/web"]
+  "include": ["src/web"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
 }
