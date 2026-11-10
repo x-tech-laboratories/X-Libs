@@ -2,7 +2,7 @@
 // each item a write touches, however it was made, and record saves one version of each, so any version can be
 // restored and a deleted item brought back. The versions table syncs like any other.
 
-import { migrate, type SqlDatabase } from "./sql.ts";
+import type { SqlDatabase } from "./sql.ts";
 import type { SyncedTable } from "./sync_engine.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -20,6 +20,8 @@ export interface HistoryOptions<Snapshot> {
   // The items' own table and its key column; items still there keep their newest version when older ones are pruned.
   item_table: string;
   item_key?: string;
+  // The column naming the item in the versions and pending tables; "item_id" unless set, such as an app's own older table.
+  item_column?: string;
   // Every table whose writes change an item, the item table included.
   watches: readonly HistoryWatch[];
   // The item as it is now, or null once it is gone.
@@ -81,20 +83,20 @@ export type History<Snapshot> = ReturnType<typeof create_history<Snapshot>>;
 export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
   const { name, item_table, read, apply } = options;
   const item_key = options.item_key ?? "id";
+  const item_column = options.item_column ?? "item_id";
   const versions = `${name}_versions`;
   const pending = `${name}_versions_pending`;
   const is_same = options.is_same ?? ((first: Snapshot, second: Snapshot) => JSON.stringify(first) === JSON.stringify(second));
   const site_of = options.site ?? sync_site;
 
-  const schema = [
-    `CREATE TABLE ${versions} (
-       id INTEGER PRIMARY KEY, uid TEXT NOT NULL UNIQUE, item_id TEXT NOT NULL, changed_at TEXT NOT NULL, kind TEXT NOT NULL,
+  // Made only where missing, so an app whose versions tables already exist under these names keeps them as they are.
+  const schema = `CREATE TABLE IF NOT EXISTS ${versions} (
+       id INTEGER PRIMARY KEY, uid TEXT NOT NULL UNIQUE, ${item_column} TEXT NOT NULL, changed_at TEXT NOT NULL, kind TEXT NOT NULL,
        site TEXT NOT NULL DEFAULT '', restored_from TEXT, snapshot TEXT NOT NULL
      );
-     CREATE INDEX ${versions}_by_item ON ${versions} (item_id, changed_at);
-     CREATE INDEX ${versions}_by_time ON ${versions} (changed_at);
-     CREATE TABLE ${pending} (item_id TEXT PRIMARY KEY) WITHOUT ROWID`,
-  ];
+     CREATE INDEX IF NOT EXISTS ${versions}_by_item ON ${versions} (${item_column}, changed_at);
+     CREATE INDEX IF NOT EXISTS ${versions}_by_time ON ${versions} (changed_at);
+     CREATE TABLE IF NOT EXISTS ${pending} (${item_column} TEXT PRIMARY KEY) WITHOUT ROWID`;
 
   // For the sync engine's tables, so every device has every version.
   const synced_table: SyncedTable = { name: versions, key_columns: ["uid"], local_columns: ["id"] };
@@ -116,11 +118,11 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
   // Run each time the database opens: makes the tables, sets the triggers, and gives every item with no history yet
   // a first version as it stands now, with an id every device gives it alike.
   function install(database: SqlDatabase): void {
-    migrate(database, schema, { owner: `history:${name}` });
+    database.exec(schema);
     drop_triggers(database);
     for (const trigger of triggers) database.exec(`CREATE TRIGGER ${trigger.name} ${trigger.sql}`);
 
-    const unseen = database.prepare(`SELECT ${item_key} AS id FROM ${item_table} WHERE ${item_key} NOT IN (SELECT item_id FROM ${versions})`).all() as { id: string }[];
+    const unseen = database.prepare(`SELECT ${item_key} AS id FROM ${item_table} WHERE ${item_key} NOT IN (SELECT ${item_column} FROM ${versions})`).all() as { id: string }[];
     const site = site_of(database);
     for (const { id } of unseen) {
       const snapshot = read(database, String(id));
@@ -139,19 +141,19 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
 
   function insert(database: SqlDatabase, uid: string, item_id: string, changed_at: string, kind: VersionKind, site: string, restored_from: string | null, snapshot: Snapshot): void {
     database
-      .prepare(`INSERT OR IGNORE INTO ${versions} (uid, item_id, changed_at, kind, site, restored_from, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT OR IGNORE INTO ${versions} (uid, ${item_column}, changed_at, kind, site, restored_from, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(uid, item_id, changed_at, kind, site, restored_from, JSON.stringify(snapshot));
   }
 
   function latest(database: SqlDatabase, item_id: string): { kind: VersionKind; snapshot: Snapshot } | null {
-    const row = database.prepare(`SELECT kind, snapshot FROM ${versions} WHERE item_id = ? ${newest_first} LIMIT 1`).get(item_id) as { kind: VersionKind; snapshot: string } | undefined;
+    const row = database.prepare(`SELECT kind, snapshot FROM ${versions} WHERE ${item_column} = ? ${newest_first} LIMIT 1`).get(item_id) as { kind: VersionKind; snapshot: string } | undefined;
     return row ? { kind: row.kind, snapshot: JSON.parse(row.snapshot) as Snapshot } : null;
   }
 
   // Saves a version of each item touched since the last call, skipping any that ended up as they were; call it after
   // each write. A restore passes the version each item came back from.
   function record(database: SqlDatabase, restored_from = new Map<string, string>()): void {
-    const touched = database.prepare(`SELECT item_id FROM ${pending}`).all() as { item_id: string }[];
+    const touched = database.prepare(`SELECT ${item_column} AS item_id FROM ${pending}`).all() as { item_id: string }[];
     if (touched.length === 0) return;
     const changed_at = new Date().toISOString();
     const site = site_of(database);
@@ -179,7 +181,7 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
     database
       .prepare(
         `DELETE FROM ${versions} WHERE changed_at < ? AND id NOT IN (
-           SELECT id FROM (SELECT id, item_id, ROW_NUMBER() OVER (PARTITION BY item_id ${newest_first}) AS rank FROM ${versions})
+           SELECT id FROM (SELECT id, ${item_column} AS item_id, ROW_NUMBER() OVER (PARTITION BY ${item_column} ${newest_first}) AS rank FROM ${versions})
            WHERE rank = 1 AND item_id IN (SELECT ${item_key} FROM ${item_table})
          )`,
       )
@@ -188,8 +190,8 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
 
   // ── Reading ──────────────────────────────────────────────────────────────
 
-  const columns = `id, uid, item_id, changed_at, kind, site, restored_from, snapshot,
-    LAG(snapshot) OVER (PARTITION BY item_id ORDER BY changed_at, id) AS previous`;
+  const columns = `id, uid, ${item_column} AS item_id, changed_at, kind, site, restored_from, snapshot,
+    LAG(snapshot) OVER (PARTITION BY ${item_column} ORDER BY changed_at, id) AS previous`;
 
   function to_versions(database: SqlDatabase, rows: unknown[]): Version<Snapshot>[] {
     const site = site_of(database);
@@ -207,7 +209,7 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
 
   // One item's versions, newest first.
   function read_versions(database: SqlDatabase, item_id: string): Version<Snapshot>[] {
-    return to_versions(database, database.prepare(`SELECT ${columns} FROM ${versions} WHERE item_id = ? ${newest_first}`).all(item_id));
+    return to_versions(database, database.prepare(`SELECT ${columns} FROM ${versions} WHERE ${item_column} = ? ${newest_first}`).all(item_id));
   }
 
   // The latest versions of every item, deleted ones included, newest first.
@@ -222,7 +224,7 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
   // Brings an item back to one of its versions and records it; a deleted item comes back with the items deleted along
   // with it under it, while they are still gone.
   function restore(database: SqlDatabase, version_id: string): void {
-    const row = database.prepare(`SELECT uid, item_id, snapshot FROM ${versions} WHERE uid = ?`).get(version_id) as Pick<VersionRow, "uid" | "item_id" | "snapshot"> | undefined;
+    const row = database.prepare(`SELECT uid, ${item_column} AS item_id, snapshot FROM ${versions} WHERE uid = ?`).get(version_id) as Pick<VersionRow, "uid" | "item_id" | "snapshot"> | undefined;
     if (!row) throw new Error(`no such version: ${version_id}`);
     const restored_from = new Map<string, string>();
     const was_gone = !exists(database, row.item_id);
@@ -234,10 +236,10 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
     if (was_gone && parent_of) {
       const deleted_together = database
         .prepare(
-          `SELECT uid, item_id, snapshot FROM ${versions} AS version
+          `SELECT uid, ${item_column} AS item_id, snapshot FROM ${versions} AS version
            WHERE kind = 'deleted'
-             AND changed_at = (SELECT changed_at FROM ${versions} WHERE item_id = ? AND kind = 'deleted' ${newest_first} LIMIT 1)
-             AND uid = (SELECT uid FROM ${versions} WHERE item_id = version.item_id ${newest_first} LIMIT 1)`,
+             AND changed_at = (SELECT changed_at FROM ${versions} WHERE ${item_column} = ? AND kind = 'deleted' ${newest_first} LIMIT 1)
+             AND uid = (SELECT uid FROM ${versions} WHERE ${item_column} = version.${item_column} ${newest_first} LIMIT 1)`,
         )
         .all(row.item_id) as Pick<VersionRow, "uid" | "item_id" | "snapshot">[];
       const waiting = deleted_together.map((each) => ({ ...each, snapshot: JSON.parse(each.snapshot) as Snapshot }));

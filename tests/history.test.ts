@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { create_history } from "../src/history.ts";
+import { create_history, type HistoryOptions } from "../src/history.ts";
 import type { SqlDatabase } from "../src/sql.ts";
 
 afterEach(() => vi.useRealTimers());
@@ -20,7 +20,7 @@ function open(): SqlDatabase {
   return database;
 }
 
-const history = create_history<TaskSnapshot>({
+const history_options = {
   name: "task",
   item_table: "tasks",
   watches: [{ table: "tasks", item_columns: ["id"] }, { table: "task_tags", item_columns: ["task_id"] }],
@@ -37,7 +37,9 @@ const history = create_history<TaskSnapshot>({
   },
   parent_of: (snapshot) => snapshot.parent_id,
   site: () => "this-device",
-});
+} satisfies HistoryOptions<TaskSnapshot>;
+
+const history = create_history<TaskSnapshot>(history_options);
 
 test("items already there get a first version, and each write after records one version of what it touched", () => {
   const database = open();
@@ -91,4 +93,23 @@ test("changes from sync are forgotten, and pruning keeps each item's newest vers
   history.prune(database, "2026-11-10T00:00:00Z");
 
   expect(history.read_recent(database, 10).map((version) => version.snapshot.title)).toEqual(["Two"]);
+});
+
+test("an app's own older versions table is taken over as it is, under its own item column", () => {
+  const database = open();
+  database.exec(`CREATE TABLE task_versions (id INTEGER PRIMARY KEY, uid TEXT, task_id TEXT NOT NULL, changed_at TEXT NOT NULL, kind TEXT NOT NULL,
+                   site TEXT NOT NULL DEFAULT '', restored_from TEXT, snapshot TEXT NOT NULL);
+                 CREATE UNIQUE INDEX task_versions_by_uid ON task_versions (uid);
+                 CREATE TABLE task_versions_pending (task_id TEXT PRIMARY KEY) WITHOUT ROWID;
+                 INSERT INTO tasks VALUES ('a', 'Old', NULL);
+                 INSERT INTO task_versions (uid, task_id, changed_at, kind, snapshot)
+                   VALUES ('first_seen:a', 'a', '2026-11-01T00:00:00Z', 'first_seen', '{"title":"Old","parent_id":null,"tag_ids":[]}');`);
+  const adopted = create_history<TaskSnapshot>({ ...history_options, item_column: "task_id" });
+
+  adopted.install(database);
+  database.exec("UPDATE tasks SET title = 'New'");
+  adopted.record(database);
+
+  expect(adopted.read_versions(database, "a").map((version) => [version.kind, version.snapshot.title])).toEqual([["edited", "New"], ["first_seen", "Old"]]);
+  expect(database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'schema_versions'").get()).toEqual({ count: 0 });
 });
