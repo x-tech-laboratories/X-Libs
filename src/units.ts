@@ -1,5 +1,6 @@
 // Measurements kept in one unit and shown in the one each person picks: weights in kilograms or pounds, lengths in
-// centimetres or inches, distances in kilometres or miles, and energy in kilocalories or kilojoules.
+// centimetres or inches, distances in kilometres or miles, and energy in kilocalories or kilojoules; plain numbers and
+// signed changes to a tenth.
 
 // ── Units ────────────────────────────────────────────────────────────────────
 
@@ -48,4 +49,23 @@ export function to_stored(value: number, unit: Unit): number {
 export function format_measure(value: number, unit: Unit, decimals = 1): string {
   const shown = Number(to_shown(value, unit).toFixed(decimals));
   return `${shown.toLocaleString(undefined, { maximumFractionDigits: decimals })} ${unit}`;
+}
+
+// A plain number such as a reading: whole when it rounds whole, otherwise to the given decimals, such as "80" or
+// "80.5"; not localised, so it reads back as typed.
+export function format_number(value: number, decimals = 1): string {
+  if (!Number.isFinite(value)) return "0";
+  const scale = 10 ** decimals;
+  const rounded = Math.round(value * scale) / scale;
+  // -0 prints as 0.
+  if (Number.isInteger(rounded)) return String(rounded + 0);
+  return rounded.toFixed(decimals);
+}
+
+// A difference with its sign and label, such as "+1.5 kg", "-0.5 kg" or "0 kg". A stored difference converts as a
+// value does, since no unit here has an offset, so pass to_shown(change, unit) to show it in a person's unit.
+export function format_change(change: number, label = "", decimals = 1): string {
+  const text = format_number(change, decimals);
+  const sign = change > 0 && text !== "0" ? "+" : "";
+  return `${sign}${text} ${label}`.trim();
 }
