@@ -1,12 +1,8 @@
 // Named backups of an app's data: the name says when each was taken and whether it was automatic, and daily ones keep a set number.
 
-export interface Backup {
-  name: string;
-  // When it was taken, as an ISO time to the second.
-  taken_at: string;
-  is_automatic: boolean;
-  size_bytes: number;
-}
+import type { Backup, BackupSchedule } from "./backup_protocol.ts";
+
+export { backup_method_names, default_backup_schedule, type Backup, type BackupClient, type BackupMethods, type BackupSchedule } from "./backup_protocol.ts";
 
 // ── Names ────────────────────────────────────────────────────────────────────
 
@@ -82,4 +78,29 @@ export function backups(naming: BackupNaming, store: BackupStore): Backups {
   };
 
   return { naming, list, create: (is_automatic) => create(is_automatic), remove, keep_automatic };
+}
+
+// ── Schedule ─────────────────────────────────────────────────────────────────
+
+export interface KeepBackingUpOptions {
+  // How often to check whether a day has passed, since an app can stay open for days; an hour unless set.
+  check_every_ms?: number;
+  // A failed backup is reported here and never stops the app; logged unless set.
+  on_error?: (error: unknown) => void;
+}
+
+// Takes the automatic backups now and on every check; check again after the schedule changes. Returns the function that stops it.
+export function keep_backing_up(kept: Backups, schedule: () => BackupSchedule | Promise<BackupSchedule>, options: KeepBackingUpOptions = {}) {
+  const on_error = options.on_error ?? ((error: unknown) => console.error("automatic backup failed:", error));
+  const check = async (): Promise<void> => {
+    try {
+      const { automatic, to_keep } = await schedule();
+      if (automatic) await kept.keep_automatic(to_keep);
+    } catch (error) {
+      on_error(error);
+    }
+  };
+  void check();
+  const timer = setInterval(() => void check(), options.check_every_ms ?? 60 * 60 * 1000);
+  return { check, stop: () => clearInterval(timer) };
 }

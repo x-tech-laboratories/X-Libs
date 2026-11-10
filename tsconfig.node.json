@@ -12,6 +12,6 @@
     "composite": true
   },
   "include": ["src"],
-  "exclude": ["src/web", "src/api_spec.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts", "src/categories.ts"],
+  "exclude": ["src/web", "src/api_spec.ts", "src/backup_protocol.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts", "src/categories.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }
