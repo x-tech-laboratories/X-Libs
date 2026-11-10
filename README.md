@@ -12,6 +12,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `date_ranges`                            | `resolve_range` turns a range named from now, each side an offset in minutes, hours, days, weeks, months or years or left open, such as earlier today or next week, into its first and last minutes on day.js, with the week starting on a chosen day; `is_in_range` places a plain date at the end of its day. |
 | `units`                                  | `convert`, `to_shown`, `to_stored` and `format_measure`: weights, lengths, distances and energy kept in kg, cm, km and kcal and shown in the unit each person picks, such as `"225 lb"`. |
 | `sql`                                    | `SqlDatabase`, the part of a synchronous SQLite connection the apps use, met by node:sqlite and by `web/sqlite_wasm`; `in_transaction`, and `migrate`, each step once in its own transaction, through `user_version` or, with an `owner` such as a feature or plugin, its own row in `schema_versions`. |
+| `api_spec`                               | An app's calls described once for other programs: `ApiSpec` gives each method its words and a JSON Schema per argument, so a method without one fails to compile; `input_schema` takes the arguments as one object, `positional_args` puts named arguments back in the method's order, and `openapi_document` writes an OpenAPI 3.1 document with one POST per call. |
 | `drizzle`, `drizzle_migrations`          | Typed SQLite on Drizzle ORM 1.0.0-rc.5, chosen over Kysely and hand-written SQL because it types rows from one schema in TypeScript, writes the migration SQL from it with drizzle-kit and runs synchronously: `open_drizzle` over any `SqlDatabase`, so the same queries run on node:sqlite and in a phone's page, `synced_tables` reading the sync list from the schema's primary keys, `migrate_drizzle` per owner, the schema builders and query operators so an app never imports Drizzle, and `x-libs-bundle-migrations <folder>`, which turns drizzle-kit's migration folders into an `index.ts` a server running .ts files can import. |
 | `sync_engine`, `sync_client`, `sync_protocol`, `server/sync_routes` | SQLite kept alike on every device: `create_sync_engine` stamps each value of the tables it is given through triggers, so the app's own writes need no change, and the newest write of each value wins; `create_sync_client` sends a device's changes within seconds, takes everyone else's in the same round trip, follows the server's event stream, works on offline, and asks which copy to keep once the server's data was replaced; `register_sync_routes` is the server's exchange, snapshot and replace, which backs up first. |
 | `backups`                                | Named backups of an app's data in any store, newest first, with daily automatic ones kept to a set number. |
@@ -46,6 +47,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/web_folder`                      | `register_web_folder`: the built page from a folder, tuned for the Nix store (no etag or date, hashed `/assets/` kept a year, the page fetched fresh), a warning, error or nothing when the folder is missing, and the page for unknown paths when it routes itself. |
 | `server/replies`                         | `register_error_replies`: errors and unknown paths answered in plain text or as `{ error }`; `register_lenient_json_body`: an empty body as no arguments and bad JSON as `BAD_JSON`, for the route to refuse in its own words; `send_text`. |
 | `server/config`                          | `read_server_config`: host, port, web folder and the app's options from flags, then the environment, then defaults, with usage text for `--help`, the secret from `<PREFIX>_TOKEN_FILE` or `<PREFIX>_TOKEN`, and no listening beyond this machine without one; `read_secret_file`. |
+| `server/mcp`                             | `register_mcp_route`: the calls an `api_spec` describes, served as MCP tools over the official SDK's streamable HTTP (`@modelcontextprotocol/server`), each marked read-only or not, its arguments checked against the schema, its result as JSON text and a failure as a tool error in the call's own words; it sits behind the app's sign-in like any other API path. |
 | `server/cors`                            | `register_open_cors`: any origin may call the API, as a native or mobile shell does from a page of its own, with the client id header allowed. |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder and `cx` class joiner, formatters (including `compact_count`, such as `"1.4M"`), hash router and theme choice, kept in this browser or the app's settings, and `follow_host_theme` for taking a host page's colours, such as the Linux sidebar's. |
 | `web/sqlite_wasm`                        | `open_wasm_database`: SQLite in WebAssembly for a page that keeps its own database, such as a phone app, saved whole to IndexedDB through `indexed_db_files` shortly after each change. |
@@ -107,6 +109,20 @@ await app.register(async (api) => {
   api.post("/add", async (request) => { ...; changes.announce_change(changes.client_id_of(request)); });
 }, { prefix: "/api" });
 await register_web_folder(app, { folder: config.web_folder });
+```
+
+Other programs reach the same calls once they are described in an `ApiSpec`: as MCP tools, and as an OpenAPI
+document for everything else. Both sit behind the sign-in, so a client sends the secret as a bearer header.
+
+```ts
+const api: ApiSpec<TasksMethods> = {
+  list_tasks: { description: "Lists the open tasks.", params: [] },
+  add_task: { description: "Adds a task.", params: [{ name: "title", schema: { type: "string", minLength: 1 } }] },
+};
+await app.register(async (scope) => {
+  await register_mcp_route(scope, { name: "x-tasks", version, api, is_read_only, call: (method, args) => methods[method](...args) });
+  scope.get("/openapi.json", async () => openapi_document(api, { title: "X-Tasks", version, path_of: (method) => `/api/${method}`, is_read_only }));
+}, { prefix: "/api" });
 ```
 
 An app with its own sessions, such as one logging in by name and password, uses `register_sign_in_guard` with its
