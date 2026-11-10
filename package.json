@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -14,6 +14,9 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "x-libs-bundle-migrations": "dist/drizzle_migrations.js"
+  },
   "exports": {
     "./*": {
       "types": "./dist/*.d.ts",
@@ -110,6 +113,7 @@
     "@tiptap/starter-kit": "^3.33.0",
     "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
+    "drizzle-orm": "1.0.0-rc.5",
     "emojibase": "^18.0.0",
     "emojibase-data": "^18.0.0",
     "es-module-lexer": "^3.0.4",
