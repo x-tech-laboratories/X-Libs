@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -37,6 +37,7 @@
     "@fastify/session": "^11.1.6",
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "fastify": "^5.12.7",
     "react": "^19",
@@ -64,6 +65,9 @@
     "@fastify/websocket": {
       "optional": true
     },
+    "@modelcontextprotocol/server": {
+      "optional": true
+    },
     "@sqlite.org/sqlite-wasm": {
       "optional": true
     },
@@ -85,6 +89,7 @@
     "@fastify/session": "^11.1.6",
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
