@@ -70,6 +70,16 @@ describe("signing in", () => {
     expect((await app.inject({ url: "/" })).body).toBe("page");
   });
 
+  it("makes a name wait after five wrong tries from one address", async () => {
+    await serve();
+
+    for (let attempt = 0; attempt < 5; attempt++) await sign_in({ name: "root", password: "wrong" });
+    const locked = await sign_in({ name: "root", password });
+
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json()).toEqual({ error: "Too many tries; wait a few minutes." });
+  });
+
   it("asks for the second factor once the password is right", async () => {
     const accounts = await serve();
     const { secret } = accounts.start_totp("root");
@@ -154,6 +164,43 @@ describe("roles and sessions", () => {
 });
 
 describe("the store", () => {
+  const store = () => new AccountStore({
+    database: new DatabaseSync(":memory:"), app_name: "X-Test", roles: ["viewer", "admin"], declared: new Map([["root", hash_password(password)]]),
+  });
+
+  it("takes each code once, and each recovery code once", () => {
+    const accounts = store();
+    const { secret } = accounts.start_totp("root");
+    const now = Date.now() / 1000;
+    const recovery = accounts.confirm_totp("root", code_at(secret, now));
+
+    expect(accounts.authenticate("root", password, undefined)).toEqual({ user: null, needs_code: true });
+    expect(accounts.authenticate("root", password, code_at(secret, now)).user).toBeNull();
+    expect(accounts.authenticate("root", password, code_at(secret, now + 30)).user).not.toBeNull();
+    expect(accounts.authenticate("root", password, recovery[0]).user).not.toBeNull();
+    expect(accounts.authenticate("root", password, recovery[0]).user).toBeNull();
+  });
+
+  it("leaves a declared user's role and password to the accounts file", () => {
+    const accounts = store();
+
+    expect(() => accounts.update_user("root", { role: "viewer" })).toThrow("accounts file");
+    expect(() => accounts.delete_user("root")).toThrow("accounts file");
+    expect(() => accounts.change_password("root", password, "another long password")).toThrow("accounts file");
+  });
+
+  it("keeps only a token's digest, and drops a user's tokens and sessions with them", () => {
+    const accounts = store();
+    accounts.create_user({ name: "vera", role: "viewer", access: null, password });
+    const { token } = accounts.create_token("vera", { name: "script", read_only: true });
+    const { secret } = accounts.open_session("vera", { remember: true, label: "test", lifetime_in_seconds: null });
+
+    expect(accounts.check_token(token)).toMatchObject({ owner: "vera", read_only: true });
+    accounts.delete_user("vera");
+    expect(accounts.check_token(token)).toBeNull();
+    expect(accounts.session(secret)).toBeNull();
+  });
+
   it("ends sessions past their lifetime", () => {
     const accounts = new AccountStore({ database: new DatabaseSync(":memory:"), app_name: "X-Test", declared: new Map([["root", hash_password(password)]]) });
 

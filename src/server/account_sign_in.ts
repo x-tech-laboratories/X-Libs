@@ -96,7 +96,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   await app.register(fastify_cookie);
   await app.register(fastify_rate_limit, {
     global: false,
-    errorResponseBuilder: () => ({ statusCode: 429, error: "Too many tries; wait a few minutes." }),
+    errorResponseBuilder: () => Object.assign(new Error("Too many tries; wait a few minutes."), { statusCode: 429 }),
   });
 
   app.decorateRequest("viewer", null);
@@ -167,10 +167,13 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     }
   });
 
-  // The routes sit in a scope of their own, so a refusal from the store answers in its own words without changing the app's error handler.
+  // The routes sit in a scope of their own, so their refusals answer in their own words without changing the app's error handler.
   await app.register(async (scope) => {
     scope.setErrorHandler((error, _request, reply) => {
       if (error instanceof AccountError) return reply.code(error.status).send({ error: error.message });
+      // A refusal such as too many tries answers in its own words too.
+      const status = (error as { statusCode?: number }).statusCode;
+      if (status !== undefined && status >= 400 && status < 500) return reply.code(status).send({ error: (error as Error).message });
       return reply.send(error);
     });
 
