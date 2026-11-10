@@ -25,10 +25,11 @@ test("asks before replacing, signs the device in, asks for the code when the ser
     disconnect_sync: async () => off,
     sync_now: async () => status,
   };
-  render(<><SyncSettings device={device} data_name="tasks" /><Dialogs /></>);
+  render(<><SyncSettings device={device} data_name="tasks" extra={(address) => <p>{`Address: ${address}`}</p>} /><Dialogs /></>);
 
   await waitFor(() => screen.getByLabelText("Server address"));
   fireEvent.change(screen.getByLabelText("Server address"), { target: { value: "https://sync.example.org/" } });
+  expect(screen.getByText("Address: https://sync.example.org/")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("User name"), { target: { value: "ada" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
   fireEvent.click(screen.getByRole("button", { name: "Use the server's tasks" }));

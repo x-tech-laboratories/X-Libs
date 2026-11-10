@@ -2,7 +2,7 @@
 // in as with Sync now and Stop syncing, or the server's address, a name and password (and the code when asked) and the
 // choice of which copy wins the first time, asked before it replaces anything. It pairs with sync_client, which runs wherever the app keeps its database.
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { asks_for_code, type SyncDeviceClient, type SyncDirection, type SyncStatus } from "../../sync_protocol.ts";
 import { describe_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
@@ -21,12 +21,14 @@ export interface SyncSettingsProps {
   placeholder?: string;
   // What the question before each choice says; the standard words unless set.
   confirm_text?: Record<SyncDirection, string>;
+  // More rows after the section, given the address being typed or the one synced with, such as a certificate to trust.
+  extra?: (server_url: string) => ReactNode;
 }
 
 const tones = { off: "none", idle: "good", syncing: "info", offline: "warn", needs_setup: "warn", failed: "bad" } as const;
 const state_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing", offline: "Offline", needs_setup: "Needs a choice", failed: "Failed" } as const;
 
-export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text }: SyncSettingsProps) {
+export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text, extra }: SyncSettingsProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
   const [server_url, set_server_url] = useState("");
   const [name, set_name] = useState("");
@@ -116,6 +118,7 @@ export function SyncSettings({ device, subscribe, data_name, placeholder = "http
           </SettingRow>
         </form>
       )}
+      {extra?.(connected ? status.server_url : server_url || status.server_url)}
     </>
   );
 }
