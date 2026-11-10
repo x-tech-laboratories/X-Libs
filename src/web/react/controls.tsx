@@ -219,6 +219,74 @@ export function CommitInput({ value, on_commit, onBlur, onKeyDown, ...rest }: Co
   );
 }
 
+interface NumberFieldProps {
+  label: string;
+  value: number | null;
+  // Gets null when the field is emptied, and the value kept within min and max.
+  on_change: (value: number | null) => void;
+  min?: number;
+  max?: number;
+  // How far the buttons and arrow keys move it; 1 unless set.
+  step?: number;
+  // Text after the number, such as "kg".
+  unit?: string;
+  // Only the field, named by label, such as inside a table row.
+  bare?: boolean;
+}
+
+function round_to_step(value: number, step: number): number {
+  const decimals = (String(step).split(".")[1] ?? "").length;
+  return Number(value.toFixed(decimals));
+}
+
+// A number typed with a phone's number keys or moved by a step with the − and + buttons or the arrow keys; it saves once left or on Enter.
+export function NumberField({ label, value, on_change, min, max, step = 1, unit, bare = false }: NumberFieldProps) {
+  const clamp = (next: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, next));
+
+  function commit(text: string): void {
+    const trimmed = text.trim().replace(",", ".");
+    if (trimmed === "") return on_change(null);
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) on_change(clamp(parsed));
+  }
+
+  function nudge(direction: 1 | -1): void {
+    on_change(clamp(round_to_step((value ?? min ?? 0) + direction * step, step)));
+  }
+
+  function keyed(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === "Enter") event.currentTarget.blur();
+    else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      nudge(event.key === "ArrowUp" ? 1 : -1);
+    }
+  }
+
+  const inputs = (
+    <div className="number-field-inputs">
+      <button type="button" aria-label={`Less ${label.toLowerCase()}`} disabled={value !== null && min !== undefined && value <= min} onClick={() => nudge(-1)}>−</button>
+      <input
+        key={String(value)}
+        type="text"
+        inputMode="decimal"
+        aria-label={label}
+        defaultValue={value ?? ""}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        onKeyDown={keyed}
+      />
+      <button type="button" aria-label={`More ${label.toLowerCase()}`} disabled={value !== null && max !== undefined && value >= max} onClick={() => nudge(1)}>+</button>
+      {unit && <span className="unit">{unit}</span>}
+    </div>
+  );
+  if (bare) return inputs;
+  return (
+    <div className="field number-field">
+      <span className="field-label">{label}</span>
+      {inputs}
+    </div>
+  );
+}
+
 interface DateTimeFieldProps {
   label: string;
   // A local day such as "2026-06-10", or a day and time such as "2026-06-10T09:30".

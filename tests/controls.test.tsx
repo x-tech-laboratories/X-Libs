@@ -3,7 +3,7 @@ import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ColorPicker, CommitInput, DateTimeField, PathInput, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
+import { ColorPicker, CommitInput, DateTimeField, NumberField, PathInput, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
 import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
@@ -152,6 +152,29 @@ describe("CommitInput", () => {
 
     rerender(<CommitInput aria-label="Title" value="Saved" on_commit={on_commit} />);
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Title" }).value).toBe("Saved");
+  });
+});
+
+describe("NumberField", () => {
+  test("steps with the buttons and arrow keys, keeps within its limits and saves typing once left", () => {
+    const on_change = vi.fn();
+    const { rerender } = render(<NumberField label="Weight" value={60} on_change={on_change} min={0} max={61} step={2.5} unit="kg" />);
+    const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Weight" });
+
+    fireEvent.click(screen.getByRole("button", { name: "More weight" }));
+    expect(on_change).toHaveBeenLastCalledWith(61);
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(on_change).toHaveBeenLastCalledWith(57.5);
+
+    fireEvent.change(field, { target: { value: "42,5" } });
+    fireEvent.blur(field);
+    expect(on_change).toHaveBeenLastCalledWith(42.5);
+
+    rerender(<NumberField label="Weight" value={0} on_change={on_change} min={0} />);
+    expect(screen.getByRole("button", { name: "Less weight" })).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Weight" }), { target: { value: "" } });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Weight" }));
+    expect(on_change).toHaveBeenLastCalledWith(null);
   });
 });
 
