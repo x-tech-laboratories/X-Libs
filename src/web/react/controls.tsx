@@ -172,23 +172,40 @@ export function SearchBox({ label, value, on_input, on_submit, on_paste, submit_
   );
 }
 
-interface SelectProps<Value extends string | number> {
+// Options under a heading, drawn as an optgroup; an option may sit under several headings.
+export interface OptionGroup<Value extends string | number> {
   label: string;
   options: [value: Value, text: string][];
+}
+
+interface SelectProps<Value extends string | number> {
+  label: string;
+  // Drawn first, outside any group, such as an empty "Pick one…" choice.
+  options: [value: Value, text: string][];
+  // Drawn after the options, each under its heading; a group with no options is left out.
+  groups?: OptionGroup<Value>[];
   value: Value;
   on_change: (value: Value) => void;
   // Only the select, named by label, such as inside a SettingRow that shows the label itself.
   bare?: boolean;
+  id?: string;
 }
 
-export function Select<Value extends string | number>({ label, options, value, on_change, bare = false }: SelectProps<Value>) {
+export function Select<Value extends string | number>({ label, options, groups = [], value, on_change, bare = false, id }: SelectProps<Value>) {
+  const shown_groups = groups.filter((group) => group.options.length > 0);
   const change = (event: ChangeEvent<HTMLSelectElement>) => {
     const text = event.currentTarget.value;
-    on_change((options.find(([option]) => String(option) === text)?.[0] ?? text) as Value);
+    const every = [...options, ...shown_groups.flatMap((group) => group.options)];
+    on_change((every.find(([option]) => String(option) === text)?.[0] ?? text) as Value);
   };
   const select = (
-    <select value={value} aria-label={bare ? label : undefined} onChange={change}>
+    <select id={id} value={value} aria-label={bare ? label : undefined} onChange={change}>
       {options.map(([option, text]) => <option key={option} value={option}>{text}</option>)}
+      {shown_groups.map((group) => (
+        <optgroup key={group.label} label={group.label}>
+          {group.options.map(([option, text]) => <option key={option} value={option}>{text}</option>)}
+        </optgroup>
+      ))}
     </select>
   );
   if (bare) return select;
