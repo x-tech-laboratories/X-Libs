@@ -2,7 +2,7 @@
 // and a settings section that turns each plugin on or off and edits its settings. A slot's contents are each kept behind
 // react-error-boundary, chosen because React still catches render errors only in a class, which this library does not write.
 
-import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
+import { Fragment, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import type { PluginApi, PluginHost, PluginState, PluginStatus, SettingField, SettingValue } from "../../plugins.ts";
 import type { MenuItem } from "../menus.ts";
@@ -76,19 +76,17 @@ const STATE_LABELS: Record<PluginState, [string, Tone]> = {
   unsupported: ["Unsupported", "bad"],
 };
 
-// One settings group per plugin, for a SettingsPage section such as "Plugins".
-export function PluginSettings<Api extends PluginApi>({ host, empty = "No plugins are installed." }: { host: PluginHost<Api>; empty?: ReactNode }) {
+// The settings page's Plugins section: a row per plugin with its version, state and on switch, then its own settings.
+export function PluginSettings<Api extends PluginApi>({ host, heading = "Plugins", empty = "No plugins are installed." }: { host: PluginHost<Api>; heading?: ReactNode; empty?: ReactNode }) {
   const statuses = use_plugins(host);
-  if (statuses.length === 0) return <p className="setting-hint">{empty}</p>;
   return (
-    <>
+    <SettingsGroup heading={heading} hint={statuses.length === 0 ? empty : undefined}>
       {statuses.map(({ manifest, state, problem }) => (
-        <SettingsGroup
-          key={manifest.id}
-          heading={<>{manifest.name} <span className="setting-hint">{manifest.version}</span> <StateBadge labels={STATE_LABELS} state={state} title={problem} /></>}
-          hint={problem ?? manifest.description}
-        >
-          <SettingRow label="Turned on" as_label>
+        <Fragment key={manifest.id}>
+          <SettingRow
+            label={<>{manifest.name} <span className="setting-hint">{manifest.version}</span> <StateBadge labels={STATE_LABELS} state={state} title={problem} /></>}
+            hint={problem ?? manifest.description}
+          >
             <Switch
               label={`Turn ${manifest.name} on`}
               checked={state !== "off" && state !== "unsupported"}
@@ -101,9 +99,9 @@ export function PluginSettings<Api extends PluginApi>({ host, empty = "No plugin
               <SettingControl field={field} value={host.settings(manifest.id)[field.key] ?? field.default} on_change={(value) => void host.set_settings(manifest.id, { [field.key]: value })} />
             </SettingRow>
           ))}
-        </SettingsGroup>
+        </Fragment>
       ))}
-    </>
+    </SettingsGroup>
   );
 }
 

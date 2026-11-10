@@ -56,6 +56,7 @@ describe("PluginSettings", () => {
     await host.start();
     render(<PluginSettings host={host} />);
 
+    expect(screen.getByRole("heading", { name: "Plugins" })).toBeTruthy();
     expect(screen.getByText("Does things")).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByLabelText("Turn Plugin a on")); });
     expect(host.list()[0]?.state).toBe("off");
@@ -76,6 +77,17 @@ describe("PluginSettings", () => {
 
     expect(screen.getByText("Waiting")).toBeTruthy();
     expect(screen.getByText("It needs ghost *, which is not installed.")).toBeTruthy();
+  });
+});
+
+describe("PluginSettings with nothing installed", () => {
+  it("still shows the Plugins section, saying so", async () => {
+    const host = create_plugin_host<Api>({ app });
+    await host.start();
+    render(<PluginSettings host={host} heading="Extensions" />);
+
+    expect(screen.getByRole("heading", { name: "Extensions" })).toBeTruthy();
+    expect(screen.getByText("No plugins are installed.")).toBeTruthy();
   });
 });
 
