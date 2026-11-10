@@ -47,6 +47,9 @@ export interface SyncPaths {
   snapshot: string;
   replace: string;
   events: string;
+  // Where a device signs in for a token of its own, and gives it back.
+  login: string;
+  logout: string;
 }
 
 // Relative to the server's address, so a server under a folder keeps it.
@@ -55,6 +58,8 @@ export const default_sync_paths: SyncPaths = {
   snapshot: "api/sync/snapshot",
   replace: "api/sync/replace",
   events: "api/events",
+  login: "api/login",
+  logout: "api/logout",
 };
 
 // ── Device storage ───────────────────────────────────────────────────────────
@@ -62,6 +67,8 @@ export const default_sync_paths: SyncPaths = {
 export interface SyncConfig {
   server_url: string;
   token: string;
+  // Who the token signed in as, when the device signed in for it.
+  user?: string;
 }
 
 // Where each platform keeps the server and its token, and how it saves a copy of the data before the server's replaces it.
@@ -80,9 +87,26 @@ export type SyncDirection = "download" | "upload";
 // Off with no server set; needs_setup when the server's data was replaced and the device must choose a direction again.
 export type SyncState = "off" | "idle" | "syncing" | "offline" | "needs_setup" | "failed";
 
+// What a device signs in to the server with; the code only once the server asks for it.
+export interface SyncCredentials {
+  name: string;
+  password: string;
+  code?: string;
+}
+
+// What the server says when the password was right and only the authenticator code is missing.
+const code_needed_text = "Enter the code from your authenticator app.";
+
+// Whether a refused connect asks for the authenticator code, even after crossing to the page as plain text.
+export function asks_for_code(error: unknown): boolean {
+  return String(error instanceof Error ? error.message : error).includes(code_needed_text);
+}
+
 export interface SyncStatus {
   state: SyncState;
   server_url: string;
+  // Who the device is signed in as; empty when it syncs with a token given by hand.
+  user: string;
   // When the last exchange with the server finished, as an ISO time; empty if never.
   last_synced_at: string;
   // How many rows this device changed that the server has not had yet.
@@ -99,7 +123,8 @@ export function is_change_list(value: unknown): value is SyncChange[] {
 // What a page asks of a device that keeps its own copy; a browser has none, since it is already on the server.
 export interface SyncDeviceMethods {
   get_sync_status: () => SyncStatus;
-  connect_sync: (server_url: string, token: string, direction: SyncDirection) => Promise<SyncStatus>;
+  // Signs in with a name and password, takes a token given by hand, or keeps the saved sign-in when given null.
+  connect_sync: (server_url: string, credentials: SyncCredentials | string | null, direction: SyncDirection) => Promise<SyncStatus>;
   disconnect_sync: () => SyncStatus;
   sync_now: () => Promise<SyncStatus>;
 }

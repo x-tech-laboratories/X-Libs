@@ -6,8 +6,11 @@
 
 import type { SqlDatabase } from "./sql.ts";
 import type { SyncEngine } from "./sync_engine.ts";
+export { asks_for_code } from "./sync_protocol.ts";
+
 import {
   default_sync_paths,
+  type SyncCredentials,
   type SyncDirection,
   type SyncExchangeRequest,
   type SyncExchangeResponse,
@@ -38,6 +41,8 @@ export interface SyncClientOptions {
   client_id_header?: string;
   // What the data is called in messages, such as "tasks".
   data_name?: string;
+  // What the server lists this device as among the user's tokens, such as "X-Tasks on laptop".
+  device_name?: string;
   local_check_ms?: number;
   full_sync_ms?: number;
   retry_after_failure_ms?: number;
@@ -55,6 +60,7 @@ class SyncHttpError extends Error {
     this.status = status;
   }
 }
+
 
 // A trailing slash keeps the server's own folder when paths are resolved against it.
 export function normalise_server_url(server_url: string): string {
@@ -85,7 +91,8 @@ export function create_sync_client(options: SyncClientOptions) {
   const event_stream_retry_ms = options.event_stream_retry_ms ?? 15_000;
   const do_fetch = (input: URL, init?: RequestInit) => (options.fetch ?? fetch)(input, init);
 
-  let status: Omit<SyncStatus, "pending_changes"> = { state: "off", server_url: "", last_synced_at: "", error: "" };
+  const off = { state: "off", server_url: "", user: "", last_synced_at: "", error: "" } as const;
+  let status: Omit<SyncStatus, "pending_changes"> = { ...off };
   // The client id from the server's event stream, so the server does not tell this device about its own changes.
   let event_client_id = "";
   let exchanging: Promise<void> | null = null;
@@ -101,7 +108,7 @@ export function create_sync_client(options: SyncClientOptions) {
       headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json", [client_id_header]: event_client_id },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (response.status === 401) throw new SyncHttpError(401, "the server refused the access token");
+    if (response.status === 401) throw new SyncHttpError(401, "the server no longer accepts this device; sign in again");
     if (!response.ok) throw new SyncHttpError(response.status, `the server answered ${response.status}: ${await response.text()}`);
     return (await response.json()) as Result;
   }
@@ -166,15 +173,38 @@ export function create_sync_client(options: SyncClientOptions) {
 
   // ── Connecting ───────────────────────────────────────────────────────────
 
-  // Either way the device takes a fresh id, so a database copied from another device never passes for it.
-  async function connect(server_url: string, token: string, direction: SyncDirection): Promise<SyncStatus> {
+  // Signs this device in to the server for a token of its own, which it sends from then on.
+  async function sign_in(server_url: string, credentials: SyncCredentials): Promise<SyncConfig> {
+    const response = await do_fetch(new URL(paths.login, server_url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...credentials, device: options.device_name ?? "a device" }),
+    });
+    const answer = await response.json().catch(() => ({})) as { token?: string; error?: string };
+    if (!response.ok || !answer.token) throw new Error(answer.error ?? `the server answered ${response.status}`);
+    return { server_url, token: answer.token, user: credentials.name.trim().toLowerCase() };
+  }
+
+  // Gives the token back so the server forgets this device; a server out of reach keeps it until the user revokes it there.
+  function sign_out(config: SyncConfig): void {
+    void do_fetch(new URL(paths.logout, config.server_url), { method: "POST", headers: { authorization: `Bearer ${config.token}` } }).catch(() => {});
+  }
+
+  // Signs in with a name and password, or reuses the saved token when none are given, as when choosing a direction again;
+  // a token given by hand also works. Either way the device takes a fresh id, so a database copied from another device never passes for it.
+  async function connect(server_url: string, credentials: SyncCredentials | string | null, direction: SyncDirection): Promise<SyncStatus> {
     const saved = storage.read_config();
-    const config: SyncConfig = { server_url: normalise_server_url(server_url), token: token || (saved?.token ?? "") };
-    if (config.token === "") throw new Error("enter the access token");
+    const address = normalise_server_url(server_url);
+    let config: SyncConfig;
+    if (credentials !== null && typeof credentials === "object") config = await sign_in(address, credentials);
+    else if (credentials) config = { server_url: address, token: credentials };
+    else if (saved !== null && saved.server_url === address) config = saved;
+    else throw new Error("sign in with your name and password");
+    if (saved !== null && saved.token !== config.token) sign_out(saved);
 
     stop_background_sync();
     const database = options.database();
-    set_status({ state: "syncing", server_url: config.server_url, error: "" });
+    set_status({ state: "syncing", server_url: config.server_url, user: config.user ?? "", error: "" });
 
     try {
       if (direction === "download") {
@@ -201,12 +231,14 @@ export function create_sync_client(options: SyncClientOptions) {
     return get_status();
   }
 
-  // Stops syncing and forgets the server; the data on this device stays as it is.
+  // Stops syncing, signs out and forgets the server; the data on this device stays as it is.
   function disconnect(): SyncStatus {
     stop_background_sync();
+    const saved = storage.read_config();
+    if (saved !== null) sign_out(saved);
     storage.remove_config();
     engine.write_state(options.database(), { server_generation: "" });
-    status = { state: "off", server_url: "", last_synced_at: "", error: "" };
+    status = { ...off };
     options.on_status?.(get_status());
     return get_status();
   }
@@ -281,7 +313,7 @@ export function create_sync_client(options: SyncClientOptions) {
   function start(): void {
     const config = storage.read_config();
     if (!config) return;
-    set_status({ server_url: config.server_url });
+    set_status({ server_url: config.server_url, user: config.user ?? "" });
     if (engine.read_state(options.database()).server_generation === "") return ask_which_copy_to_keep("this device has not synced since a restore");
     set_status({ state: "idle" });
     start_background_sync();
