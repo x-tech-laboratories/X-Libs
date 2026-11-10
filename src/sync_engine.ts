@@ -89,7 +89,7 @@ interface CellRow {
 // ── Engine ───────────────────────────────────────────────────────────────────
 
 export function create_sync_engine(options: SyncEngineOptions) {
-  const tables = options.tables.map((table) => ({ local_columns: [], local_keys: [], ...table }));
+  const tables = options.tables.map((table) => ({ ...table, local_columns: table.local_columns ?? [], local_keys: table.local_keys ?? [] }));
   const tables_by_name = new Map(tables.map((table) => [table.name, table]));
   type Table = (typeof tables)[number];
 
