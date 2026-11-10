@@ -132,6 +132,24 @@ describe("Select", () => {
     expect(container.firstElementChild!.tagName).toBe("SELECT");
     expect(on_change).toHaveBeenCalledWith(1);
   });
+
+  test("draws option groups under their headings after the loose options, leaving out empty ones", () => {
+    const on_change = vi.fn();
+    const groups = [
+      { label: "Push", options: [["bench", "Bench Press"], ["dip", "Dip"]] as [string, string][] },
+      { label: "Chest", options: [["bench", "Bench Press"]] as [string, string][] },
+      { label: "Legs", options: [] },
+    ];
+    render(<Select bare label="Exercise" options={[["", "Pick an exercise…"]]} groups={groups} value="" on_change={on_change} />);
+
+    const select = screen.getByRole("combobox", { name: "Exercise" });
+    expect([...select.querySelectorAll("optgroup")].map((group) => group.label)).toEqual(["Push", "Chest"]);
+    expect(screen.getAllByRole("option", { name: "Bench Press" })).toHaveLength(2);
+    expect(select.firstElementChild!.textContent).toBe("Pick an exercise…");
+
+    fireEvent.change(select, { target: { value: "dip" } });
+    expect(on_change).toHaveBeenCalledWith("dip");
+  });
 });
 
 // ============================================================================

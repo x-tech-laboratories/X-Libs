@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
-import { BarChart, Donut, LineChart, Meters, Sparkline, StackedBarChart, Strip, Timeline } from "../src/web/react/charts.tsx";
+import { BarChart, Donut, LineChart, Meters, moving_average, Sparkline, StackedBarChart, Strip, Timeline } from "../src/web/react/charts.tsx";
 
 afterEach(cleanup);
 
@@ -25,6 +25,57 @@ test("a line chart with one reading says there is not enough history", () => {
   render(<LineChart title="Store used" format={format} series={[{ label: "thor", color: "red", points: [[0, 1], [0, 2]] }]} />);
 
   expect(screen.getByText("Not enough history yet to draw a trend.")).toBeTruthy();
+});
+
+const day = 86400;
+const kg = (value: number) => `${value} kg`;
+const iso_date = (epoch: number) => new Date(epoch * 1000).toISOString().slice(0, 10);
+
+function ticks(): string[] {
+  return [...screen.getByRole("img").querySelectorAll("text.tick")].map((tick) => tick.textContent ?? "");
+}
+
+test("a trend chart draws readings as dots, their average as a line and a goal dashed, on a scale fitted to them", () => {
+  const weights: [number, number][] = [[0, 80], [day, 81], [2 * day, 79]];
+  render(
+    <LineChart
+      title="Weight"
+      format={kg}
+      scale="fit"
+      format_time={iso_date}
+      series={[
+        { label: "Readings", color: "var(--series-1)", draw: "dots", points: weights },
+        { label: "Average", color: "var(--series-2)", points: moving_average(weights, 7 * day) },
+      ]}
+      limits={[{ label: "Goal", value: 75, color: "var(--status-success)" }]}
+    />,
+  );
+
+  const chart = screen.getByRole("img", { name: "Weight" });
+  expect([...chart.querySelectorAll("circle title")].map((title) => title.textContent)).toEqual(["1970-01-01: 80 kg", "1970-01-02: 81 kg", "1970-01-03: 79 kg"]);
+  expect(chart.querySelector("path title")!.textContent).toBe("Average");
+  expect(chart.querySelector("line[stroke-dasharray] title")!.textContent).toBe("Goal: 75 kg");
+  // 75 to 81 padded by 15% of the span either way, not down to zero.
+  expect(ticks()).toEqual(["81.9 kg", "74.1 kg", "1970-01-01", "1970-01-03"]);
+  expect([...chart.closest("figure")!.querySelectorAll(".legend")].map((legend) => legend.textContent)).toEqual(["Readings", "Average", "Goal"]);
+});
+
+test("a chart of dots draws a single reading in the middle, with one date and a made-up span", () => {
+  render(<LineChart title="Weight" format={kg} scale="fit" format_time={iso_date} series={[{ label: "Readings", color: "red", draw: "dots", points: [[0, 80]] }]} />);
+
+  const dot = screen.getByRole("img").querySelector("circle")!;
+  expect(dot.getAttribute("cx")).toBe("328.0");
+  expect(ticks()).toEqual(["84 kg", "76 kg", "1970-01-01"]);
+});
+
+test("a chart with nothing to draw says its own message", () => {
+  render(<LineChart title="Weight" format={kg} empty_message="Nothing to plot yet." series={[{ label: "Readings", color: "red", draw: "dots", points: [] }]} />);
+
+  expect(screen.getByText("Nothing to plot yet.")).toBeTruthy();
+});
+
+test("a moving average runs over the window ending on each reading, skipping gaps", () => {
+  expect(moving_average([[0, 2], [day, null], [2 * day, 4], [10 * day, 9]], 7 * day)).toEqual([[0, 2], [2 * day, 3], [10 * day, 9]]);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
