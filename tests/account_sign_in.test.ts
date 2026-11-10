@@ -29,6 +29,7 @@ async function serve(options: Partial<AccountSignInOptions> = {}): Promise<Accou
   app.get("/api/things", async (request) => ({ seen_by: request.viewer?.name }));
   app.post("/api/things", async () => ({ ok: true }));
   app.get("/", async () => "page");
+  app.get("/metrics", async () => "metrics");
   return accounts;
 }
 
@@ -91,6 +92,17 @@ describe("signing in", () => {
     expect((await app.inject({ method: "PUT", url: "/api/account/password", headers, payload: {} })).statusCode).toBe(403);
     await app.inject({ method: "POST", url: "/api/logout", headers });
     expect((await app.inject({ url: "/api/things", headers })).statusCode).toBe(401);
+  });
+});
+
+describe("guarded paths", () => {
+  it("guards a path outside the API only when it is named", async () => {
+    await serve({ guarded_paths: ["/metrics"] });
+    const { token } = (await sign_in({ name: "root", password, device: "Scraper" })).json();
+
+    expect((await app.inject({ url: "/metrics" })).statusCode).toBe(401);
+    expect((await app.inject({ url: "/metrics", headers: { authorization: `Bearer ${token}` } })).body).toBe("metrics");
+    expect((await app.inject({ url: "/" })).body).toBe("page");
   });
 });
 

@@ -53,6 +53,8 @@ export interface AccountSignInOptions {
   api_prefix?: string;
   // Paths reached without signing in, such as a health check, an agent socket or a webhook.
   open_paths?: Iterable<string>;
+  // Paths outside the API that still need signing in, such as /metrics; `needed` decides what they need.
+  guarded_paths?: Iterable<string>;
   // What each of the app's own API routes needs; anyone signed in unless set.
   needed?: (method: string, path: string) => Need;
   oidc?: OidcClient | null;
@@ -87,6 +89,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     oidc_start: `${prefix}/auth/oidc/start`, oidc_callback: `${prefix}/auth/oidc/callback`,
     account: `${prefix}/account`, users: `${prefix}/users`, tokens: `${prefix}/tokens`,
   };
+  const guarded_paths = new Set(options.guarded_paths ?? []);
   const open_paths = new Set([routes.info, routes.login, routes.oidc_start, routes.oidc_callback, ...(options.open_paths ?? [])]);
   const admin: Need = { role: accounts.top_role };
 
@@ -128,7 +131,8 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
   // What a request needs, with the account routes' own needs first.
   const need_of = (method: string, path: string): Need => {
-    if (!path.startsWith(`${prefix}/`) || open_paths.has(path)) return "open";
+    if (open_paths.has(path)) return "open";
+    if (!path.startsWith(`${prefix}/`)) return guarded_paths.has(path) ? needed(method, path) : "open";
     if (path === routes.me || path === routes.logout || path.startsWith(`${routes.account}/`)) return "any";
     if (path === routes.users || path.startsWith(`${routes.users}/`) || path === routes.tokens || path.startsWith(`${routes.tokens}/`)) return admin;
     return needed(method, path);
@@ -148,7 +152,9 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     const path = path_of(request);
     const need = need_of(request.method, path);
     const viewer = request.viewer;
-    if (need === "open" || viewer === null) return;
+    if (need === "open") return;
+    // The guard answers for the API; a guarded path outside it is turned away here.
+    if (viewer === null) return path.startsWith(`${prefix}/`) ? undefined : reply.code(401).send({ error: sign_in_first });
     // A token cannot manage the account that owns it, so a lost device cannot lock its owner out.
     if (viewer.via === "token" && (path.startsWith(`${routes.account}/`) || typeof need === "object" && (path.startsWith(routes.users) || path.startsWith(routes.tokens)))) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
