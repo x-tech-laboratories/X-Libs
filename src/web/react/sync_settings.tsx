@@ -1,11 +1,12 @@
 // The Sync section every app with a sync server shows in its settings: the status, and either who the device is signed
 // in as with Sync now and Stop syncing, or the server's address, a name and password (and the code when asked) and the
-// choice of which copy wins the first time. It pairs with sync_client, which runs wherever the app keeps its database.
+// choice of which copy wins the first time, asked before it replaces anything. It pairs with sync_client, which runs wherever the app keeps its database.
 
 import { useEffect, useState, type FormEvent } from "react";
 import { asks_for_code, type SyncDeviceClient, type SyncDirection, type SyncStatus } from "../../sync_protocol.ts";
 import { describe_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
+import { confirm_dialog } from "./dialog.tsx";
 import { SettingRow } from "./layout.tsx";
 import { toast } from "./toasts.tsx";
 
@@ -18,12 +19,14 @@ export interface SyncSettingsProps {
   data_name?: string;
   // An example server address.
   placeholder?: string;
+  // What the question before each choice says; the standard words unless set.
+  confirm_text?: Record<SyncDirection, string>;
 }
 
 const tones = { off: "none", idle: "good", syncing: "info", offline: "warn", needs_setup: "warn", failed: "bad" } as const;
 const state_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing", offline: "Offline", needs_setup: "Needs a choice", failed: "Failed" } as const;
 
-export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/" }: SyncSettingsProps) {
+export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text }: SyncSettingsProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
   const [server_url, set_server_url] = useState("");
   const [name, set_name] = useState("");
@@ -56,6 +59,21 @@ export function SyncSettings({ device, subscribe, data_name, placeholder = "http
     } finally {
       set_busy(false);
     }
+  }
+
+  // Asks before one copy replaces the other, but not again when only the code was missing.
+  function choose(direction: SyncDirection): void {
+    if (asks_code) return void connect(direction);
+    const question = confirm_text?.[direction] ?? (direction === "download"
+      ? `Replace the ${data_name} on this device with the server's? A copy of this device's is kept first.`
+      : `Replace the ${data_name} on the server with this device's? Other devices will have to choose again, and the server keeps a copy first.`);
+    confirm_dialog({
+      title: direction === "download" ? `Use the server's ${data_name}?` : `Use this device's ${data_name}?`,
+      message: question,
+      confirm_label: direction === "download" ? "Use the server's" : "Use this device's",
+      danger: true,
+      run: () => connect(direction),
+    });
   }
 
   if (!status) return null;
@@ -93,8 +111,8 @@ export function SyncSettings({ device, subscribe, data_name, placeholder = "http
             )}
           </>}
           <SettingRow label="First sync" hint="Which copy wins the first time; the other is backed up before it is replaced.">
-            <button type="button" disabled={busy} onClick={() => void connect("download")}>{`Use the server's ${data_name}`}</button>
-            <button type="button" disabled={busy} onClick={() => void connect("upload")}>{`Use this device's ${data_name}`}</button>
+            <button type="button" disabled={busy} onClick={() => choose("download")}>{`Use the server's ${data_name}`}</button>
+            <button type="button" disabled={busy} onClick={() => choose("upload")}>{`Use this device's ${data_name}`}</button>
           </SettingRow>
         </form>
       )}

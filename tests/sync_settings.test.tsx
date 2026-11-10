@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
+import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
 import type { SyncCredentials, SyncDeviceClient, SyncStatus } from "../src/sync_protocol.ts";
+import { Dialogs } from "../src/web/react/dialog.tsx";
 import { SyncSettings } from "../src/web/react/sync_settings.tsx";
 
 afterEach(cleanup);
 
 const off: SyncStatus = { state: "off", server_url: "", user: "", last_synced_at: "", pending_changes: 0, error: "" };
 
-test("signs the device in, asking for the code when the server does, then shows who it syncs as", async () => {
+test("asks before replacing, signs the device in, asks for the code when the server does, then shows who it syncs as", async () => {
   const tries: (SyncCredentials | string | null)[] = [];
   let status = off;
   const device: SyncDeviceClient = {
@@ -23,13 +25,14 @@ test("signs the device in, asking for the code when the server does, then shows 
     disconnect_sync: async () => off,
     sync_now: async () => status,
   };
-  render(<SyncSettings device={device} data_name="tasks" />);
+  render(<><SyncSettings device={device} data_name="tasks" /><Dialogs /></>);
 
   await waitFor(() => screen.getByLabelText("Server address"));
   fireEvent.change(screen.getByLabelText("Server address"), { target: { value: "https://sync.example.org/" } });
   fireEvent.change(screen.getByLabelText("User name"), { target: { value: "ada" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
   fireEvent.click(screen.getByRole("button", { name: "Use the server's tasks" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use the server's" }));
   await waitFor(() => screen.getByLabelText("Code from your authenticator app, or a recovery code"));
   fireEvent.change(screen.getByLabelText("Code from your authenticator app, or a recovery code"), { target: { value: "123456" } });
   fireEvent.click(screen.getByRole("button", { name: "Use the server's tasks" }));
