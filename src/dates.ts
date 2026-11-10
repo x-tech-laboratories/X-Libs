@@ -48,6 +48,53 @@ export function add_months(date: Date, months: number): Date {
   );
 }
 
+// ── Days and months ──────────────────────────────────────────────────────────
+
+// Today on this device, such as "2026-06-10".
+export function today(now = new Date()): string {
+  return format_local(now, false);
+}
+
+export function shift_day(local_date: string, days: number): string {
+  return format_local(add_days(parse_local(local_date), days), false);
+}
+
+// A real day such as "2026-02-28", never "2026-02-30" or a day with a time.
+export function is_day(text: unknown): text is string {
+  return typeof text === "string" && /^\d{4}-\d{2}-\d{2}$/.test(text) && format_local(parse_local(text), false) === text;
+}
+
+// The month of a date, such as "2026-06", taken from the text so a time zone never moves the 1st into the month before.
+export function month_of(local_date: string): string {
+  return local_date.slice(0, 7);
+}
+
+export function this_month(now = new Date()): string {
+  return month_of(today(now));
+}
+
+export function is_month(text: unknown): text is string {
+  return typeof text === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(text);
+}
+
+export function shift_month(month: string, months: number): string {
+  const [year = 0, number = 1] = month.split("-").map(Number);
+  const index = year * 12 + number - 1 + months;
+  return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
+}
+
+// The months from first to last, both included, oldest first.
+export function months_from(first: string, last: string): string[] {
+  const months: string[] = [];
+  for (let month = first; month <= last; month = shift_month(month, 1)) months.push(month);
+  return months;
+}
+
+// A month in the reader's language, such as "June 2026", or "Jun 2026" when short.
+export function format_month(month: string, locale?: string, short = false): string {
+  return parse_local(`${month}-01`).toLocaleDateString(locale || undefined, { month: short ? "short" : "long", year: "numeric" });
+}
+
 // ── Labels ───────────────────────────────────────────────────────────────────
 
 // A date without a time is overdue only once its day has passed.

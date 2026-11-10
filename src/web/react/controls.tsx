@@ -1,6 +1,7 @@
 // React controls drawn like the page's own: segmented choices, switches, search fields, selects, and date, colour and tree pickers.
 
 import { createElement, useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { format_month, is_day, is_month, relative_day_label, shift_day, shift_month, this_month, today } from "../../dates.ts";
 import { in_tree_order, path_names, type TreeItem } from "../tree.ts";
 
 // ── Choices ──────────────────────────────────────────────────────────────────
@@ -309,6 +310,39 @@ export function DateTimeField({ label, value, on_change, allow_time = true }: Da
         {day && allow_time && <input type="time" aria-label={`${label} time`} value={time} onChange={(event) => join(day, event.currentTarget.value)} />}
         {day && <button type="button" className="icon remove" aria-label={`Clear ${label.toLowerCase()} date`} onClick={() => on_change(null)}>×</button>}
       </div>
+    </div>
+  );
+}
+
+interface PeriodStepperProps {
+  label: string;
+  // A day steps "2026-06-10" a day at a time; a month steps "2026-06" a month at a time.
+  period: "day" | "month";
+  value: string;
+  on_change: (value: string) => void;
+  // The clock Today or This month goes back to; the device's own unless set.
+  now?: Date;
+  locale?: string;
+}
+
+// A day or month stepped back and forward, picked from the calendar, or brought back to the current one, named in words beside.
+export function PeriodStepper({ label, period, value, on_change, now, locale }: PeriodStepperProps) {
+  const is_daily = period === "day";
+  const current = is_daily ? today(now) : this_month(now);
+  const shift = (steps: number) => on_change(is_daily ? shift_day(value, steps) : shift_month(value, steps));
+  const pick = (text: string) => {
+    if (is_daily ? is_day(text) : is_month(text)) on_change(text);
+  };
+
+  return (
+    <div className="stepper" role="group" aria-label={label}>
+      <div className="date-time-inputs">
+        <button type="button" aria-label={`Previous ${period}`} onClick={() => shift(-1)}>‹</button>
+        <input type={is_daily ? "date" : "month"} aria-label={`Pick a ${period}`} value={value} onChange={(event) => pick(event.currentTarget.value)} />
+        <button type="button" aria-label={`Next ${period}`} onClick={() => shift(1)}>›</button>
+      </div>
+      <button type="button" disabled={value === current} onClick={() => on_change(current)}>{is_daily ? "Today" : "This month"}</button>
+      <span className="muted">{is_daily ? relative_day_label(value, now, locale) : format_month(value, locale)}</span>
     </div>
   );
 }

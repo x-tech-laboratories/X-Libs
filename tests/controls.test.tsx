@@ -3,7 +3,7 @@ import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ColorPicker, CommitInput, DateTimeField, NumberField, PathInput, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
+import { ColorPicker, CommitInput, DateTimeField, NumberField, PathInput, PeriodStepper, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
 import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
@@ -209,6 +209,42 @@ describe("DateTimeField", () => {
 // ============================================================================
 // Pickers
 // ============================================================================
+
+describe("PeriodStepper", () => {
+  const now = new Date(2026, 5, 10, 12, 0);
+
+  test("steps months, takes a picked month, ignores a half-typed one and comes back to this month", () => {
+    const on_change = vi.fn();
+    const { rerender } = render(<PeriodStepper label="Month" period="month" value="2026-01" on_change={on_change} now={now} locale="en-US" />);
+
+    expect(screen.getByRole("group", { name: "Month" }).textContent).toContain("January 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(on_change).toHaveBeenLastCalledWith("2025-12");
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+    expect(on_change).toHaveBeenLastCalledWith("2026-02");
+    fireEvent.change(screen.getByLabelText("Pick a month"), { target: { value: "2026-04" } });
+    expect(on_change).toHaveBeenLastCalledWith("2026-04");
+    on_change.mockClear();
+    fireEvent.change(screen.getByLabelText("Pick a month"), { target: { value: "2026-1" } });
+    expect(on_change).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "This month" }));
+    expect(on_change).toHaveBeenLastCalledWith("2026-06");
+    rerender(<PeriodStepper label="Month" period="month" value="2026-06" on_change={on_change} now={now} />);
+    expect(screen.getByRole("button", { name: "This month" })).toHaveProperty("disabled", true);
+  });
+
+  test("steps days and names them relative to today", () => {
+    const on_change = vi.fn();
+    render(<PeriodStepper label="Day" period="day" value="2026-06-11" on_change={on_change} now={now} locale="en-US" />);
+
+    expect(screen.getByRole("group", { name: "Day" }).textContent).toContain("Tomorrow");
+    fireEvent.click(screen.getByRole("button", { name: "Next day" }));
+    expect(on_change).toHaveBeenLastCalledWith("2026-06-12");
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    expect(on_change).toHaveBeenLastCalledWith("2026-06-10");
+  });
+});
 
 describe("ColorPicker", () => {
   const swatches = ["#e5484d", "#30a46c"];

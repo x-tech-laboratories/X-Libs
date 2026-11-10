@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { add_days, add_months, days_between, format_local, has_time, is_overdue, parse_local, relative_day_label, start_of_day } from "../src/dates.ts";
+import {
+  add_days, add_months, days_between, format_local, format_month, has_time, is_day, is_month, is_overdue, month_of, months_from, parse_local, relative_day_label,
+  shift_day, shift_month, start_of_day, this_month, today,
+} from "../src/dates.ts";
 
 // ── Text and dates ───────────────────────────────────────────────────────────
 
@@ -78,5 +81,43 @@ describe("overdue and labels", () => {
 
   test("adds the time when there is one", () => {
     expect(relative_day_label("2026-06-11T09:30", now, "en-US")).toMatch(/^Tomorrow 9:30\sAM$/);
+  });
+});
+
+// ── Days and months ──────────────────────────────────────────────────────────
+
+describe("days and months", () => {
+  const now = new Date(2026, 0, 31, 23, 30);
+
+  test("names today and this month on the device's clock", () => {
+    expect(today(now)).toBe("2026-01-31");
+    expect(this_month(now)).toBe("2026-01");
+  });
+
+  test("steps days across a month's end", () => {
+    expect(shift_day("2026-01-31", 1)).toBe("2026-02-01");
+    expect(shift_day("2026-03-01", -1)).toBe("2026-02-28");
+  });
+
+  test("takes the month from the text and steps it across years", () => {
+    expect(month_of("2026-08-01")).toBe("2026-08");
+    expect(shift_month("2026-01", -1)).toBe("2025-12");
+    expect(shift_month("2026-11", 14)).toBe("2028-01");
+    expect(months_from("2025-11", "2026-02")).toEqual(["2025-11", "2025-12", "2026-01", "2026-02"]);
+    expect(months_from("2026-02", "2026-01")).toEqual([]);
+  });
+
+  test("tells real days and months from other text", () => {
+    expect(is_day("2024-02-29")).toBe(true);
+    expect(is_day("2026-02-30")).toBe(false);
+    expect(is_day("2026-02-03T10:00")).toBe(false);
+    expect(is_month("2026-12")).toBe(true);
+    expect(is_month("2026-13")).toBe(false);
+    expect(is_month(202612)).toBe(false);
+  });
+
+  test("names a month in words", () => {
+    expect(format_month("2026-06", "en-US")).toBe("June 2026");
+    expect(format_month("2026-06", "en-US", true)).toBe("Jun 2026");
   });
 });
