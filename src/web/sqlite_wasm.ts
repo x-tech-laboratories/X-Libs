@@ -110,15 +110,28 @@ export async function open_wasm_database(options: WasmDatabaseOptions): Promise<
     save_timer ??= setTimeout(() => void save_now(), options.save_delay_ms ?? 300);
   };
 
-  const prepare = (sql: string): SqlStatement => ({
-    run: (...params) => {
-      run_statement(database, sql, params);
-      save_soon();
-      return { changes: database.changes(), lastInsertRowid: sqlite3.capi.sqlite3_last_insert_rowid(database.pointer!) };
-    },
-    get: (...params) => run_statement(database, sql, params)[0],
-    all: (...params) => run_statement(database, sql, params),
-  });
+  const prepare = (sql: string): SqlStatement => {
+    let returns_arrays = false;
+    // A statement that returns rows can still write, such as INSERT ... RETURNING, so the change count decides the save.
+    const rows = (params: SqlValue[]): unknown[] => {
+      const changes_before = sqlite3.capi.sqlite3_total_changes(database.pointer!);
+      const found = run_statement(database, sql, params);
+      if (sqlite3.capi.sqlite3_total_changes(database.pointer!) !== changes_before) save_soon();
+      return returns_arrays ? found.map((row) => Object.values(row)) : found;
+    };
+    return {
+      run: (...params) => {
+        run_statement(database, sql, params);
+        save_soon();
+        return { changes: database.changes(), lastInsertRowid: sqlite3.capi.sqlite3_last_insert_rowid(database.pointer!) };
+      },
+      get: (...params) => rows(params)[0],
+      all: (...params) => rows(params),
+      setReturnArrays: (on) => {
+        returns_arrays = on;
+      },
+    };
+  };
 
   const connection: SqlDatabase = {
     exec: (sql) => {
