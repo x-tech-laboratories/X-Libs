@@ -92,7 +92,7 @@ describe("shell top bar", () => {
     expect(screen.getByRole("link", { name: "X-Test" }).getAttribute("href")).toBe("#/today");
     expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();
     expect(document.getElementById("theme")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
     expect(document.body.classList.contains("logged-out")).toBe(false);
     expect(screen.getByRole("main").className).toBe("panes");
   });
@@ -107,7 +107,7 @@ describe("shell top bar", () => {
   it("shows no account name for an empty user, and keeps the tools when told the user is not logged out", () => {
     const { rerender } = render(<Shell brand="X-Test" tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} user="" on_logout={() => {}}>Page</Shell>);
     expect(document.querySelector(".user-name")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
 
     rerender(<Shell brand="X-Test" tools={<input aria-label="Search" />} theme={theme_choice("x-test-theme")} user={null} logged_out={false}>Page</Shell>);
     expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();

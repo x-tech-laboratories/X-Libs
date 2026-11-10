@@ -26,7 +26,7 @@ export interface ApiOptions {
   open_paths?: Iterable<string>;
   // Headers every request carries, read afresh each time, such as the client id of a change feed.
   headers?: () => Record<string, string>;
-  // What a lapsed session says; "Log in first." unless set.
+  // What a lapsed session says; "Sign in first." unless set.
   login_needed_text?: string;
   fetch?: typeof fetch;
 }
@@ -50,7 +50,7 @@ function refusal_message(text: string, response: Response): string {
 
 export function create_api(options: ApiOptions = {}): Api {
   const open_paths = new Set(options.open_paths ?? []);
-  const login_needed_text = options.login_needed_text ?? "Log in first.";
+  const login_needed_text = options.login_needed_text ?? "Sign in first.";
 
   return async <Answer>(path: string, method: ApiMethod = "GET", body: unknown = undefined): Promise<Answer> => {
     const headers: Record<string, string> = { accept: "application/json", ...options.headers?.() };

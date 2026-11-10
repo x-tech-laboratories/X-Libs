@@ -71,7 +71,7 @@ interface ShellProps {
   // Makes the sidebar's edge draggable on wide screens.
   sidebar_width?: SidebarWidth;
   theme: ThemeChoice;
-  // Who is logged in; left out, null or empty shows no account name or Log out.
+  // Who is signed in; left out, null or empty shows no account name or Sign out.
   user?: string | null;
   // Hides the sidebar and the top bar's tools, such as on the login page; true when user is null unless set.
   logged_out?: boolean;
@@ -180,7 +180,7 @@ export function Shell({
         {!logged_out && tools}
         {!logged_out && <ThemeButton choice={theme} />}
         {user_name !== undefined && (user_href ? <a className="account-link" href={user_href}>{user_name}</a> : <span className="user-name">{user_name}</span>)}
-        {user_name !== undefined && on_logout && <button onClick={on_logout}>Log out</button>}
+        {user_name !== undefined && on_logout && <button onClick={on_logout}>Sign out</button>}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">

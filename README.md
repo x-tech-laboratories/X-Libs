@@ -39,7 +39,10 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `server/backup_files`                    | `file_backup_store`: the `backups` store as files in a folder on disk.        |
 | `server/sign_in`, `server/login_page`    | `register_token_sign_in`: a server with one secret signs browsers in on its own login page, keeps them in by an HMAC-derived cookie, takes the secret as a bearer header, waits after a wrong try, and turns the rest away (401 in text or JSON under the API prefix, 303 to the login page elsewhere, with open paths); `register_sign_in_guard` is the turning-away alone, for an app with its own sessions. |
-| `server/password_sign_in`                | `register_password_sign_in`: names and passwords from the accounts file open a session the server keeps (on @fastify/session) through `/api/login`, with `/api/logout` and `/api/me`; a wrong name takes as long as a wrong password, an address gets a few tries before it waits (on @fastify/rate-limit), and other API paths but the open ones answer 401 as JSON. |
+| `server/account_store`                   | `AccountStore`: users with the app's ordered roles and its own access rules, checked by `check_access`, the accounts file's users declared at the highest role, second factor with recovery codes, sessions and tokens, all in the app's SQLite database under `account_*` tables. |
+| `server/account_sign_in`                 | `register_accounts`: the standard sign-in. A name and password (then the code when the user has a second factor), single sign-on or a trusted proxy opens a session kept in the database; "Keep me signed in" unticked ends it with the browser, ticked keeps it until revoked, both bounded by `session_seconds` and `remembered_seconds`. A device signs in with `device` and gets a token instead. It also serves the account routes (password, second factor, sessions, tokens), the admin's users and tokens, and checks each app route against `needed`. |
+| `server/totp`, `server/oidc`             | Authenticator-app codes (RFC 6238) and their `otpauth://` links; `OidcClient`, single sign-on by the code flow with PKCE and a checked ID token, set up from `<PREFIX>_OIDC_*` by `oidc_from_environment`. |
+| `server/password_sign_in`                | For apps not yet on `server/account_sign_in`. `register_password_sign_in`: names and passwords from the accounts file open a session the server keeps (on @fastify/session) through `/api/login`, with `/api/logout` and `/api/me`; a wrong name takes as long as a wrong password, an address gets a few tries before it waits (on @fastify/rate-limit), and other API paths but the open ones answer 401 as JSON. |
 | `server/forge_webhook`                   | A forge's pushes: `is_signed` for GitHub's HMAC, Gitea's and Forgejo's signatures, a bearer token or GitLab's token; `event_of`, `parse_payload` and `read_push`, which names the branch and the repository URLs through the app's own normaliser; `AddressLockout` for an address that keeps failing to sign; `Debouncer` so a burst of pushes starts one run; `register_webhook_route`, which keeps the raw body the signature covers. |
 | `server/poller`, `server/runs`           | `CyclePoller`: each watched item's cycle on its own timer, every `interval` or every `job_poll` while busy, with `refresh` and `soon`; `follow_run`: a long run's new output copied to a sink and the run finished once it has ended, with `describe` and `translate` hooks, an unreachable agent leaving it to be followed again. |
 | `server/events`                          | `EventStream`: server-sent events with a client id per page, a heartbeat, `announce_change(except_client_id)` so the page that made a change is not told, nameless or named events to all or chosen clients, and every stream ended with the app. |
@@ -60,7 +63,10 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/shell`                        | `Shell`: top bar with the brand and its icon, section links or the app's own sidebar in a `.sidebar-content` box, resizable, theme button, a `status_bar` at the foot, toasts, dialogs and menus, with or without logins (no account UI without a `user`, `logged_out` hiding the sidebar and tools), its phone menu held by the Shell or the app, and for app-like pages a `contained` window where only main scrolls, the brand heading the sidebar, and a `sidebar_foot` held at the sidebar's bottom; `use_route`. |
 | `web/react/layout`, `badges`, `states`   | `PageHeading` with a subtitle, icon, banner, actions and a `level` for inside dialogs and panels; panels, facts, tiles, cards, tabs, crumbs, steppers, `FormRow` for a form's labelled fields, `SettingsPage` with an outline beside its sections that marks the one being read, settings rows, `RowActions` and `moved` for ordered lists, `SelectionBar` for picked rows; badges, chips in an item's own colour, dashed or removable, `ColorDot` and `StatusPill`, a state dot with text and an action; `use_resource` with its `status` (idle until `enabled`, loading, loaded, failed), a `watch` that reloads it quietly, and its loading states, `Loaded` going by the status so a null result shows its `empty` slot or the children. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover; `use_now`, the time read again each minute. |
-| `web/react/login`                        | `LoginForm`, the name and password form; `use_session`, the page's session checked once at start and lost whenever a `LoginNeeded` goes unhandled; they pair with `server/password_sign_in`. |
+| `web/accounts`                           | `create_accounts_client`: the page's calls to `server/account_sign_in`, from the page itself or, given the server's address as `base`, from a desktop or phone app, which signs in with `sign_in_device` and keeps the token; `SignInRefused` says when only the code is missing. |
+| `web/react/sign_in`                      | `SignInForm`: name, password, the code when asked, "Keep me signed in" and the single sign-on button; `use_account`, the account the page is signed in as, checked at start and lost whenever a `LoginNeeded` goes unhandled. |
+| `web/react/accounts`                     | `AccountView`, "Your account": password, second factor, where you are signed in with Sign out, and your tokens; `UsersView`, the admin's users with roles, access, second factor resets and Sign out, and every token; the app gives `role_text`, `access_text` and an `access_editor`. |
+| `web/react/login`                        | For apps not yet on `web/react/sign_in`. `LoginForm`, the name and password form; `use_session`, the page's session checked once at start and lost whenever a `LoginNeeded` goes unhandled; they pair with `server/password_sign_in`. |
 | `web/react/reveal`                       | `use_reveal`: a long list shown a page at a time, the next page added as its end scrolls into view, starting from the count shown before the page was left if given. |
 | `web/react/media`                        | `Avatar`, a round picture or the name's first letter; `MediaTile` and `MediaGrid`: videos, albums or playlists as tiles in a grid or as rows, with text over the picture's corner such as a length, lines under the title, a faded look, and buttons in the corner. |
 | `web/react/menu_button`                  | `MenuButton`: a ⋮ button that opens a menu under itself, even inside a link, saying through `aria-expanded` whether it is open. |
@@ -111,6 +117,31 @@ await register_web_folder(app, { folder: config.web_folder });
 
 An app with its own sessions, such as one logging in by name and password, uses `register_sign_in_guard` with its
 own `is_signed_in`, `login_path: null` so its page loads and logs in itself, and `refusal: "json"`.
+
+## Accounts
+
+Every app whose users sign in uses the same accounts: `register_accounts` on the server, `SignInForm`, `AccountView`
+and `UsersView` on the page, and "Sign in" and "Sign out" in its words. A desktop or phone app syncing with a server
+signs in once as a device and sends its token from then on.
+
+```ts
+const accounts = new AccountStore({
+  database, app_name: "X-Tasks", roles: ["viewer", "editor", "admin"],
+  declared: load_accounts("X_TASKS_PASSWORD_HASH_FILE"),
+});
+await register_accounts(app, {
+  accounts, cookie_name: "x_tasks_session", oidc: oidc_settings && new OidcClient(oidc_settings),
+  needed: (method) => (method === "GET" ? "any" : { role: "editor" }),
+});
+```
+
+On the page, the Shell shows the name, linked to "Your account", and Sign out:
+
+```tsx
+const client = create_accounts_client();
+const { account, refresh, sign_out } = use_account(client);
+if (account.state === "signed_out") return <SignInForm client={client} title="X-Tasks" on_signed_in={refresh} />;
+```
 
 ## The page's widgets
 
