@@ -2,7 +2,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { Suggestions } from "../src/web/react/suggestions.tsx";
+import { useState } from "react";
+
+import { ComboField, Suggestions } from "../src/web/react/suggestions.tsx";
 
 afterEach(cleanup);
 
@@ -61,4 +63,99 @@ test("Escape dismisses the list, a click takes one, and other keys pass through"
   expect(on_take).toHaveBeenCalledWith(commands[1]);
 
   expect(screen.queryByRole("listbox")).toBeNull();
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Combo field
+// ════════════════════════════════════════════════════════════════════════════
+
+const meals = ["Breakfast", "Lunch", "Dinner", "Snack"];
+
+function Meal({ on_enter, on_take, list_on_focus, initial = "" }: { on_enter?: (value: string) => void; on_take?: (value: string) => void; list_on_focus?: boolean; initial?: string }) {
+  const [value, set_value] = useState(initial);
+  return (
+    <>
+      <ComboField label="Meal" value={value} options={meals} on_change={set_value} on_take={on_take} on_enter={on_enter && (() => on_enter(value))} list_on_focus={list_on_focus} />
+      <output>{value}</output>
+    </>
+  );
+}
+
+function names(): string[] {
+  return screen.queryAllByRole("option").map((option) => option.textContent ?? "");
+}
+
+test("a combo field lists every value once entered, nothing lit, and narrows as it is typed into", async () => {
+  render(<Meal />);
+  await settle();
+  const field = screen.getByRole("combobox", { name: "Meal" });
+  expect(screen.queryByRole("listbox")).toBeNull();
+
+  fireEvent.focus(field);
+  expect(names()).toEqual(meals);
+  expect(field.getAttribute("aria-expanded")).toBe("true");
+  expect(field.getAttribute("aria-activedescendant")).toBeNull();
+
+  fireEvent.input(field, { target: { value: "NN" } });
+  fireEvent.change(field, { target: { value: "NN" } });
+  await settle();
+  expect(names()).toEqual(["Dinner"]);
+});
+
+test("a combo field takes a value by arrow and Enter, comes back to the text past the end, and closes on Escape", async () => {
+  const on_enter = vi.fn();
+  render(<Meal on_enter={on_enter} />);
+  await settle();
+  const field = screen.getByRole("combobox", { name: "Meal" });
+  fireEvent.focus(field);
+
+  fireEvent.keyDown(field, { key: "ArrowUp" });
+  expect(screen.getByRole("option", { name: "Snack" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.keyDown(field, { key: "ArrowDown" });
+  expect(screen.getAllByRole("option").every((option) => option.getAttribute("aria-selected") === "false")).toBe(true);
+  fireEvent.keyDown(field, { key: "ArrowDown" });
+  fireEvent.keyDown(field, { key: "ArrowDown" });
+  fireEvent.keyDown(field, { key: "Enter" });
+
+  expect(screen.getByRole("status").textContent).toBe("Lunch");
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(on_enter).not.toHaveBeenCalled();
+  await settle();
+
+  fireEvent.keyDown(field, { key: "ArrowDown" });
+  expect(screen.getByRole("listbox")).toBeTruthy();
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByRole("listbox")).toBeNull();
+});
+
+test("a combo field hands free text to on_enter when nothing is lit, and a click takes one", async () => {
+  const on_enter = vi.fn();
+  const on_take = vi.fn();
+  render(<Meal on_enter={on_enter} on_take={on_take} initial="Brunch" />);
+  await settle();
+  const field = screen.getByRole("combobox", { name: "Meal" });
+
+  fireEvent.focus(field);
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(on_enter).toHaveBeenCalledWith("Brunch");
+
+  fireEvent.change(field, { target: { value: "" } });
+  await settle();
+  fireEvent.click(field);
+  fireEvent.mouseDown(screen.getByRole("option", { name: "Dinner" }));
+  expect(on_take).toHaveBeenCalledWith("Dinner");
+});
+
+test("a combo field told not to list on focus waits for typing", async () => {
+  render(<Meal list_on_focus={false} />);
+  await settle();
+  const field = screen.getByRole("combobox", { name: "Meal" });
+
+  fireEvent.focus(field);
+  expect(screen.queryByRole("listbox")).toBeNull();
+  fireEvent.input(field, { target: { value: "sn" } });
+  fireEvent.change(field, { target: { value: "sn" } });
+  await settle();
+
+  expect(names()).toEqual(["Snack"]);
 });
