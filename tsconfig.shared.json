@@ -11,5 +11,5 @@
     "declaration": true,
     "composite": true
   },
-  "include": ["src/api_spec.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts"]
+  "include": ["src/api_spec.ts", "src/backup_protocol.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts"]
 }

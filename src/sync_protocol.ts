@@ -57,6 +57,21 @@ export const default_sync_paths: SyncPaths = {
   events: "api/events",
 };
 
+// ── Device storage ───────────────────────────────────────────────────────────
+
+export interface SyncConfig {
+  server_url: string;
+  token: string;
+}
+
+// Where each platform keeps the server and its token, and how it saves a copy of the data before the server's replaces it.
+export interface SyncStorage {
+  read_config: () => SyncConfig | null;
+  write_config: (config: SyncConfig) => void;
+  remove_config: () => void;
+  back_up_before_download: () => void | Promise<void>;
+}
+
 // ── Device status ────────────────────────────────────────────────────────────
 
 // Which copy wins when a device first connects: the server's replaces this device's, or this device's replaces the server's.
@@ -78,3 +93,18 @@ export interface SyncStatus {
 export function is_change_list(value: unknown): value is SyncChange[] {
   return Array.isArray(value) && value.every((change) => typeof change === "object" && change !== null && "table" in change && "key" in change);
 }
+
+// ── Device calls ─────────────────────────────────────────────────────────────
+
+// What a page asks of a device that keeps its own copy; a browser has none, since it is already on the server.
+export interface SyncDeviceMethods {
+  get_sync_status: () => SyncStatus;
+  connect_sync: (server_url: string, token: string, direction: SyncDirection) => Promise<SyncStatus>;
+  disconnect_sync: () => SyncStatus;
+  sync_now: () => Promise<SyncStatus>;
+}
+
+export const sync_device_method_names = ["get_sync_status", "connect_sync", "disconnect_sync", "sync_now"] as const satisfies readonly (keyof SyncDeviceMethods)[];
+
+// The same calls as the page makes them, each answered later, as a bridge's client gives them.
+export type SyncDeviceClient = { [Name in keyof SyncDeviceMethods]: (...args: Parameters<SyncDeviceMethods[Name]>) => Promise<Awaited<ReturnType<SyncDeviceMethods[Name]>>> };

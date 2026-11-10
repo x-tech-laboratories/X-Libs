@@ -14,23 +14,15 @@ import {
   type SyncPaths,
   type SyncReplaceResponse,
   type SyncSnapshot,
+  type SyncConfig,
+  type SyncDeviceMethods,
   type SyncStatus,
+  type SyncStorage,
 } from "./sync_protocol.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
-export interface SyncConfig {
-  server_url: string;
-  token: string;
-}
-
-// Where each platform keeps the server and its token, and how it saves a copy of the data before the server's replaces it.
-export interface SyncStorage {
-  read_config: () => SyncConfig | null;
-  write_config: (config: SyncConfig) => void;
-  remove_config: () => void;
-  back_up_before_download: () => void | Promise<void>;
-}
+export type { SyncConfig, SyncStorage };
 
 export interface SyncClientOptions {
   engine: SyncEngine;
@@ -297,4 +289,9 @@ export function create_sync_client(options: SyncClientOptions) {
   }
 
   return { start, stop: stop_background_sync, sync_now, connect, disconnect, get_status };
+}
+
+// The calls a device answers for its page, under the names every app's bridge uses.
+export function sync_device_methods(client: SyncClient): SyncDeviceMethods {
+  return { get_sync_status: client.get_status, connect_sync: client.connect, disconnect_sync: client.disconnect, sync_now: client.sync_now };
 }
