@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -15,7 +15,8 @@
     "dist"
   ],
   "bin": {
-    "x-libs-bundle-migrations": "dist/drizzle_migrations.js"
+    "x-libs-bundle-migrations": "dist/drizzle_migrations.js",
+    "x-libs-icons": "dist/app_icons.js"
   },
   "exports": {
     "./*": {
@@ -38,6 +39,7 @@
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
     "@modelcontextprotocol/server": "^2.4.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "fastify": "^5.12.7",
     "react": "^19",
@@ -68,6 +70,9 @@
     "@modelcontextprotocol/server": {
       "optional": true
     },
+    "@resvg/resvg-js": {
+      "optional": true
+    },
     "@sqlite.org/sqlite-wasm": {
       "optional": true
     },
@@ -90,6 +95,7 @@
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
     "@modelcontextprotocol/server": "^2.4.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
