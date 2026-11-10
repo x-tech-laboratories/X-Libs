@@ -1,4 +1,4 @@
-// Small SVG charts: lines over time, bars, meters, a donut, a timeline, sparklines and a pass/fail strip, colored from Halon's tokens.
+// Small SVG charts: lines or dots over time with a moving average, bars, meters, a donut, a timeline, sparklines and a pass/fail strip, colored from Halon's tokens.
 
 import type { CSSProperties, ReactNode } from "react";
 
@@ -7,6 +7,8 @@ export interface Series {
   // A CSS color, normally one of Halon's --series-* tokens.
   color: string;
   points: [epoch: number, value: number | null][];
+  // Each reading as a dot rather than readings joined by a line, such as weigh-ins under their average; a line unless told.
+  draw?: "line" | "dots";
 }
 
 export interface Bar {
@@ -61,43 +63,85 @@ interface LineChartProps {
   series: Series[];
   format: (value: number) => string;
   limits?: Limit[];
+  // "zero" starts the scale at zero; "fit" pads it around the readings and limits, so a slow change such as a kilo a
+  // month still shows, staying at or above zero while every value does.
+  scale?: "zero" | "fit";
+  // The dates under the chart and on each dot, from epoch seconds; the local date unless told.
+  format_time?: (epoch: number) => string;
+  // Said when there is nothing to draw: no line with two readings at different times, and no dot.
+  empty_message?: string;
 }
 
-export function LineChart({ title, series, format, limits = [] }: LineChartProps) {
-  const points = series.flatMap((line) => line.points).filter(([, value]) => value !== null) as [number, number][];
-  // A line needs two readings at different times.
-  const drawable = series.some((line) => new Set(line.points.filter(([, value]) => value !== null).map(([epoch]) => epoch)).size >= 2);
-  if (!drawable) return <EmptyChart title={title} message="Not enough history yet to draw a trend." />;
+// Readings over time, a line per series or a dot per reading, with a dashed line per limit such as a goal; dots alone
+// draw from a single reading, placed in the middle.
+export function LineChart({ title, series, format, limits = [], scale = "zero", format_time = local_date, empty_message = "Not enough history yet to draw a trend." }: LineChartProps) {
+  const readings = (line: Series) => line.points.filter(([, value]) => value !== null) as [number, number][];
+  const points = series.flatMap(readings);
+  // A line needs two readings at different times; dots need one.
+  const drawable = series.some((line) => (line.draw === "dots" ? readings(line).length >= 1 : new Set(readings(line).map(([epoch]) => epoch)).size >= 2));
+  if (!drawable) return <EmptyChart title={title} message={empty_message} />;
 
   const epochs = points.map(([epoch]) => epoch);
-  const values = points.map(([, value]) => value);
+  const values = [...points.map(([, value]) => value), ...limits.map((limit) => limit.value)];
   const [first, last] = [Math.min(...epochs), Math.max(...epochs)];
-  const highest = Math.max(...values, ...limits.map((limit) => limit.value));
-  const top = highest * 1.05 || 1;
-  const x = (epoch: number) => margin.left + (epoch - first) / Math.max(1, last - first) * (width - margin.left - margin.right);
-  const y = (value: number) => height - margin.bottom - value / top * (height - margin.top - margin.bottom);
+  const [low, high, ticks] = value_range(values, scale);
+  const inner_width = width - margin.left - margin.right;
+  const x = (epoch: number) => margin.left + (last === first ? inner_width / 2 : (epoch - first) / (last - first) * inner_width);
+  const y = (value: number) => height - margin.bottom - (value - low) / (high - low) * (height - margin.top - margin.bottom);
 
   return (
     <Figure title={title} legend={[...series, ...limits].map((item): [string, string] => [item.label, item.color])}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
         <AxisLines />
-        <Tick x={margin.left - 6} y={y(highest)} text={format(highest)} anchor="end" />
-        <Tick x={margin.left - 6} y={height - margin.bottom} text={format(0)} anchor="end" />
-        <Tick x={margin.left} y={height - 4} text={new Date(first * 1000).toLocaleDateString()} anchor="start" />
-        <Tick x={width - margin.right} y={height - 4} text={new Date(last * 1000).toLocaleDateString()} anchor="end" />
+        <Tick x={margin.left - 6} y={y(ticks[1])} text={format(ticks[1])} anchor="end" />
+        <Tick x={margin.left - 6} y={height - margin.bottom} text={format(ticks[0])} anchor="end" />
+        <Tick x={margin.left} y={height - 4} text={format_time(first)} anchor="start" />
+        {last > first && <Tick x={width - margin.right} y={height - 4} text={format_time(last)} anchor="end" />}
         {limits.map((limit) => (
           <line key={limit.label} x1={margin.left} y1={y(limit.value).toFixed(1)} x2={width - margin.right} y2={y(limit.value).toFixed(1)} stroke={limit.color} strokeWidth={2} strokeDasharray="6 4">
             <title>{`${limit.label}: ${format(limit.value)}`}</title>
           </line>
         ))}
-        {series.map((line) => {
-          const drawn = line.points.filter(([, value]) => value !== null) as [number, number][];
-          const path = drawn.map(([epoch, value], index) => `${index === 0 ? "M" : "L"}${x(epoch).toFixed(1)},${y(value).toFixed(1)}`).join("");
+        {series.filter((line) => line.draw !== "dots").map((line) => {
+          const path = readings(line).map(([epoch, value], index) => `${index === 0 ? "M" : "L"}${x(epoch).toFixed(1)},${y(value).toFixed(1)}`).join("");
           return <path key={line.label} d={path} fill="none" stroke={line.color} strokeWidth={2}><title>{line.label}</title></path>;
         })}
+        {series.filter((line) => line.draw === "dots").map((line) => (
+          <g key={line.label} fill={line.color}>
+            {readings(line).map(([epoch, value], index) => (
+              <circle key={index} cx={x(epoch).toFixed(1)} cy={y(value).toFixed(1)} r={3.5}>
+                <title>{`${format_time(epoch)}: ${format(value)}`}</title>
+              </circle>
+            ))}
+          </g>
+        ))}
       </svg>
     </Figure>
   );
+}
+
+// The bottom and top of the scale, and the values ticked at them.
+function value_range(values: number[], scale: "zero" | "fit"): [low: number, high: number, ticks: [number, number]] {
+  const [lowest, highest] = [Math.min(...values), Math.max(...values)];
+  if (scale === "zero") return [0, highest * 1.05 || 1, [0, highest]];
+  // Readings that never move have no span to scale by, so one is made up.
+  const pad = (highest - lowest) * 0.15 || Math.max(Math.abs(highest) * 0.05, 1);
+  const low = lowest >= 0 ? Math.max(0, lowest - pad) : lowest - pad;
+  return [low, highest + pad, [low, highest + pad]];
+}
+
+function local_date(epoch: number): string {
+  return new Date(epoch * 1000).toLocaleDateString();
+}
+
+// Each reading's average over the readings in the window of seconds ending on it, so swings such as water weight
+// smooth into a trend; readings are in time order and null ones are skipped.
+export function moving_average(points: Series["points"], window_seconds: number): [epoch: number, value: number][] {
+  const readings = points.filter(([, value]) => value !== null) as [number, number][];
+  return readings.map(([epoch]) => {
+    const window = readings.filter(([other]) => other > epoch - window_seconds && other <= epoch);
+    return [epoch, window.reduce((sum, [, value]) => sum + value, 0) / window.length];
+  });
 }
 
 // ── Bar chart ────────────────────────────────────────────────────────────────
