@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { fireEvent } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
 
-import { BarChart, Donut, LineChart, Meters, moving_average, Sparkline, StackedBarChart, Strip, Timeline } from "../src/web/react/charts.tsx";
+import { BarChart, Donut, Gauge, gauge_dash, LineChart, Meters, moving_average, ShareBar, Sparkline, squarify, StackedBarChart, Strip, Timeline, Treemap } from "../src/web/react/charts.tsx";
 
 afterEach(cleanup);
 
@@ -151,4 +152,49 @@ test("a strip colors each cell by its verdict", () => {
   const { container } = render(<Strip title="Builds" cells={[{ label: "1", ok: true }, { label: "2", ok: false }, { label: "3", ok: null }]} />);
 
   expect([...container.querySelectorAll(".cell")].map((cell) => cell.className)).toEqual(["cell cell-pass", "cell cell-fail", "cell cell-none"]);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Gauge, share bar and treemap
+// ════════════════════════════════════════════════════════════════════════════
+
+test("a gauge prints its value and says how full it is", () => {
+  render(<Gauge label="CPU" value_text="78.0%" percent={78} color="var(--status-warning)" caption="8 cores" />);
+  expect(screen.getByText("CPU")).toBeTruthy();
+  expect(screen.getByText("78.0%")).toBeTruthy();
+  expect(screen.getByText("8 cores")).toBeTruthy();
+  expect(screen.getByRole("meter", { name: "CPU" }).getAttribute("aria-valuenow")).toBe("78");
+});
+
+test("a gauge draws no arc when empty, and caps a full one", () => {
+  expect(gauge_dash(0)).toBeNull();
+  expect(gauge_dash(50)).toMatch(/^\d+\.\d\d 999$/);
+  expect(gauge_dash(150)).toBe(gauge_dash(100));
+});
+
+test("a share bar prints every part's value in its legend, or only the names", () => {
+  const parts = [{ label: "Allowed", value_text: "3", percent: 75, color: "var(--series-1)" }, { label: "Blocked", value_text: "1", percent: 25, color: "var(--status-warning)" }];
+  render(<ShareBar label="Queries" parts={parts} />);
+  expect(screen.getByText("Allowed 3")).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Queries: Allowed 3, Blocked 1" })).toBeTruthy();
+  cleanup();
+  render(<ShareBar label="Queries" parts={parts} show_values={false} />);
+  expect(screen.getByText("Blocked")).toBeTruthy();
+});
+
+test("squarify fills its box with areas in proportion, largest first, leaving out empty tiles", () => {
+  const placed = squarify([{ name: "a", value: 1 }, { name: "b", value: 3 }]);
+  expect(placed.map((tile) => tile.tile.name)).toEqual(["b", "a"]);
+  expect(placed[0]!.width * placed[0]!.height).toBeCloseTo(7500);
+  expect(placed[1]!.width * placed[1]!.height).toBeCloseTo(2500);
+  expect(squarify([{ value: 0 }])).toEqual([]);
+});
+
+test("a treemap hands back the clicked tile and marks the selected one", () => {
+  const picked = vi.fn();
+  render(<Treemap label="Monitors by type" selected="ZFS" on_select={picked} tiles={[{ name: "CPU", value: 4, color: "var(--status-danger)" }, { name: "ZFS", value: 1, color: "var(--status-success)" }]} />);
+  fireEvent.click(screen.getByRole("button", { name: /CPU/ }));
+  expect(picked).toHaveBeenCalledWith(expect.objectContaining({ name: "CPU" }));
+  expect(screen.getByRole("button", { name: /ZFS/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("group", { name: "Monitors by type" })).toBeTruthy();
 });
