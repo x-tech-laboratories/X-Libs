@@ -159,6 +159,7 @@ describe("trusting_fetch", () => {
     };
     const trust = create_certificate_trust({ file: join(folder, "fetch.json") });
     const send = trusting_fetch(sessions, trust);
+    expect(made).toEqual([]);
 
     const first = await (await send(new URL("https://nas.lan/a"))).text();
     await trust.methods.trust_certificate(self_signed_url, (await check_certificate(self_signed_url))!.chain[0]!.fingerprint);

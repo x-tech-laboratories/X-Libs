@@ -54,12 +54,14 @@ let next_partition = 0;
 
 // A fetch over Chromium for the sync client or create_main_fetch, moved to a fresh session whenever the trusted certificates change, since a session keeps refusing a certificate it once refused.
 export function trusting_fetch(sessions: SessionsLike, trust: TrustLike): typeof fetch {
-  const fresh_session = () => {
-    const session = sessions.fromPartition(`x-libs-certificates-${Date.now()}-${next_partition++}`);
-    trust_in_session(session, trust.is_trusted);
-    return session;
+  // Made at the first request, since Electron has no sessions before the app is ready.
+  let session: FetchingSessionLike | null = null;
+  trust.on_change(() => { session = null; });
+  return (input, init) => {
+    if (!session) {
+      session = sessions.fromPartition(`x-libs-certificates-${Date.now()}-${next_partition++}`);
+      trust_in_session(session, trust.is_trusted);
+    }
+    return session.fetch(input instanceof URL ? input.href : input, init);
   };
-  let session = fresh_session();
-  trust.on_change(() => { session = fresh_session(); });
-  return (input, init) => session.fetch(input instanceof URL ? input.href : input, init);
 }
