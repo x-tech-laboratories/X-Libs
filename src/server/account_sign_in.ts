@@ -56,6 +56,8 @@ export interface AccountSignInOptions {
   api_prefix?: string;
   // Paths reached without signing in, such as a health check, an agent socket or a webhook.
   open_paths?: Iterable<string>;
+  // Path beginnings reached without signing in, such as "/api/push/" for routes that check their own credentials.
+  open_prefixes?: Iterable<string>;
   // Paths outside the API that still need signing in, such as /metrics; `needed` decides what they need.
   guarded_paths?: Iterable<string>;
   // Paths a read-only token may send any method to, as the route itself keeps such a token to reading, such as /api/mcp.
@@ -94,6 +96,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     oidc_start: `${prefix}/auth/oidc/start`, oidc_callback: `${prefix}/auth/oidc/callback`,
     account: `${prefix}/account`, users: `${prefix}/users`, tokens: `${prefix}/tokens`,
   };
+  const open_prefixes = [...(options.open_prefixes ?? [])];
   const guarded_paths = new Set(options.guarded_paths ?? []);
   const read_only_paths = new Set(options.read_only_paths ?? []);
   const open_paths = new Set([routes.info, routes.login, routes.oidc_start, routes.oidc_callback, ...(options.open_paths ?? [])]);
@@ -141,7 +144,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
   // What a request needs, with the account routes' own needs first.
   const need_of = (method: string, path: string): Need => {
-    if (open_paths.has(path)) return "open";
+    if (open_paths.has(path) || open_prefixes.some((open_prefix) => path.startsWith(open_prefix))) return "open";
     if (!path.startsWith(`${prefix}/`)) return guarded_paths.has(path) ? needed(method, path) : "open";
     if (path === routes.me || path === routes.logout || path.startsWith(`${routes.account}/`)) return "any";
     if (path === routes.users || path.startsWith(`${routes.users}/`) || path === routes.tokens || path.startsWith(`${routes.tokens}/`)) return admin;
@@ -155,7 +158,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
   // Every API call needs a viewer; the page loads without one and signs in itself.
   register_sign_in_guard(app, {
-    is_signed_in: (request) => request.viewer !== null, api_prefix: `${prefix}/`, login_path: null, refusal: "json", refusal_text: sign_in_first, open_paths,
+    is_signed_in: (request) => request.viewer !== null, api_prefix: `${prefix}/`, login_path: null, refusal: "json", refusal_text: sign_in_first, open_paths, open_prefixes,
   });
 
   app.addHook("onRequest", async (request, reply) => {

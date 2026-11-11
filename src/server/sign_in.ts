@@ -21,6 +21,8 @@ export interface SignInGuardOptions {
   api_prefix?: string;
   // Paths reached without signing in, such as a health check or an agent socket.
   open_paths?: Iterable<string>;
+  // Path beginnings reached without signing in, such as "/api/push/" for routes that check their own credentials.
+  open_prefixes?: Iterable<string>;
   // Where a page load that is not signed in goes; null leaves pages open, for an app whose page logs in itself.
   login_path?: string | null;
   // How a refused call answers: plain text, or JSON as { error }.
@@ -99,11 +101,12 @@ export function path_of(request: FastifyRequest): string {
 export function register_sign_in_guard(app: FastifyInstance, options: SignInGuardOptions): void {
   const { is_signed_in, api_prefix = "/api/", login_path = "/login", refusal = "text", refusal_text = "sign in first" } = options;
   const open_paths = new Set(options.open_paths ?? []);
+  const open_prefixes = [...(options.open_prefixes ?? [])];
 
   app.addHook("onRequest", async (request, reply) => {
     const path = path_of(request);
     // Preflight checks carry no credentials, and the sign-in routes are open by nature.
-    if (request.method === "OPTIONS" || open_paths.has(path)) return;
+    if (request.method === "OPTIONS" || open_paths.has(path) || open_prefixes.some((prefix) => path.startsWith(prefix))) return;
     if (is_signed_in(request)) return;
     if (!path.startsWith(api_prefix)) {
       if (login_path === null) return;

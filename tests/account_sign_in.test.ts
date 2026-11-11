@@ -266,3 +266,12 @@ describe("declared tokens", () => {
     expect((await app.inject({ url: "/api/users", headers: bearer("control-secret-1234") })).statusCode).toBe(403);
   });
 });
+
+describe("open prefixes", () => {
+  it("let a route that checks its own credentials through without signing in", async () => {
+    await serve({ open_prefixes: ["/api/push/"] });
+    app.post("/api/push/:id", async () => ({ pushed: true }));
+    expect((await app.inject({ method: "POST", url: "/api/push/nightly" })).json()).toEqual({ pushed: true });
+    expect((await app.inject({ url: "/api/things" })).statusCode).toBe(401);
+  });
+});
