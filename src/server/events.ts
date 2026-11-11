@@ -109,3 +109,34 @@ export class EventStream {
     this.streams.clear();
   }
 }
+
+// ── Cooldown ─────────────────────────────────────────────────────────────────
+
+export interface Cooldown {
+  // Something changed: flushes at once when cool, or once the cooldown ends.
+  poke(): void;
+  stop(): void;
+}
+
+// Flushes on the first change at once, then at most once per cooldown while changes keep coming, so a burst reaches
+// the pages as two events, not hundreds; `flush` says whether it had anything to send, and the cooling ends when not.
+export function leading_cooldown(cooldown_ms: number, flush: () => boolean): Cooldown {
+  let cooling: ReturnType<typeof setTimeout> | null = null;
+  const run = () => {
+    if (!flush()) {
+      cooling = null;
+      return;
+    }
+    cooling = setTimeout(run, cooldown_ms);
+    cooling.unref?.();
+  };
+  return {
+    poke: () => {
+      if (cooling === null) run();
+    },
+    stop: () => {
+      if (cooling !== null) clearTimeout(cooling);
+      cooling = null;
+    },
+  };
+}
