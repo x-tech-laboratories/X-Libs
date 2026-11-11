@@ -41,6 +41,20 @@ function cookie_of(response: LightMyRequestResponse) {
   return response.cookies.find((cookie) => cookie.name === "x_test_session")!;
 }
 
+describe("read-only tokens", () => {
+  it("only read, except on a path that keeps them to reading itself", async () => {
+    const accounts = await serve({ read_only_paths: ["/api/mcp"] });
+    app.post("/api/mcp", async () => ({ ok: true }));
+    accounts.create_user({ name: "vera", role: "operator", access: null, password });
+    const { token } = accounts.create_token("vera", { name: "script", read_only: true });
+    const headers = { authorization: `Bearer ${token}` };
+
+    expect((await app.inject({ url: "/api/things", headers })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/api/things", headers })).json()).toEqual({ error: "This token can only read." });
+    expect((await app.inject({ method: "POST", url: "/api/mcp", headers })).statusCode).toBe(200);
+  });
+});
+
 describe("signing in", () => {
   it("opens a session that ends with the browser unless kept", async () => {
     await serve();

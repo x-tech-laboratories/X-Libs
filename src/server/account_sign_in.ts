@@ -55,6 +55,8 @@ export interface AccountSignInOptions {
   open_paths?: Iterable<string>;
   // Paths outside the API that still need signing in, such as /metrics; `needed` decides what they need.
   guarded_paths?: Iterable<string>;
+  // Paths a read-only token may send any method to, as the route itself keeps such a token to reading, such as /api/mcp.
+  read_only_paths?: Iterable<string>;
   // What each of the app's own API routes needs; anyone signed in unless set.
   needed?: (method: string, path: string) => Need;
   oidc?: OidcClient | null;
@@ -90,6 +92,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     account: `${prefix}/account`, users: `${prefix}/users`, tokens: `${prefix}/tokens`,
   };
   const guarded_paths = new Set(options.guarded_paths ?? []);
+  const read_only_paths = new Set(options.read_only_paths ?? []);
   const open_paths = new Set([routes.info, routes.login, routes.oidc_start, routes.oidc_callback, ...(options.open_paths ?? [])]);
   const admin: Need = { role: accounts.top_role };
 
@@ -159,7 +162,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (viewer.via === "token" && (path.startsWith(`${routes.account}/`) || typeof need === "object" && (path.startsWith(routes.users) || path.startsWith(routes.tokens)))) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
-    if (viewer.read_only && request.method !== "GET" && path !== routes.logout) {
+    if (viewer.read_only && request.method !== "GET" && path !== routes.logout && !read_only_paths.has(path)) {
       return reply.code(403).send({ error: "This token can only read." });
     }
     if (typeof need === "object" && !accounts.has_role(viewer.role, need.role)) {
