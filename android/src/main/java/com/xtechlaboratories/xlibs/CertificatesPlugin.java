@@ -2,6 +2,7 @@ package com.xtechlaboratories.xlibs;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.http.X509TrustManagerExtensions;
 import android.util.Base64;
 
 import com.getcapacitor.JSArray;
@@ -33,7 +34,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
 
-import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocket;
@@ -76,8 +76,9 @@ public class CertificatesPlugin extends Plugin {
         }
     }
 
+    // Written at once, so a choice holds even when the app is closed straight after.
     private static void write_trusted(Context context, JSONArray list) {
-        preferences(context).edit().putString(TRUSTED_KEY, list.toString()).apply();
+        preferences(context).edit().putString(TRUSTED_KEY, list.toString()).commit();
     }
 
     static boolean is_trusted(Context context, String host, String fingerprint) {
@@ -155,6 +156,26 @@ public class CertificatesPlugin extends Plugin {
         return details;
     }
 
+    // Whether one of the certificate's names covers the host, a wildcard covering one label.
+    private static boolean covers_host(X509Certificate certificate, String host) {
+        String wanted = host.toLowerCase(Locale.US);
+        try {
+            Collection<List<?>> entries = certificate.getSubjectAlternativeNames();
+            if (entries == null) return false;
+            for (List<?> entry : entries) {
+                String name = String.valueOf(entry.get(1)).toLowerCase(Locale.US);
+                int kind = (Integer) entry.get(0);
+                if (kind == 7 && name.equals(wanted)) return true;
+                if (kind != 2) continue;
+                if (name.equals(wanted)) return true;
+                if (name.startsWith("*.") && wanted.endsWith(name.substring(1)) && wanted.indexOf('.') == wanted.length() - name.length() + 1) return true;
+            }
+        } catch (Exception error) {
+            return false;
+        }
+        return false;
+    }
+
     private static boolean signs_itself(X509Certificate certificate) {
         try {
             certificate.verify(certificate.getPublicKey());
@@ -164,14 +185,15 @@ public class CertificatesPlugin extends Plugin {
         }
     }
 
-    // The phone's own authorities' verdict on the chain, or null when they accept it.
-    private static Exception authority_problem(X509Certificate[] chain) {
+    // The phone's own authorities' verdict on the chain for the host, or null when they accept it.
+    private static Exception authority_problem(X509Certificate[] chain, String host) {
         try {
             TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             factory.init((KeyStore) null);
             for (TrustManager manager : factory.getTrustManagers()) {
                 if (manager instanceof X509TrustManager) {
-                    ((X509TrustManager) manager).checkServerTrusted(chain, "GENERIC");
+                    // The host-aware check, since an app with a network security config refuses the plain one.
+                    new X509TrustManagerExtensions((X509TrustManager) manager).checkServerTrusted(chain, "GENERIC", host);
                     return null;
                 }
             }
@@ -213,11 +235,11 @@ public class CertificatesPlugin extends Plugin {
 
         // TLS stops at the first problem it finds, so the name and dates are checked here as well.
         Set<String> problems = new LinkedHashSet<>();
-        Exception refused = authority_problem(chain);
+        Exception refused = authority_problem(chain, host);
         if (refused != null && !caused_by(refused, CertificateExpiredException.class) && !caused_by(refused, CertificateNotYetValidException.class)) {
             problems.add(chain.length == 1 && signs_itself(leaf) ? "self_signed" : "unknown_authority");
         }
-        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, session)) problems.add("wrong_host");
+        if (!covers_host(leaf, host)) problems.add("wrong_host");
         Date now = new Date();
         if (leaf.getNotAfter().before(now)) problems.add("expired");
         if (leaf.getNotBefore().after(now)) problems.add("not_yet_valid");
