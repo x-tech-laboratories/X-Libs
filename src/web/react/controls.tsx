@@ -446,20 +446,37 @@ interface TreeSelectProps<Item extends TreeItem> {
   on_change: (id: string) => void;
 }
 
-// A select listing a tree indented, each choice's whole path on hover and in the closed select.
+// Chromium's customizable select draws an option's own markup; elsewhere, such as in Firefox, an option is plain text.
+function can_style_options(): boolean {
+  return typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("appearance", "base-select");
+}
+
+// A select listing a tree indented, each choice's whole path on hover and, where options can be styled, in the closed select.
 export function TreeSelect<Item extends TreeItem>({ label, items, name_of, value, blank_label, disabled_ids = [], on_change }: TreeSelectProps<Item>) {
   const depth_of = (item: Item) => path_names(item, items, name_of).length - 1;
+  const path_of = (item: Item) => path_names(item, items, name_of).join(" › ");
   const chosen = items.find((item) => item.id === value);
+  const styled = can_style_options();
+
+  // Where options are plain text, the name is indented with spaces that do not collapse.
+  const option_content = (item: Item) =>
+    styled ? (
+      <>
+        <span className="tree-option-name">{name_of(item)}</span>
+        <span className="tree-option-path">{path_of(item)}</span>
+      </>
+    ) : (
+      `${"\u00a0\u00a0\u00a0".repeat(depth_of(item))}${name_of(item)}`
+    );
 
   // The open list indents each name by its depth, and the closed face shows the picked choice's whole path.
   return (
-    <select className="tree-select" aria-label={label} value={value} title={chosen ? path_names(chosen, items, name_of).join(" › ") : undefined} onChange={(event) => on_change(event.currentTarget.value)}>
-      <button type="button">{createElement("selectedcontent")}</button>
+    <select className="tree-select" aria-label={label} value={value} title={chosen ? path_of(chosen) : undefined} onChange={(event) => on_change(event.currentTarget.value)}>
+      {styled && <button type="button">{createElement("selectedcontent")}</button>}
       <option value="">{blank_label}</option>
       {in_tree_order(items).map((item) => (
-        <option key={item.id} value={item.id} disabled={disabled_ids.includes(item.id)} title={path_names(item, items, name_of).join(" › ")} style={{ "--depth": depth_of(item) } as CSSProperties}>
-          <span className="tree-option-name">{name_of(item)}</span>
-          <span className="tree-option-path">{path_names(item, items, name_of).join(" › ")}</span>
+        <option key={item.id} value={item.id} disabled={disabled_ids.includes(item.id)} title={path_of(item)} style={{ "--depth": depth_of(item) } as CSSProperties}>
+          {option_content(item)}
         </option>
       ))}
     </select>

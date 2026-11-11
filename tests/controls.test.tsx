@@ -299,7 +299,12 @@ describe("TreeSelect", () => {
     { id: "w", parent_id: null, position: 1, name: "Work" },
   ];
 
+  // jsdom has no CSS.supports, so each test says whether options can be styled, as in Chromium, or not, as in Firefox.
+  const supports_styled_options = (styled: boolean) => vi.stubGlobal("CSS", { supports: (property: string, value: string) => styled && property === "appearance" && value === "base-select" });
+  afterEach(() => vi.unstubAllGlobals());
+
   test("lists the tree indented by depth with each path, greying disabled ones", () => {
+    supports_styled_options(true);
     const on_change = vi.fn();
     render(<TreeSelect label="Parent" items={tags} name_of={(tag) => tag.name} value="c" blank_label="No parent" disabled_ids={["w"]} on_change={on_change} />);
     const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Parent" });
@@ -315,6 +320,18 @@ describe("TreeSelect", () => {
 
     fireEvent.change(select, { target: { value: "" } });
     expect(on_change).toHaveBeenCalledWith("");
+  });
+
+  test("shows each name alone, indented, where options cannot be styled, keeping the path on hover", () => {
+    supports_styled_options(false);
+    render(<TreeSelect label="Parent" items={tags} name_of={(tag) => tag.name} value="c" blank_label="No parent" on_change={() => {}} />);
+    const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Parent" });
+    const options = [...select.options];
+
+    expect(options.map((option) => option.textContent)).toEqual(["No parent", "Work", "\u00a0\u00a0\u00a0Clients", "Home"]);
+    expect(options[2]!.title).toBe("Work › Clients");
+    expect(select.querySelector("button")).toBeNull();
+    expect(select.value).toBe("c");
   });
 });
 
