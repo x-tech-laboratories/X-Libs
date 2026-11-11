@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { config_fingerprint, file_digest, watch_config } from "../../src/server/config_watch.ts";
+import { config_fingerprint, file_digest, watch_config } from "../src/config_watch.ts";
 
 function setup(text: string) {
   const folder = mkdtempSync(join(tmpdir(), "config-watch-"));
