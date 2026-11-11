@@ -181,7 +181,7 @@ export class Notifier {
 
   // Shows the notification described, and opens its link if it is clicked; resolves once it is closed
   // or replaced.
-  async show(frame: DesktopNotification): Promise<void> {
+  async show(frame: DesktopNotification | Record<string, unknown>): Promise<void> {
     const title = String(frame.title || this.default_title);
     const body = String(frame.body || "");
     const urgency = (URGENCIES as readonly unknown[]).includes(frame.urgency) ? String(frame.urgency) : "normal";
@@ -246,7 +246,7 @@ export class Notifier {
   }
 
   // Closes the notification a key has on screen, if any.
-  async dismiss(frame: { key?: unknown }): Promise<void> {
+  async dismiss(frame: { key?: unknown } | Record<string, unknown>): Promise<void> {
     const key = String(frame.key || "");
     const shown = await this.locked(key, async () => {
       const found = this.shown.get(key);
