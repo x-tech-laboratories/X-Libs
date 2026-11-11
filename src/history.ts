@@ -11,7 +11,10 @@ import type { SyncedTable } from "./sync_engine.ts";
 // one for a child table such as its tags, two for a link between two items.
 export interface HistoryWatch {
   table: string;
-  item_columns: readonly string[];
+  item_columns?: readonly string[];
+  // A query giving the item's id for a row that names it only through another table, such as a workout's sets through
+  // its exercises; row is NEW or OLD.
+  item_lookup?: (row: "NEW" | "OLD") => string;
 }
 
 export interface HistoryOptions<Snapshot> {
@@ -106,7 +109,8 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
   const triggers = options.watches.flatMap((watch) =>
     (["insert", "update", "delete"] as const).map((event) => {
       const row = event === "delete" ? "OLD" : "NEW";
-      const notes = watch.item_columns.map((column) => `INSERT OR IGNORE INTO ${pending} SELECT ${row}.${column} WHERE ${row}.${column} IS NOT NULL;`).join(" ");
+      const noted = [...(watch.item_columns ?? []).map((column) => `${row}.${column}`), ...(watch.item_lookup ? [`(${watch.item_lookup(row)})`] : [])];
+      const notes = noted.map((item) => `INSERT OR IGNORE INTO ${pending} SELECT item FROM (SELECT ${item} AS item) WHERE item IS NOT NULL;`).join(" ");
       return { name: `${versions}_${watch.table}_${event}`, sql: `AFTER ${event.toUpperCase()} ON ${watch.table} BEGIN ${notes} END` };
     }),
   );
