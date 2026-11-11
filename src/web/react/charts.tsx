@@ -391,16 +391,20 @@ interface SparklineProps {
   points: [epoch: number, value: number][];
   top: number;
   color: string;
+  // "zero" scales from zero to top; "fit" from just under the lowest reading to just over the highest, ignoring top, so
+  // a slow change such as a kilo a month still shows.
+  scale?: "zero" | "fit";
 }
 
-// A small line of readings over time with no axes, scaled from zero to top or the highest reading if that is higher.
-export function Sparkline({ label, points, top, color }: SparklineProps) {
+// A small line of readings over time with no axes, scaled from zero to top or the highest reading if that is higher,
+// or fitted to the readings.
+export function Sparkline({ label, points, top, color, scale = "zero" }: SparklineProps) {
   const frame = { viewBox: `0 0 ${sparkline_width} ${sparkline_height}`, className: "sparkline", role: "img" as const, "aria-label": label };
   if (points.length < 2) return <svg {...frame} />;
   const [first, last] = [points[0][0], points.at(-1)![0]];
-  const highest = Math.max(top, ...points.map(([, value]) => value)) || 1;
+  const [low, high] = sparkline_range(points.map(([, value]) => value), top, scale);
   const x = (epoch: number) => (epoch - first) / Math.max(1, last - first) * sparkline_width;
-  const y = (value: number) => sparkline_height - 2 - value / highest * (sparkline_height - 4);
+  const y = (value: number) => sparkline_height - 2 - (value - low) / (high - low) * (sparkline_height - 4);
   const path = points.map(([epoch, value], index) => `${index === 0 ? "M" : "L"}${x(epoch).toFixed(1)},${y(value).toFixed(1)}`).join("");
   return (
     <svg {...frame}>
@@ -409,6 +413,15 @@ export function Sparkline({ label, points, top, color }: SparklineProps) {
       <title>{label}</title>
     </svg>
   );
+}
+
+// The bottom and top of a sparkline's scale; a fitted one leaves a tenth of the span below, and readings that never move
+// sit halfway up.
+function sparkline_range(values: number[], top: number, scale: "zero" | "fit"): [low: number, high: number] {
+  const [lowest, highest] = [Math.min(...values), Math.max(...values)];
+  if (scale === "zero") return [0, Math.max(top, highest) || 1];
+  const span = highest - lowest;
+  return span > 0 ? [lowest - span * 0.1, highest] : [lowest - 1, lowest + 1];
 }
 
 // ── Strip ────────────────────────────────────────────────────────────────────

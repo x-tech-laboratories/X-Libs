@@ -133,6 +133,20 @@ test("a sparkline needs two readings to draw", () => {
   expect(container.querySelectorAll("path")).toHaveLength(2);
 });
 
+test("a fitted sparkline spreads a small change over its height, where one from zero stays flat", () => {
+  const heights = (scale: "zero" | "fit") => {
+    const { container, unmount } = render(<Sparkline label="Weight" points={[[0, 80], [60, 81]]} top={0} color="red" scale={scale} />);
+    const line = container.querySelectorAll("path")[1]!.getAttribute("d")!;
+    unmount();
+    return [...line.matchAll(/,([\d.]+)/g)].map((match) => Number(match[1]));
+  };
+
+  const [from_zero_start, from_zero_end] = heights("zero");
+  expect(from_zero_start! - from_zero_end!).toBeLessThan(1);
+  const [fitted_start, fitted_end] = heights("fit");
+  expect(fitted_start! - fitted_end!).toBeGreaterThan(20);
+});
+
 test("a strip colors each cell by its verdict", () => {
   const { container } = render(<Strip title="Builds" cells={[{ label: "1", ok: true }, { label: "2", ok: false }, { label: "3", ok: null }]} />);
 
