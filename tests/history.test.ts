@@ -113,3 +113,42 @@ test("an app's own older versions table is taken over as it is, under its own it
   expect(adopted.read_versions(database, "a").map((version) => [version.kind, version.snapshot.title])).toEqual([["edited", "New"], ["first_seen", "Old"]]);
   expect(database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'schema_versions'").get()).toEqual({ count: 0 });
 });
+
+test("a row that names its item only through another table records a version of that item", () => {
+  const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
+  database.exec(`CREATE TABLE workouts (id TEXT PRIMARY KEY);
+                 CREATE TABLE workout_exercises (id TEXT PRIMARY KEY, workout_id TEXT NOT NULL REFERENCES workouts (id) ON DELETE CASCADE);
+                 CREATE TABLE workout_sets (id TEXT PRIMARY KEY, workout_exercise_id TEXT NOT NULL REFERENCES workout_exercises (id) ON DELETE CASCADE, reps INTEGER NOT NULL);
+                 PRAGMA foreign_keys = ON;`);
+  const reps_of = (db: SqlDatabase, id: string) =>
+    (db.prepare("SELECT reps FROM workout_sets JOIN workout_exercises ON workout_exercises.id = workout_exercise_id WHERE workout_id = ? ORDER BY workout_sets.id").all(id) as { reps: number }[]).map((set) => set.reps);
+  const workouts = create_history<{ reps: number[] }>({
+    name: "workout",
+    item_table: "workouts",
+    watches: [
+      { table: "workouts", item_columns: ["id"] },
+      { table: "workout_exercises", item_columns: ["workout_id"] },
+      { table: "workout_sets", item_lookup: (row) => `SELECT workout_id FROM workout_exercises WHERE id = ${row}.workout_exercise_id` },
+    ],
+    read: (db, id) => (db.prepare("SELECT 1 FROM workouts WHERE id = ?").get(id) === undefined ? null : { reps: reps_of(db, id) }),
+    apply: () => {},
+    site: () => "this-device",
+  });
+  workouts.install(database);
+  database.exec("INSERT INTO workouts VALUES ('w'); INSERT INTO workout_exercises VALUES ('e', 'w')");
+  workouts.record(database);
+
+  database.exec("INSERT INTO workout_sets VALUES ('s', 'e', 5)");
+  workouts.record(database);
+  database.exec("UPDATE workout_sets SET reps = 8 WHERE id = 's'");
+  workouts.record(database);
+  database.exec("DELETE FROM workouts WHERE id = 'w'");
+  workouts.record(database);
+
+  expect(workouts.read_versions(database, "w").map((version) => [version.kind, version.snapshot.reps])).toEqual([
+    ["deleted", [8]],
+    ["edited", [8]],
+    ["edited", [5]],
+    ["created", []],
+  ]);
+});
