@@ -63,6 +63,30 @@ test("restoring puts the backup's data back, after backing up what was there, an
   database.close();
 });
 
+test("restoring within the same second as the backup it restores still backs up what was there", async () => {
+  vi.useFakeTimers({ now: new Date("2026-11-10T09:00:00Z"), toFake: ["Date"] });
+  const folder = mkdtempSync(join(tmpdir(), "sqlite-backups-"));
+  const path = join(folder, "tasks.db");
+  let database = new DatabaseSync(path);
+  database.exec("CREATE TABLE tasks (title TEXT); INSERT INTO tasks VALUES ('before')");
+  const kept = sqlite_backups({
+    folder: () => join(folder, "backups"), naming, database: () => database, database_path: () => path,
+    close: () => database.close(), open: () => void (database = new DatabaseSync(path)),
+  });
+
+  const first = await kept.create();
+  database.exec("UPDATE tasks SET title = 'after'");
+  await kept.restore(first.name);
+
+  expect(database.prepare("SELECT title FROM tasks").get()).toEqual({ title: "before" });
+  const [replaced] = await kept.list();
+  expect(replaced.name).toBe("tasks-2026-11-10T09-00-00Z-2.db");
+  const copy = new DatabaseSync(join(folder, "backups", replaced.name));
+  expect(copy.prepare("SELECT title FROM tasks").get()).toEqual({ title: "after" });
+  copy.close();
+  database.close();
+});
+
 test("a server stages the restore and takes it in on its next start, before opening the database", async () => {
   vi.useFakeTimers({ now: new Date("2026-11-10T09:00:00Z"), toFake: ["Date"] });
   const folder = mkdtempSync(join(tmpdir(), "sqlite-backups-"));

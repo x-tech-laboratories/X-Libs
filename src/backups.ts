@@ -9,24 +9,33 @@ export { backup_method_names, default_backup_schedule, type Backup, type BackupC
 export interface BackupNaming {
   // Matches only names this naming writes, so a name from a page can never reach outside the backup folder.
   pattern: RegExp;
-  name_for: (taken_at: Date, is_automatic: boolean) => string;
+  // A repeat of 2 or more names another backup taken within the same second.
+  name_for: (taken_at: Date, is_automatic: boolean, repeat?: number) => string;
   describe: (name: string, size_bytes: number) => Backup;
+  // Which backup of its second the name is, 1 for the first; a naming without repeats always answers 1.
+  repeat_of?: (name: string) => number;
 }
 
 const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Names such as tasks-2026-06-10T09-30-00Z-auto.db for the prefix "tasks" and the extension ".db".
+// Names such as tasks-2026-06-10T09-30-00Z-auto.db for the prefix "tasks" and the extension ".db", and
+// tasks-2026-06-10T09-30-00Z-2.db for a second backup taken within the same second.
 export function backup_naming(prefix: string, extension: string): BackupNaming {
-  const pattern = new RegExp(`^${escaped(prefix)}-(\\d{4}-\\d{2}-\\d{2})T(\\d{2})-(\\d{2})-(\\d{2})Z(-auto)?${escaped(extension)}$`);
+  const pattern = new RegExp(`^${escaped(prefix)}-(\\d{4}-\\d{2}-\\d{2})T(\\d{2})-(\\d{2})-(\\d{2})Z(?:-([2-9]|[1-9]\\d+))?(-auto)?${escaped(extension)}$`);
+  const matched = (name: string): RegExpExecArray => {
+    const match = pattern.exec(name);
+    if (!match) throw new Error(`not a backup name: ${name}`);
+    return match;
+  };
   return {
     pattern,
-    name_for: (taken_at, is_automatic) => `${prefix}-${taken_at.toISOString().slice(0, 19).replaceAll(":", "-")}Z${is_automatic ? "-auto" : ""}${extension}`,
+    name_for: (taken_at, is_automatic, repeat = 1) =>
+      `${prefix}-${taken_at.toISOString().slice(0, 19).replaceAll(":", "-")}Z${repeat > 1 ? `-${repeat}` : ""}${is_automatic ? "-auto" : ""}${extension}`,
     describe: (name, size_bytes) => {
-      const match = pattern.exec(name);
-      if (!match) throw new Error(`not a backup name: ${name}`);
-      const [, date, hours, minutes, seconds, automatic] = match;
+      const [, date, hours, minutes, seconds, , automatic] = matched(name);
       return { name, taken_at: `${date}T${hours}:${minutes}:${seconds}Z`, is_automatic: automatic !== undefined, size_bytes };
     },
+    repeat_of: (name) => Number(matched(name)[5] ?? 1),
   };
 }
 
@@ -44,7 +53,8 @@ export interface Backups {
   naming: BackupNaming;
   // Newest first, leaving out any file the naming did not write.
   list: () => Promise<Backup[]>;
-  // A second backup within the same second keeps the first, since nothing much can have changed between them.
+  // A second backup within the same second is taken too, under a name of its own, since a restore backs up the data
+  // it replaces right after the backup it restores may have been taken.
   create: (is_automatic?: boolean) => Promise<Backup>;
   remove: (name: string) => Promise<void>;
   // Takes an automatic backup once the interval has passed since the last one and deletes the oldest automatic ones beyond the number to keep; ones made by hand stay.
@@ -54,10 +64,12 @@ export interface Backups {
 const day_in_milliseconds = 24 * 60 * 60 * 1000;
 
 export function backups(naming: BackupNaming, store: BackupStore): Backups {
+  const repeat_of = (backup: Backup): number => naming.repeat_of?.(backup.name) ?? 1;
+
   const list = async (): Promise<Backup[]> => (await store.list())
     .filter((file) => naming.pattern.test(file.name))
     .map((file) => naming.describe(file.name, file.size_bytes))
-    .sort((first, second) => second.taken_at.localeCompare(first.taken_at));
+    .sort((first, second) => second.taken_at.localeCompare(first.taken_at) || repeat_of(second) - repeat_of(first));
 
   const remove = async (name: string): Promise<void> => {
     if (!naming.pattern.test(name)) throw new Error(`not a backup name: ${name}`);
@@ -65,9 +77,15 @@ export function backups(naming: BackupNaming, store: BackupStore): Backups {
   };
 
   const create = async (is_automatic = false, now = new Date()): Promise<Backup> => {
-    const name = naming.name_for(now, is_automatic);
-    const existing = (await list()).find((backup) => backup.name === name);
-    return existing ?? naming.describe(name, await store.take(name));
+    const taken = await list();
+    let name = naming.name_for(now, is_automatic);
+    for (let repeat = 2; taken.some((backup) => backup.name === name); repeat++) {
+      const next = naming.name_for(now, is_automatic, repeat);
+      // A naming of an app's own that cannot name repeats keeps the backup already taken this second.
+      if (next === name) return taken.find((backup) => backup.name === name)!;
+      name = next;
+    }
+    return naming.describe(name, await store.take(name));
   };
 
   const keep_automatic = async (to_keep: number, interval_in_milliseconds = day_in_milliseconds, now = new Date()): Promise<void> => {
