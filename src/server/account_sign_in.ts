@@ -12,6 +12,7 @@ import fastify_rate_limit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { AccountError, type AccountStore, type User } from "./account_store.ts";
+import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
 import { path_of, register_sign_in_guard } from "./sign_in.ts";
 
@@ -25,8 +26,10 @@ export interface Viewer {
   via: "session" | "token" | "proxy";
   // A read-only token can only make GET requests.
   read_only: boolean;
-  // The session or token the request came with, or null through the proxy.
+  // The session or token the request came with, or null through the proxy or a declared token.
   credential_id: number | null;
+  // The config's token the request came with, whose name is the viewer's.
+  declared?: DeclaredToken;
 }
 
 declare module "fastify" {
@@ -123,6 +126,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       const token = accounts.check_token(bearer);
       const user = token === null ? null : accounts.user(token.owner);
       if (token !== null && user !== null) return as_viewer(user, "token", token.read_only, token.id);
+      const declared = accounts.check_declared_token(bearer);
+      if (declared !== null && declared.role !== null) {
+        return { name: declared.name, role: declared.role, access: declared.limited_to, via: "token", read_only: declared.read_only, credential_id: null, declared };
+      }
     }
     if (proxy !== null && proxy.trusted.has(request.ip)) {
       const header = request.headers[proxy.header.toLowerCase()];
@@ -217,6 +224,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     // Ends this session, or revokes the token the request came with.
     scope.post(routes.logout, async (request, reply) => {
       const viewer = request.viewer!;
+      if (viewer.declared) throw new AccountError("A token from the config cannot be revoked here; remove it from the config.", 403);
       if (viewer.via === "session") accounts.close_session(viewer.name, viewer.credential_id!);
       if (viewer.via === "token") accounts.delete_token(viewer.credential_id!, viewer.name);
       reply.clearCookie(cookie_name, { path: "/" });
@@ -226,6 +234,12 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     // Who is signed in; the page asks when it starts, which also renews a remembered cookie.
     scope.get(routes.me, async (request, reply) => {
       const viewer = request.viewer!;
+      if (viewer.declared) {
+        return {
+          name: viewer.name, role: viewer.role, access: viewer.access, via: viewer.via, read_only: viewer.read_only,
+          roles: accounts.roles, totp_enabled: false, source: "config", has_password: false,
+        };
+      }
       const user = accounts.user(viewer.name)!;
       const secret = request.cookies[cookie_name];
       const session = viewer.via === "session" && secret ? accounts.session(secret) : null;
