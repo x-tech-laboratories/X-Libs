@@ -21,6 +21,18 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - From X-Fitness and X-Stream: one item's versions in a dialog and the latest changes to every item, each restorable, on `history_methods` (X-Fitness `src/web/history/HistoryView.tsx`, X-Stream `src/components/PlaylistHistory/`).
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
 - From X-Monitor: a log search table over entries from many hosts (sort, filter, group by a field with collapsible parent rows, a priority badge per entry) with a search bar of time range, priority, unit and text.
+- From X-Monitor's TypeScript port (`worktree-ts-port`), too big or app-shaped to move in the first round:
+  - The pooled SSH transport with trust on first use, `src/core/connectors/ssh_connector.ts`: `SshPool({ known_hosts_file, connect_timeout })` with `execute(target, command, { timeout }) -> { exit_code, stdout, stderr }`, one connection per host reused, a host key trusted on first use and refused when it changes, `measure_channel_wait`.
+  - The batched SQLite writer, `src/core/database/sqlite_persistence.ts`: `BatchedWriter({ database, flush_every_seconds, buffers })` with `write(table, rows)`, `flush()`, `close()`, and `distinct_keys(database, table, columns)`, the distinct keys of a large table by skip-scan rather than a full scan.
+  - `monitor_graph` (`src/core/coordination/monitor_graph.ts`): a DAG of items defined once and linked under other parents with labels of their own, `iter_monitors`, `parent_ids`, `resolve_links`, `child_label`, `is_link`; the server's copy is `src/server/monitor_tree.ts`.
+  - Borg readers shared with X-Backups: `src/monitors/borg/{parsing,checks,shell}.ts` against X-Backups `src/server/borg/`: `parse_borg_info`, `parse_archive_list`, `check_freshness`, `borg_env(passphrase_command)` and the shell builders, one `agent/borg` module both apps call.
+  - The OCI registry digest lookup, `src/monitors/containers/registry.ts`: `registry_digest(image_ref, { fetch, auth })` with Docker Hub and GHCR token flows, the manifest-list digest and rate-limit handling.
+  - `metric_family` (Prometheus metric family names from metric names with labels), beside `server/prometheus`.
+  - The detached-job poll step repeated in attic_push, vuln_scan, nixos_upgrade and borg: `poll_detached_job(jobs, job, { on_output, on_done })` reading new output since the last sequence and finishing the job by exit code.
+  - The small XML reader in vuln_scan (`src/monitors/vuln_scan.ts`): `parse_xml(text) -> { name, attributes, children, text }` for nmap's output, without a dependency.
+  - `close_matches` and `similarity_ratio` (difflib's get_close_matches) and `deep_equal` (Python's == on JSON values) in `src/core/python.ts`, as more of `python_text`.
+  - A strict `python_format` raising Python's KeyError, IndexError and single-brace errors in its own words, as `src/monitors/uptime.ts` has, behind an option of `python_text`'s.
+  - Cache-busting reloads of plugin folders (`src/core/coordination/plugin_loader.ts`): re-import a changed plugin module under a new query string, as an option of `load_plugin_folder`.
 
 ## Certificates (X-Libs 0.35.0)
 
