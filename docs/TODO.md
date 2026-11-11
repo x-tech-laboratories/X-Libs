@@ -22,6 +22,11 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
 - From X-Monitor: a log search table over entries from many hosts (sort, filter, group by a field with collapsible parent rows, a priority badge per entry) with a search bar of time range, priority, unit and text.
 
+## Certificates (X-Libs 0.35.0)
+
+- Check the certificate dialog on a real phone with a release build of X-Tasks, X-Budget or X-Fitness against a self-signed server; so far only the `XLibsCertificates` plugin has been run, on an Android 15 emulator whose WebView (124) could not load X-Tasks' page.
+- A certificate trusted on the desktop holds for the window's own loads only from the next start, since `trust_in_session` sets the default session and Chromium keeps its first refusal there; sync and `create_main_fetch` already go through `trusting_fetch`, which holds at once.
+
 ## Unrelated, for the owner
 
 - The X-Backups health check reports critical because the two Odin Borgmatic repositories (on-disk and Ragnarok) have a failed or overdue check and a failing poll. The Ragnarok repository needs `borg check --repair` run with Heimdall's credentials.
