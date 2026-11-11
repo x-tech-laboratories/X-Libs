@@ -140,6 +140,7 @@ export function create_certificate_trust(options: CertificateTrustOptions) {
   const check = options.check ?? ((url: string) => check_certificate(url));
 
   let trusted = read_trusted(options.file);
+  const listeners = new Set<() => void>();
   const read = () => trusted;
 
   // Writes beside the file and renames over it, so a crash mid-write never leaves half a file.
@@ -150,6 +151,7 @@ export function create_certificate_trust(options: CertificateTrustOptions) {
     renameSync(`${options.file}.tmp`, options.file);
     trusted = list;
     if (options.use_in_node) use_in_node(list);
+    for (const listener of listeners) listener();
     return list;
   }
 
@@ -177,7 +179,13 @@ export function create_certificate_trust(options: CertificateTrustOptions) {
 
   if (options.use_in_node) use_in_node(read());
 
-  return { methods, read, is_trusted };
+  // Runs whenever a certificate is trusted or forgotten; returns how to stop.
+  function on_change(listener: () => void): () => void {
+    listeners.add(listener);
+    return () => void listeners.delete(listener);
+  }
+
+  return { methods, read, is_trusted, on_change };
 }
 
 // A missing or malformed file reads as nothing trusted.
