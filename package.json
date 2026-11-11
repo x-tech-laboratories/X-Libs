@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.32.1",
+  "version": "0.33.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
