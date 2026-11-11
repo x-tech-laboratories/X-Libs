@@ -3,9 +3,11 @@
 // choice of which copy wins the first time, asked before it replaces anything. It pairs with sync_client, which runs wherever the app keeps its database.
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { CertificateClient } from "../../certificate_protocol.ts";
 import { asks_for_code, type SyncDeviceClient, type SyncDirection, type SyncStatus } from "../../sync_protocol.ts";
 import { describe_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
+import { offer_certificate_trust } from "./certificates.tsx";
 import { confirm_dialog } from "./dialog.tsx";
 import { SettingRow } from "./layout.tsx";
 import { toast } from "./toasts.tsx";
@@ -23,12 +25,14 @@ export interface SyncSettingsProps {
   confirm_text?: Record<SyncDirection, string>;
   // More rows after the section, given the address being typed or the one synced with, such as a certificate to trust.
   extra?: (server_url: string) => ReactNode;
+  // Asks to trust a server certificate this device refuses, such as a self-signed one, and connects again once trusted.
+  certificates?: CertificateClient;
 }
 
 const tones = { off: "none", idle: "good", syncing: "info", offline: "warn", needs_setup: "warn", failed: "bad" } as const;
 const state_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing", offline: "Offline", needs_setup: "Needs a choice", failed: "Failed" } as const;
 
-export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text, extra }: SyncSettingsProps) {
+export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text, extra, certificates }: SyncSettingsProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
   const [server_url, set_server_url] = useState("");
   const [name, set_name] = useState("");
@@ -48,15 +52,17 @@ export function SyncSettings({ device, subscribe, data_name, placeholder = "http
 
   async function connect(direction: SyncDirection): Promise<void> {
     set_busy(true);
+    const address = server_url || status?.server_url || "";
     try {
       const credentials = keeps_sign_in ? null : { name, password, ...(asks_code ? { code } : {}) };
-      set_status(await device.connect_sync(server_url || status?.server_url || "", credentials, direction));
+      set_status(await device.connect_sync(address, credentials, direction));
       set_password("");
       set_code("");
       set_asks_code(false);
       toast(direction === "download" ? `This device now has the server's ${data_name}.` : `The server now has this device's ${data_name}.`, { tone: "good" });
     } catch (error) {
       if (asks_for_code(error) && !asks_code) set_asks_code(true);
+      else if (certificates && await offer_certificate_trust(address, certificates)) return void connect(direction);
       else toast(describe_error(error).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), { tone: "bad" });
     } finally {
       set_busy(false);

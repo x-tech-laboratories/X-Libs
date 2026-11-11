@@ -3,6 +3,7 @@ import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
+import type { CertificateClient } from "../src/certificate_protocol.ts";
 import type { SyncCredentials, SyncDeviceClient, SyncStatus } from "../src/sync_protocol.ts";
 import { Dialogs } from "../src/web/react/dialog.tsx";
 import { SyncSettings } from "../src/web/react/sync_settings.tsx";
@@ -61,4 +62,35 @@ test("a syncing device shows its server and what is waiting, rereads its status 
   await waitFor(() => expect(reads).toBe(2));
   fireEvent.click(screen.getByRole("button", { name: "Stop syncing" }));
   await waitFor(() => expect(stopped).toBe(true));
+});
+
+test("offers to trust a server's self-signed certificate when connecting fails over it, then connects again", async () => {
+  let trusted = false;
+  let status = off;
+  const device: SyncDeviceClient = {
+    get_sync_status: async () => status,
+    connect_sync: async (server_url) => {
+      if (!trusted) throw new Error("fetch failed: self-signed certificate");
+      status = { ...status, state: "idle", server_url, user: "ada" };
+      return status;
+    },
+    disconnect_sync: async () => off,
+    sync_now: async () => status,
+  };
+  const leaf = { subject: "CN=nas.lan", issuer: "CN=nas.lan", alt_names: [], valid_from: "2026-01-01T00:00:00Z", valid_to: "2027-01-01T00:00:00Z", fingerprint: "AB:CD", serial_number: "01", pem: "" };
+  const certificates: CertificateClient = {
+    check_certificate: async () => ({ origin: "https://nas.lan", host: "nas.lan", problems: ["self_signed"], reason: "DEPTH_ZERO_SELF_SIGNED_CERT", chain: [leaf], trusted }),
+    trust_certificate: async () => ((trusted = true), []),
+    list_trusted_certificates: async () => [],
+    forget_certificate: async () => [],
+  };
+  render(<><SyncSettings device={device} certificates={certificates} data_name="tasks" /><Dialogs /></>);
+
+  await waitFor(() => screen.getByLabelText("Server address"));
+  fireEvent.change(screen.getByLabelText("Server address"), { target: { value: "https://nas.lan/" } });
+  fireEvent.click(screen.getByRole("button", { name: "Use the server's tasks" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use the server's" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Trust this certificate" }));
+
+  await waitFor(() => screen.getByText("Signed in as ada"));
 });
