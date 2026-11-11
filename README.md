@@ -60,7 +60,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `server/web_folder`                      | `register_web_folder`: the built page from a folder, tuned for the Nix store (no etag or date, hashed `/assets/` kept a year, the page fetched fresh), a warning, error or nothing when the folder is missing, and the page for unknown paths when it routes itself. |
 | `server/replies`                         | `register_error_replies`: errors and unknown paths answered in plain text or as `{ error }`; `register_lenient_json_body`: an empty body as no arguments and bad JSON as `BAD_JSON`, for the route to refuse in its own words; `send_text`. |
 | `server/config`                          | `read_server_config`: host, port, web folder and the app's options from flags, then the environment, then defaults, with usage text for `--help`, the secret from `<PREFIX>_TOKEN_FILE` or `<PREFIX>_TOKEN`, and no listening beyond this machine without one; `read_secret_file`. |
-| `server/mcp`                             | `register_mcp_route`: the calls an `api_spec` describes, served as MCP tools over the official SDK's streamable HTTP (`@modelcontextprotocol/server`), each marked read-only or not, its arguments checked against the schema, its result as JSON text and a failure as a tool error in the call's own words; it sits behind the app's sign-in like any other API path. |
+| `server/mcp`                             | `register_mcp_route`: the calls an `api_spec` describes, served as MCP tools over the official SDK's streamable HTTP (`@modelcontextprotocol/server`), each marked read-only or not, its arguments checked against the schema, its result as JSON text and a failure as a tool error in the call's own words; it sits behind the app's sign-in like any other API path. `route_tools` offers a REST app's routes the same way, running each route inside the app with the caller's headers and address, so it is signed in and checked exactly as the page's request is. |
 | `server/cors`                            | `register_open_cors`: any origin may call the API, as a native or mobile shell does from a page of its own, with the client id header allowed. |
 | `web/dom`, `web/format`, `web/router`, `web/theme` | The page's element builder and `cx` class joiner, formatters (including `compact_count`, such as `"1.4M"`), hash router and theme choice, kept in this browser or the app's settings, and `follow_host_theme` for taking a host page's colours, such as the Linux sidebar's. |
 | `web/sqlite_wasm`                        | `open_wasm_database`: SQLite in WebAssembly for a page that keeps its own database, such as a phone app, saved whole to IndexedDB through `indexed_db_files` shortly after each change. |
@@ -142,6 +142,18 @@ await app.register(async (scope) => {
   await register_mcp_route(scope, { name: "x-tasks", version, api, is_read_only, call: (method, args) => methods[method](...args) });
   scope.get("/openapi.json", async () => openapi_document(api, { title: "X-Tasks", version, path_of: (method) => `/api/${method}`, is_read_only }));
 }, { prefix: "/api" });
+```
+
+An app built on REST routes names the route each tool runs instead of writing `call`. Each `:name` in the path takes
+the argument of that name, and the rest go in a GET's query or in the JSON body; a GET only reads. As every route
+checks the caller itself, the MCP path needs only someone signed in.
+
+```ts
+const routes: Record<string, RouteToolSpec> = {
+  get_host: { route: "GET /api/hosts/:name", description: "Shows one host.", params: [{ name: "name", schema: { type: "string" } }] },
+  refresh_host: { route: "POST /api/hosts/:name/refresh", description: "Reads a host again now.", params: [{ name: "name", schema: { type: "string" } }] },
+};
+await app.register(async (scope) => register_mcp_route(scope, { name: "x-nix", version, ...route_tools(app, routes) }), { prefix: "/api" });
 ```
 
 An app with its own sessions, such as one logging in by name and password, uses `register_sign_in_guard` with its
