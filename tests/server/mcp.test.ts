@@ -17,8 +17,13 @@ const api: Record<string, MethodSpec> = {
 // The protocol version the stateless fallback serves, which every MCP client still speaks.
 const protocol_version = "2025-06-18";
 
+// A server that marks the "script" token read-only, as server/account_sign_in does.
 async function build(notes: string[]): Promise<FastifyInstance> {
   const server = fastify();
+  server.decorateRequest("viewer", null);
+  server.addHook("onRequest", async (request) => {
+    (request as unknown as { viewer: { read_only: boolean } }).viewer = { read_only: request.headers.authorization === "Bearer script" };
+  });
   await server.register(
     async (scope) => {
       await register_mcp_route(scope, {
@@ -109,6 +114,18 @@ async function build_rest(restarts: unknown[]): Promise<FastifyInstance> {
   await server.register(async (scope) => register_mcp_route(scope, { name: "hosts", version: "1.0.0", ...route_tools(server, routes) }), { prefix: "/api" });
   return server;
 }
+
+describe("read-only tokens", () => {
+  it("run the tools that read and are refused the rest", async () => {
+    const notes = ["milk"];
+    app = await build(notes);
+
+    expect((await rpc("tools/call", { name: "list_notes", arguments: {} }, "script")).result).toEqual({ content: [{ type: "text", text: '["milk"]' }] });
+    const refused = await rpc("tools/call", { name: "add_note", arguments: { text: "eggs" } }, "script");
+    expect(refused.result).toEqual({ isError: true, content: [{ type: "text", text: "This token can only read." }] });
+    expect(notes).toEqual(["milk"]);
+  });
+});
 
 describe("route tools", () => {
   it("marks a GET as only reading", async () => {

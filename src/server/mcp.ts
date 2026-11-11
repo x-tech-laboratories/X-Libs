@@ -40,6 +40,11 @@ export interface RouteToolSpec extends MethodSpec {
 // The request each tool call arrives in, so the call can act as whoever sent it.
 const current_request = new AsyncLocalStorage<FastifyRequest>();
 
+// Whether the request came with a read-only token of server/account_sign_in, which may run only the tools that read.
+function is_read_only_token(request: FastifyRequest): boolean {
+  return (request as { viewer?: { read_only?: boolean } | null }).viewer?.read_only === true;
+}
+
 // ── Tools ────────────────────────────────────────────────────────────────────
 
 // A result as the text a model reads; a call that returns nothing says so.
@@ -58,7 +63,9 @@ export function create_mcp_server(options: McpRouteOptions): McpServer {
     };
     server.registerTool(method, config, async (named) => {
       try {
-        const result = await options.call(method, positional_args(spec, named ?? {}), current_request.getStore()!);
+        const request = current_request.getStore()!;
+        if (!config.annotations.readOnlyHint && is_read_only_token(request)) throw new Error("This token can only read.");
+        const result = await options.call(method, positional_args(spec, named ?? {}), request);
         return { content: [{ type: "text" as const, text: as_text(result) }] };
       } catch (error) {
         return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }] };
