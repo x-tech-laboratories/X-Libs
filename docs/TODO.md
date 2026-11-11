@@ -19,7 +19,6 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - From X-Stream: metadata cache with TTL, refresher, image-to-data-URI, parseViewCount and parseRelativeAge, loading overlay, sidebar entity list, threaded comments.
 - From X-Nix: EventsList, a state-to-tone badge, the jobs table and job page.
 - From X-Fitness and X-Stream: one item's versions in a dialog and the latest changes to every item, each restorable, on `history_methods` (X-Fitness `src/web/history/HistoryView.tsx`, X-Stream `src/components/PlaylistHistory/`).
-- Backups: `create` reuses a backup taken in the same second, so a restore within a second of the backup it restores keeps no copy of the data it replaces; name a second backup apart, such as with a suffix.
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
 - From X-Monitor: a log search table over entries from many hosts (sort, filter, group by a field with collapsible parent rows, a priority badge per entry) with a search bar of time range, priority, unit and text.
 

@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { backup_naming, backups, type BackupStore } from "../src/backups.ts";
 import { file_backup_store } from "../src/server/backup_files.ts";
@@ -38,6 +38,15 @@ describe("backup_naming", () => {
     expect(naming.describe(name, 42)).toEqual({ name, taken_at: "2026-06-10T09:30:05Z", is_automatic: true, size_bytes: 42 });
   });
 
+  test("names a second backup of the same second apart and reads that back", () => {
+    const name = naming.name_for(new Date("2026-06-10T09:30:05Z"), false, 2);
+
+    expect(name).toBe("tasks-2026-06-10T09-30-05Z-2.db");
+    expect(naming.describe(name, 42)).toEqual({ name, taken_at: "2026-06-10T09:30:05Z", is_automatic: false, size_bytes: 42 });
+    expect(naming.repeat_of?.(name)).toBe(2);
+    expect(naming.pattern.test("tasks-2026-06-10T09-30-05Z-1.db")).toBe(false);
+  });
+
   test("refuses names it did not write, such as one reaching outside the folder", () => {
     expect(naming.pattern.test("../tasks-2026-06-10T09-30-05Z.db")).toBe(false);
     expect(() => naming.describe("notes.txt", 1)).toThrow("not a backup name");
@@ -49,6 +58,30 @@ describe("backup_naming", () => {
 // ============================================================================
 
 describe("backups", () => {
+  test("takes a second backup within the same second under a name of its own, listed first", async () => {
+    vi.useFakeTimers({ now: new Date("2026-06-10T09:30:05Z"), toFake: ["Date"] });
+    const store = memory_store();
+    const set = backups(naming, store);
+
+    await set.create();
+    await set.create();
+    await set.create();
+
+    expect((await set.list()).map((backup) => backup.name)).toEqual(["tasks-2026-06-10T09-30-05Z-3.db", "tasks-2026-06-10T09-30-05Z-2.db", "tasks-2026-06-10T09-30-05Z.db"]);
+    vi.useRealTimers();
+  });
+
+  test("keeps the backup already taken this second when an app's own naming cannot name repeats", async () => {
+    vi.useFakeTimers({ now: new Date("2026-06-10T09:30:05Z"), toFake: ["Date"] });
+    const store = memory_store();
+    const set = backups({ ...naming, name_for: (taken_at, is_automatic) => naming.name_for(taken_at, is_automatic) }, store);
+
+    const first = await set.create();
+    expect(await set.create()).toEqual(first);
+    expect(store.names).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
   test("lists newest first and leaves out other files", async () => {
     const store = memory_store(["tasks-2026-06-01T00-00-00Z.db", "notes.txt", "tasks-2026-06-03T00-00-00Z-auto.db"]);
 
