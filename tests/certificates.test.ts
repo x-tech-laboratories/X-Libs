@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { check_certificate, create_certificate_trust } from "../src/certificates.ts";
-import { trust_in_session, type CertificateVerifyRequestLike } from "../src/electron/certificates.ts";
+import { trust_in_session, trusting_fetch, type CertificateVerifyRequestLike, type FetchingSessionLike } from "../src/electron/certificates.ts";
 
 const folder = mkdtempSync(join(tmpdir(), "x-libs-certificates-"));
 
@@ -145,5 +145,27 @@ describe("trust_in_session", () => {
     expect(await verdict({ hostname: "example.org", certificate: { data: pem }, errorCode: 0 })).toBe(-3);
     stop();
     expect(verify).toBeNull();
+  });
+});
+
+describe("trusting_fetch", () => {
+  it("moves to a fresh session each time a certificate is trusted or forgotten, since a session keeps its refusals", async () => {
+    const made: string[] = [];
+    const sessions = {
+      fromPartition: (partition: string): FetchingSessionLike => {
+        made.push(partition);
+        return { setCertificateVerifyProc: () => {}, fetch: async (input) => new Response(`${partition} ${String(input)}`) };
+      },
+    };
+    const trust = create_certificate_trust({ file: join(folder, "fetch.json") });
+    const send = trusting_fetch(sessions, trust);
+
+    const first = await (await send(new URL("https://nas.lan/a"))).text();
+    await trust.methods.trust_certificate(self_signed_url, (await check_certificate(self_signed_url))!.chain[0]!.fingerprint);
+    const second = await (await send("https://nas.lan/b")).text();
+
+    expect(made).toHaveLength(2);
+    expect(first).toBe(`${made[0]} https://nas.lan/a`);
+    expect(second).toBe(`${made[1]} https://nas.lan/b`);
   });
 });
