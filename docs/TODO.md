@@ -39,6 +39,14 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - Check the certificate dialog on a real phone with a release build of X-Tasks, X-Budget or X-Fitness against a self-signed server; so far only the `XLibsCertificates` plugin has been run, on an Android 15 emulator whose WebView (124) could not load X-Tasks' page.
 - A certificate trusted on the desktop holds for the window's own loads only from the next start, since `trust_in_session` sets the default session and Chromium keeps its first refusal there; sync and `create_main_fetch` already go through `trusting_fetch`, which holds at once.
 
+## Old sign-in modules (next breaking release)
+
+Every app signs in through `server/account_sign_in`, `server/account_store` and `web/react/sign_in` now, so the older ways can go in the next major version, with their tests and README rows:
+
+- `server/password_sign_in` and `web/react/login`, the accounts-file sessions a restart forgets.
+- `server/login_page` and the one-secret half of `server/sign_in` (the login page, the cookie derived from the token and the bearer check). Keep `register_sign_in_guard` and `path_of`, which `account_sign_in` and X-Backups' `auth.ts` use.
+- Their README rows, the ones marked "For apps not yet on…". X-Monitor is the last app outside the shared accounts, and its TypeScript port should start on them rather than on these.
+
 ## Unrelated, for the owner
 
 - The X-Backups health check reports critical because the two Odin Borgmatic repositories (on-disk and Ragnarok) have a failed or overdue check and a failing poll. The Ragnarok repository needs `borg check --repair` run with Heimdall's credentials.
