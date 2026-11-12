@@ -91,7 +91,7 @@ describe("shell top bar", () => {
 
     expect(screen.getByRole("link", { name: "X-Test" }).getAttribute("href")).toBe("#/today");
     expect(screen.getByRole("textbox", { name: "Search" })).toBeTruthy();
-    expect(document.getElementById("theme")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "System theme" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
     expect(document.body.classList.contains("logged-out")).toBe(false);
     expect(screen.getByRole("main").className).toBe("panes");
@@ -123,6 +123,33 @@ describe("shell top bar", () => {
     expect(screen.getByRole("contentinfo").className).toBe("status-bar");
     expect(screen.getByRole("contentinfo").textContent).toBe("3 picked");
     expect(document.body.classList.contains("has-status-bar")).toBe(true);
+  });
+
+  it("pins the app's rows, the theme, the account and Settings, in that order, below the sections", () => {
+    const on_logout = vi.fn();
+    render(<Shell brand="X-Test" sections={sections} active="settings" sidebar_foot={<p>Live</p>} settings={{ href: "#/settings" }} theme={theme_choice("x-test-theme")} user="ada" user_href="#/account" on_logout={on_logout}>Page</Shell>);
+
+    expect(screen.getByRole("link", { name: "Runs" }).parentElement!.className).toBe("sidebar-links");
+    const foot = document.querySelector(".sidebar-foot")!;
+    expect([...foot.querySelectorAll("p, button, a")].map((row) => row.textContent)).toEqual(["Live", "System theme", "ada", "Sign out", "Settings"]);
+    expect(document.querySelector(".topbar")!.textContent).not.toContain("ada");
+    expect(screen.getByRole("link", { name: "ada" }).getAttribute("href")).toBe("#/account");
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+
+    fireEvent.click(screen.getByRole("button", { name: "System theme" }));
+    expect(screen.getByRole("button", { name: "Light theme" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(on_logout).toHaveBeenCalled();
+  });
+
+  it("hands the click on Settings to an app that opens it itself", () => {
+    const on_open = vi.fn();
+    render(<Shell brand="X-Test" sidebar={<p>Tags</p>} settings={{ href: "?settings", active: false, on_open }} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+    const link = screen.getByRole("link", { name: "Settings" });
+
+    expect(link.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(link);
+    expect(on_open).toHaveBeenCalled();
   });
 
   it("hands the phone menu to an app that holds it", () => {

@@ -1,4 +1,5 @@
-// The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, the theme button, a status bar, and the toasts, dialogs and menus.
+// The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, its foot
+// pinned with the theme, the signed-in user and Settings, a status bar, and the toasts, dialogs and menus.
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
@@ -38,6 +39,72 @@ export function ThemeButton({ choice }: { choice: ThemeChoice }) {
   );
 }
 
+const theme_names: Record<Theme, string> = { system: "System theme", light: "Light theme", dark: "Dark theme" };
+
+// The theme as a sidebar row, its icon and name showing the current one, stepping to the next on each click.
+export function ThemeRow({ choice }: { choice: ThemeChoice }) {
+  const [theme, set_theme] = useState(choice.get);
+  useEffect(() => choice.on_change(set_theme), []);
+  return (
+    <button className="tree-row" title="Click to change the theme" onClick={() => choice.set(next_theme(choice.get()))}>
+      <span className="tree-label"><ThemeIcon theme={theme} /><span>{theme_names[theme]}</span></span>
+    </button>
+  );
+}
+
+function ThemeIcon({ theme }: { theme: Theme }) {
+  return (
+    <svg className="line-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {theme === "light" && <>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+      </>}
+      {theme === "dark" && <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />}
+      {theme === "system" && <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+      </>}
+    </svg>
+  );
+}
+
+// ── Sidebar foot ─────────────────────────────────────────────────────────────
+
+function PersonIcon() {
+  return (
+    <svg className="line-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  );
+}
+
+function CogIcon() {
+  return (
+    <svg className="line-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+// A sidebar row that links somewhere, raised while you are there.
+function FootLink({ href, current, icon, label, on_open }: { href: string; current: boolean; icon: ReactNode; label: string; on_open?: () => void }) {
+  return (
+    <a
+      href={href}
+      className={current ? "tree-row active" : "tree-row"}
+      aria-current={current ? "page" : undefined}
+      onClick={on_open && ((event) => {
+        event.preventDefault();
+        on_open();
+      })}
+    >
+      <span className="tree-label">{icon}<span>{label}</span></span>
+    </a>
+  );
+}
+
 // ── Shell ────────────────────────────────────────────────────────────────────
 
 export interface ShellSection {
@@ -45,6 +112,15 @@ export interface ShellSection {
   id: string;
   label: string;
   href: string;
+}
+
+// The Settings link, last in the sidebar's foot; on_open takes the click from the link, for an app that opens Settings
+// itself.
+export interface ShellSettings {
+  href: string;
+  // Lights the link up; true when the active section is "settings" unless set.
+  active?: boolean;
+  on_open?: () => void;
 }
 
 // How wide the sidebar may be dragged, kept under storage_key, or by the app when it passes width and on_change.
@@ -71,7 +147,7 @@ interface ShellProps {
   // Makes the sidebar's edge draggable on wide screens.
   sidebar_width?: SidebarWidth;
   theme: ThemeChoice;
-  // Who is signed in; left out, null or empty shows no account name or Sign out.
+  // Who is signed in, shown in the sidebar's foot; left out, null or empty shows no account name or Sign out.
   user?: string | null;
   // Hides the sidebar and the top bar's tools, such as on the login page; true when user is null unless set.
   logged_out?: boolean;
@@ -87,8 +163,11 @@ interface ShellProps {
   main_class?: string;
   // More in the top bar after the brand, such as a search box or the runs in progress.
   tools?: ReactNode;
-  // What sits at the foot of the sidebar, such as whether the live updates are connected.
+  // The app's own rows in the sidebar's foot, above the theme, the account and Settings, such as whether the live
+  // updates are connected.
   sidebar_foot?: ReactNode;
+  // Where Settings is, shown last in the sidebar's foot.
+  settings?: ShellSettings;
   // A bar along the foot of the window, such as what is playing or how many rows are picked.
   status_bar?: ReactNode;
   // Changes whenever the view does, so focus and scroll move to the new page.
@@ -113,7 +192,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, brand_icon, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, status_bar, view_key,
+  brand, brand_icon, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -178,19 +257,32 @@ export function Shell({
         <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
         {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
         {!logged_out && tools}
-        {!logged_out && <ThemeButton choice={theme} />}
-        {user_name !== undefined && (user_href ? <a className="account-link" href={user_href}>{user_name}</a> : <span className="user-name">{user_name}</span>)}
-        {user_name !== undefined && on_logout && <button onClick={on_logout}>Sign out</button>}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
           {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
-          {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : sections.map((section) => (
-            <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
-              {section.label}
-            </a>
-          ))}
-          {sidebar_foot !== undefined && sidebar_foot !== null && <div className="sidebar-foot">{sidebar_foot}</div>}
+          {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : (
+            <div className="sidebar-links">
+              {sections.map((section) => (
+                <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
+                  {section.label}
+                </a>
+              ))}
+            </div>
+          )}
+          <div className="sidebar-foot">
+            {sidebar_foot}
+            <ThemeRow choice={theme} />
+            {user_name !== undefined && (
+              <div className="sidebar-account">
+                {user_href
+                  ? <FootLink href={user_href} current={location.hash === user_href} icon={<PersonIcon />} label={user_name} />
+                  : <span className="tree-row"><span className="tree-label"><PersonIcon /><span className="user-name">{user_name}</span></span></span>}
+                {on_logout && <button className="tree-row" onClick={on_logout}>Sign out</button>}
+              </div>
+            )}
+            {settings && <FootLink href={settings.href} current={settings.active ?? active === "settings"} icon={<CogIcon />} label="Settings" on_open={settings.on_open} />}
+          </div>
           {sidebar_width && width !== undefined && (
             <ResizeHandle
               side="left"
