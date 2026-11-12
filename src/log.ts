@@ -52,8 +52,13 @@ export function parse_level_spec(spec: string | undefined, fallback: Level = def
   return parsed;
 }
 
+// A scope without its own level takes its nearest dotted parent's, so "x.core" covers "x.core.db", then the default.
 export function level_for(spec: LevelSpec, scope: string): Level {
-  return spec.scopes[scope] ?? spec.default;
+  for (let name = scope; name !== ""; name = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "") {
+    const level = spec.scopes[name];
+    if (level !== undefined) return level;
+  }
+  return spec.default;
 }
 
 export function is_enabled(spec: LevelSpec, scope: string, level: Level): boolean {

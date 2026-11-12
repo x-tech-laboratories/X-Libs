@@ -36,6 +36,21 @@ describe("parse_level_spec", () => {
   });
 });
 
+describe("dotted scopes", () => {
+  it("take the nearest parent's level when they have none of their own", () => {
+    const spec = parse_level_spec("warn,app.core:debug,app.core.db:error");
+    expect(level_for(spec, "app.core.engine")).toBe("debug");
+    expect(level_for(spec, "app.core.db.queries")).toBe("error");
+    expect(level_for(spec, "app.web")).toBe("warn");
+    expect(level_for(spec, "app.coretwo")).toBe("warn");
+  });
+
+  it("leave colon scopes to their own entries", () => {
+    const spec = parse_level_spec("info,ui:debug");
+    expect(level_for(spec, "ui:other")).toBe("info");
+  });
+});
+
 describe("levels", () => {
   it("writes levels at or above the one set, and lets one scope be noisier", () => {
     const spec = parse_level_spec("warn");

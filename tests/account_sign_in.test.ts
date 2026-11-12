@@ -241,3 +241,37 @@ describe("device labels", () => {
     expect(device_label(undefined)).toBe("Unknown browser");
   });
 });
+
+describe("declared tokens", () => {
+  it("act with their scope's role, cannot be revoked, and a role-less one signs nothing in", async () => {
+    const { read_declared_tokens, token_hash } = await import("../src/server/declared_tokens.ts");
+    const accounts = await serve();
+    accounts.set_declared_tokens(read_declared_tokens([
+      { name: "scraper", scope: "read", token_hash: token_hash("scraper-secret-1234") },
+      { name: "ci", scope: "control", token_hash: token_hash("control-secret-1234") },
+      { name: "pusher", scope: "push", token_hash: token_hash("push-secret-123456") },
+    ], { scopes: { read: { role: "viewer", read_only: true }, control: { role: "operator", read_only: false }, push: { role: null, read_only: false } } }));
+    const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+    expect((await app.inject({ url: "/api/things", headers: bearer("scraper-secret-1234") })).json()).toEqual({ seen_by: "scraper" });
+    expect((await app.inject({ method: "POST", url: "/api/things", headers: bearer("scraper-secret-1234") })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/things", headers: bearer("control-secret-1234") })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/things", headers: bearer("push-secret-123456") })).statusCode).toBe(401);
+    expect(accounts.check_declared_token("push-secret-123456")?.name).toBe("pusher");
+
+    const me = await app.inject({ url: "/api/me", headers: bearer("control-secret-1234") });
+    expect(me.json()).toMatchObject({ name: "ci", role: "operator", via: "token", source: "config" });
+    const logout = await app.inject({ method: "POST", url: "/api/logout", headers: bearer("control-secret-1234") });
+    expect(logout.statusCode).toBe(403);
+    expect((await app.inject({ url: "/api/users", headers: bearer("control-secret-1234") })).statusCode).toBe(403);
+  });
+});
+
+describe("open prefixes", () => {
+  it("let a route that checks its own credentials through without signing in", async () => {
+    await serve({ open_prefixes: ["/api/push/"] });
+    app.post("/api/push/:id", async () => ({ pushed: true }));
+    expect((await app.inject({ method: "POST", url: "/api/push/nightly" })).json()).toEqual({ pushed: true });
+    expect((await app.inject({ url: "/api/things" })).statusCode).toBe(401);
+  });
+});

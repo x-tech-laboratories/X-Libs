@@ -10,6 +10,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { migrate, type SqlDatabase, type SqlValue } from "../sql.ts";
 import { account_name_pattern, hash_password, verify_password, type Accounts } from "./passwords.ts";
+import { match_declared_token, type DeclaredToken } from "./declared_tokens.ts";
 import { matching_step, new_secret, otpauth_uri } from "./totp.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -72,6 +73,8 @@ export interface AccountStoreOptions {
   token_prefix?: string;
   // The fewest characters a password may have; 12 unless set.
   shortest_password?: number;
+  // Tokens from the app's config, read by `read_declared_tokens`, which no page can list or revoke.
+  declared_tokens?: readonly DeclaredToken[];
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -128,6 +131,7 @@ export class AccountStore {
   private readonly check_access: (value: unknown) => unknown;
   private readonly token_prefix: string;
   private readonly shortest_password: number;
+  private declared_token_list: readonly DeclaredToken[];
 
   constructor(options: AccountStoreOptions) {
     this.database = options.database;
@@ -137,6 +141,7 @@ export class AccountStore {
     this.check_access = options.check_access ?? only_everything;
     this.token_prefix = options.token_prefix ?? "xt";
     this.shortest_password = options.shortest_password ?? 12;
+    this.declared_token_list = options.declared_tokens ?? [];
     if (this.roles.length === 0) throw new Error("An account store needs at least one role.");
     migrate(this.database, schema, { owner: "accounts" });
   }
@@ -363,6 +368,20 @@ export class AccountStore {
     const now = now_seconds();
     this.run("UPDATE account_tokens SET last_used_epoch = ? WHERE id = ?", now, Number(row.id));
     return { ...token_of(row), last_used_epoch: now };
+  }
+
+  // The config's tokens, which a reload of the config may replace.
+  get declared_tokens(): readonly DeclaredToken[] {
+    return this.declared_token_list;
+  }
+
+  set_declared_tokens(tokens: readonly DeclaredToken[]): void {
+    this.declared_token_list = tokens;
+  }
+
+  // The config's token the presented one matches, or null.
+  check_declared_token(token: string): DeclaredToken | null {
+    return match_declared_token(this.declared_token_list, token);
   }
 
   // ── Checks ───────────────────────────────────────────────────────────────
