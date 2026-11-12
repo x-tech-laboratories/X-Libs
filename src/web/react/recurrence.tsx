@@ -1,4 +1,4 @@
-// A form field for iCalendar recurrence (RFC 5545) on the recurrence module, drawn in Halon's form rows: every N units,
+// A form field for iCalendar recurrence (RFC 5545) on the recurrence module, drawn as Halon fields: every N units,
 // weekdays, months, days of the month, weekday entries such as "the last Friday", times, an end, dates to skip and add,
 // and every BY part directly under More options. Parts and lines it cannot edit are kept exactly as written.
 
@@ -226,11 +226,16 @@ function ListText({ label, shown, error, placeholder, on_commit }: { label: stri
 function Row({ name, label, children }: { name: string; label: string; children: ReactNode }) {
   const id = useId();
   return (
-    <div className={`form-row recurrence-${name}`} role="group" aria-labelledby={id}>
-      <span id={id}>{label}</span>
+    <div className={`field recurrence-${name}`} role="group" aria-labelledby={id}>
+      <span className="field-label" id={id}>{label}</span>
       <div className="chips">{children}</div>
     </div>
   );
+}
+
+// Repeated controls one under another, drawn only when there are some.
+function List({ children }: { children: ReactNode[] }) {
+  return children.length > 0 ? <div className="stack tight">{children}</div> : null;
 }
 
 function RemoveButton({ label, on_click }: { label: string; on_click: () => void }) {
@@ -403,7 +408,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
 
   const date_rows = (list: "exdates" | "rdates", row_label: string, add_label: string) => (
     <Row name={list} label={row_label}>
-      <div className="stack tight">
+      <List>
         {state[list].map((date, index) => (
           <div key={index} className="chips">
             <input
@@ -418,7 +423,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
             <RemoveButton label="Remove" on_click={() => edit((next) => { next[list].splice(index, 1); })} />
           </div>
         ))}
-      </div>
+      </List>
       <button type="button" onClick={() => edit((next) => { next[list].push(rule_date_from_input(default_input("date", all_day), format)); })}>{add_label}</button>
     </Row>
   );
@@ -443,7 +448,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
       </label>
 
       {shown && (
-        <div className="form-rows">
+        <div className="stack tight">
           <Row name="repeat" label="Every">
             <NumberField label="Interval" bare min={1} value={options.interval ?? 1} on_change={(interval) => edit((next) => {
               if ((interval ?? 1) <= 1) delete next.options.interval;
@@ -514,7 +519,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
               )}
               {(day_mode === "weekdays" || day_mode === "both") && (
                 <>
-                  <div className="stack tight">
+                  <List>
                     {entries.map((entry, index) => {
                       const ordinal = String(entry.n ?? "");
                       const ordinals = ordinal_names.some(([position]) => position === ordinal) ? ordinal_names : [...ordinal_names, [ordinal, `number ${ordinal}`] as [string, string]];
@@ -531,7 +536,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
                         </div>
                       );
                     })}
-                  </div>
+                  </List>
                   {features.has("weekday-entries") && (
                     <button type="button" onClick={() => edit((next) => {
                       set_entries(next, [...(next.options.byweekday ?? []), weekday_of(defaults.weekday, defaults.ordinal)]);
@@ -560,7 +565,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
 
           {time_of_day_frequencies.includes(frequency) && !all_day && (
             <Row name="times" label="At">
-              <div className="stack tight">
+              <List>
                 {shown_times.map((time, index) => (
                   <div key={index} className="chips">
                     <CheckedInput type="time" aria-label="Time" value={time} error={index === 0 ? state.errors.times : ""} onChange={(event) => {
@@ -570,7 +575,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
                     {features.has("times") && <RemoveButton label="Remove" on_click={() => edit((next) => read_times(next, shown_times.filter((_, at) => at !== index)))} />}
                   </div>
                 ))}
-              </div>
+              </List>
               {features.has("times") && (
                 <button type="button" onClick={() => edit((next) => {
                   const hours = next.options.byhour ?? [];
@@ -623,7 +628,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
       {shown && features.has("more-options") && (
         <details className="form-group recurrence-more">
           <summary>More options</summary>
-          <div className="form-rows">
+          <div className="stack tight">
             {(Object.keys(rule_parts) as RulePart[]).filter((part) => part_allowed[part] !== false).map((part) => (
               <Row key={part} name="part" label={rule_parts[part].label}>
                 <ListText
