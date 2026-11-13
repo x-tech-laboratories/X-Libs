@@ -1,5 +1,6 @@
 // Calls a server's JSON API: a body goes as JSON, a 401 throws LoginNeeded so the page can ask for a login, a 204 is no
-// answer, and a refusal throws ApiError with the server's own words from { error } or { message }, or its plain text.
+// answer, and a refusal throws ApiError with the server's own words from { error } or { message }, or its plain text,
+// or plain words for a proxy's HTML error page.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -33,8 +34,21 @@ export interface ApiOptions {
 
 // ── Requests ─────────────────────────────────────────────────────────────────
 
-// The message a refused request's body gives: its { error } or { message }, or the text itself.
+// What a proxy's own error page means, since its HTML is no message for a person.
+const proxy_messages: Record<number, string> = {
+  502: "The server could not be reached through its proxy (HTTP 502); it may be restarting, so try again in a moment.",
+  503: "The server is not available just now (HTTP 503); try again in a moment.",
+  504: "The server took too long to answer, so its proxy stopped waiting (HTTP 504). It may still be finishing what was asked; check before trying again.",
+};
+
+function is_html(text: string, response: Response): boolean {
+  return (response.headers.get("content-type") ?? "").includes("text/html") || /^\s*</.test(text);
+}
+
+// The message a refused request's body gives: its { error } or { message }, the text itself, or for an HTML page, such
+// as a proxy's, what its status means.
 function refusal_message(text: string, response: Response): string {
+  if (is_html(text, response)) return proxy_messages[response.status] ?? `The server refused the request (HTTP ${response.status}).`;
   try {
     const answer: unknown = JSON.parse(text);
     if (typeof answer === "object" && answer !== null) {

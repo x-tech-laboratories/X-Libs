@@ -43,6 +43,17 @@ describe("api", () => {
     await expect(text("/api/x")).rejects.toMatchObject({ message: "not found", status: 404 });
   });
 
+  it("says what a proxy's HTML error page means in place of its markup", async () => {
+    const nginx_504 = "<html>\r\n<head><title>504 Gateway Time-out</title></head>\r\n<body>\r\n<center><h1>504 Gateway Time-out</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
+    const timed_out = create_api({ fetch: answering(504, nginx_504) });
+    const too_large = create_api({ fetch: (async () => new Response("<html>413</html>", { status: 413, headers: { "content-type": "text/html" } })) as typeof fetch });
+    const own_words = create_api({ fetch: answering(503, '{"error":"Restoring a backup."}') });
+
+    await expect(timed_out("/api/x")).rejects.toMatchObject({ message: expect.stringContaining("took too long to answer"), status: 504 });
+    await expect(too_large("/api/x")).rejects.toMatchObject({ message: "The server refused the request (HTTP 413).", status: 413 });
+    await expect(own_words("/api/x")).rejects.toMatchObject({ message: "Restoring a backup.", status: 503 });
+  });
+
   it("throws an ApiError with no status when the server cannot be reached", async () => {
     const api = create_api({ fetch: (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch });
 
