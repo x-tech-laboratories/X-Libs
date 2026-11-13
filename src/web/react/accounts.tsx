@@ -1,6 +1,7 @@
 // The account pages every app with accounts shows: "Your account" with the password, second factor, sessions and tokens
-// of whoever is signed in, and an admin's "Users" with everyone's role, access, second factor and tokens. The app says
-// what its roles mean and, when it grants more than everything or nothing, how access reads and is picked.
+// of whoever is signed in, and an admin's "Users" with everyone's role, access, second factor and tokens, as a page or
+// as sections of the settings page. The app says what its roles mean and, when it grants more than everything or
+// nothing, how access reads and is picked.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ import { ApiError } from "../api.ts";
 import { age, stamp } from "../format.ts";
 import { Chip } from "./badges.tsx";
 import { confirm_dialog, Dialog, open_dialog } from "./dialog.tsx";
-import { Facts, FormRow, PageHeading, Section } from "./layout.tsx";
+import { Facts, FormRow, PageHeading, Section, type SettingsSection } from "./layout.tsx";
 import { Empty, Loaded, use_resource } from "./states.tsx";
 import { DataTable } from "./table.tsx";
 import { Age } from "./time.tsx";
@@ -310,7 +311,7 @@ export function UsersView({ client, me, access_editor, ...words }: UsersViewProp
   return (
     <div className="page">
       <PageHeading title="Users" actions={<button className="accent solid" onClick={() => user_dialog(null, editing)}>Add user</button>} />
-      <Section title="Users">
+      <Section title="Who can sign in">
         <Loaded resource={users} lines={4}>{(rows) => <UsersTable users={rows} editing={editing} />}</Loaded>
       </Section>
       <Section title="Tokens">
@@ -318,6 +319,32 @@ export function UsersView({ client, me, access_editor, ...words }: UsersViewProp
       </Section>
     </div>
   );
+}
+
+// The same for the settings page: everyone who can sign in, with Add user, and everyone's tokens, each a section for
+// an admin; anyone else gets none, so the page shows them nothing.
+export function users_settings({ client, me, access_editor, ...words }: UsersViewProps): SettingsSection[] {
+  if (me.role !== me.roles[me.roles.length - 1]) return [];
+  return [
+    { id: "users", heading: "Users", hint: "Who can sign in, with their role and access. Changing a user's role, access or password signs them out everywhere.", content: <UsersSettingsList client={client} me={me} access_editor={access_editor} {...words} /> },
+    { id: "tokens", heading: "Tokens", hint: "Every user's tokens, for devices and scripts.", content: <TokensSettingsList client={client} /> },
+  ];
+}
+
+function UsersSettingsList({ client, me, access_editor, ...words }: UsersViewProps) {
+  const users = use_resource(client.users, [client]);
+  const editing = { client, me, words, access_editor, refresh: () => void users.reload(true) };
+  return (
+    <div className="stack tight">
+      <Loaded resource={users} lines={4}>{(rows) => <UsersTable users={rows} editing={editing} />}</Loaded>
+      <div><button className="accent solid" onClick={() => user_dialog(null, editing)}>Add user</button></div>
+    </div>
+  );
+}
+
+function TokensSettingsList({ client }: { client: AccountsClient }) {
+  const tokens = use_resource(client.all_tokens, [client]);
+  return <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} show_owner revoke={(token) => client.delete_token(token.id)} refresh={() => void tokens.reload(true)} />}</Loaded>;
 }
 
 interface Editing {

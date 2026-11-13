@@ -69,6 +69,16 @@ describe("PluginSettings", () => {
     expect(host.settings("a")).toEqual({ loud: true, name: "y" });
   });
 
+  it("leaves its heading to the settings section around it when given null", async () => {
+    const host = create_plugin_host<Api>({ app });
+    await host.add(plugin("a", { description: "Does things" }));
+    await host.start();
+    render(<PluginSettings host={host} heading={null} />);
+
+    expect(screen.queryByRole("heading", { name: "Plugins" })).toBeNull();
+    expect(screen.getByText("Does things")).toBeTruthy();
+  });
+
   it("shows why a plugin cannot run", async () => {
     const host = create_plugin_host<Api>({ app });
     await host.add(plugin("needy", { requires: { ghost: "*" } }));

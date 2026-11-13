@@ -50,6 +50,13 @@ describe("panels and settings", () => {
     expect(screen.getByRole("heading").innerHTML).toBe("<em>Views</em>");
     expect(screen.getByText("Order").closest(".setting-row")!.className).toBe("setting-row list-row");
   });
+
+  test("a settings group with a null heading leaves the heading out", () => {
+    render(<SettingsGroup heading={null} hint="Kept here"><SettingRow label="Order">x</SettingRow></SettingsGroup>);
+
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getByText("Kept here")).toBeTruthy();
+  });
 });
 
 describe("settings page", () => {
