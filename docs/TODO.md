@@ -39,6 +39,21 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
   - A strict `python_format` raising Python's KeyError, IndexError and single-brace errors in its own words, as `src/monitors/uptime.ts` has, behind an option of `python_text`'s.
   - Cache-busting reloads of plugin folders (`src/core/coordination/plugin_loader.ts`): re-import a changed plugin module under a new query string, as an option of `load_plugin_folder`.
 
+## Settings, History and Users in Settings (Application Standard, 2026-11-13)
+
+The standard now gives every app a Settings page (`SettingsPage`) and a History page, puts Users and Tokens in Settings
+through `users_settings` (X-Libs 0.41.0) rather than a Users page or row, and asks every app to sync where it can. Apps
+that do not yet:
+
+- X-Backups: no Settings page in `src/`; Users is a page and a sidebar row (`src/web/main.tsx`, `src/web/views/users.tsx`). History is left out in its README (items come from config); no sync (server, agent and web only).
+- X-Budget: Users sits at the foot of Your account (`src/web/App.tsx`); move it to `users_settings`.
+- X-Fitness: Users is a page with a row in the sidebar foot (`src/web/App.tsx`, `src/web/Sidebar.tsx`); move it to `users_settings`.
+- X-Music: no History page (README: playlists are not edited yet); no sync (Electron only, no server).
+- X-Nix: Users is a page and a sidebar row (`src/web/main.tsx`); History is left out in its README (a log; items from config); no sync.
+- X-Stream: Settings does not use `SettingsPage` (`src/pages/Settings/Settings.tsx`); its playlist versions have no History page of their own (`/history` is watch history); no X-Libs sync.
+- X-Tasks: Users is a `#/users` page and a sections entry (`src/web/SignedIn.tsx`); move it to `users_settings`.
+- CODEX: an options view on `SettingsGroup` rather than a `SettingsPage` (`src/web/views/options.tsx`); no History page and no README note leaving it out; no sync.
+
 ## Certificates (X-Libs 0.35.0)
 
 - Check the certificate dialog on a real phone with a release build of X-Tasks, X-Budget or X-Fitness against a self-signed server; so far only the `XLibsCertificates` plugin has been run, on an Android 15 emulator whose WebView (124) could not load X-Tasks' page.
