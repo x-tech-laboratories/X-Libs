@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, test } from "vitest";
 
 import { create_accounts_client, type Me } from "../src/web/accounts.ts";
-import { UsersView } from "../src/web/react/accounts.tsx";
+import { users_settings, UsersView } from "../src/web/react/accounts.tsx";
+import { SettingsPage } from "../src/web/react/layout.tsx";
 import { SignInForm, use_account } from "../src/web/react/sign_in.tsx";
 
 afterEach(cleanup);
@@ -100,4 +101,30 @@ test("the users page lists everyone and marks who is signed in", async () => {
   await waitFor(() => expect(screen.getAllByText("vera").length).toBeGreaterThan(0));
   expect(screen.getAllByText("(you)").length).toBeGreaterThan(0);
   expect(screen.getAllByRole("button", { name: "Reset second factor" }).length).toBeGreaterThan(0);
+});
+
+test("the users page names its list apart from the page's own heading", async () => {
+  const client = create_accounts_client({ fetch: server({ "/api/users": () => json([]), "/api/tokens": () => json([]) }) });
+
+  render(<UsersView client={client} me={me} />);
+
+  expect(screen.getAllByRole("heading", { name: "Users" })).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Who can sign in" })).toBeTruthy();
+});
+
+test("the users settings give an admin Users and Tokens sections, with Add user, and anyone else none", async () => {
+  const client = create_accounts_client({
+    fetch: server({
+      "/api/users": () => json([{ name: "vera", role: "viewer", access: null, totp_enabled: false, has_password: true, source: "page", created_epoch: 0 }]),
+      "/api/tokens": () => json([]),
+    }),
+  });
+
+  render(<SettingsPage categories={[{ heading: "Server", sections: users_settings({ client, me }) }]} />);
+
+  expect(screen.getByRole("heading", { name: "Users" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Tokens" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add user" })).toBeTruthy();
+  await waitFor(() => expect(screen.getAllByText("vera").length).toBeGreaterThan(0));
+  expect(users_settings({ client, me: { ...me, role: "viewer" } })).toEqual([]);
 });

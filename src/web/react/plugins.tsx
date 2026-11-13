@@ -77,7 +77,8 @@ const STATE_LABELS: Record<PluginState, [string, Tone]> = {
 };
 
 // The settings page's Plugins section: a row per plugin with its version, state and on switch, then its own settings.
-export function PluginSettings<Api extends PluginApi>({ host, heading = "Plugins", empty = "No plugins are installed." }: { host: PluginHost<Api>; heading?: ReactNode; empty?: ReactNode }) {
+// A heading of null leaves it to the settings section the rows sit in.
+export function PluginSettings<Api extends PluginApi>({ host, heading = "Plugins", empty = "No plugins are installed." }: { host: PluginHost<Api>; heading?: ReactNode | null; empty?: ReactNode }) {
   const statuses = use_plugins(host);
   return (
     <SettingsGroup heading={heading} hint={statuses.length === 0 ? empty : undefined}>

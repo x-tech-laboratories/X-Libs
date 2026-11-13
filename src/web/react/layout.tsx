@@ -201,10 +201,12 @@ export function Stepper({ label, previous, position, next }: { label: string; pr
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-export function SettingsGroup({ heading, hint, children }: { heading: ReactNode; hint?: ReactNode; children: ReactNode }) {
+// A group of setting rows under a heading; a group placed inside a settings section that already names it leaves the
+// heading out with null.
+export function SettingsGroup({ heading, hint, children }: { heading: ReactNode | null; hint?: ReactNode; children: ReactNode }) {
   return (
     <section className="settings-group">
-      <h3 className="settings-heading">{heading}</h3>
+      {heading !== null && <h3 className="settings-heading">{heading}</h3>}
       {hint && <p className="setting-hint">{hint}</p>}
       {children}
     </section>
