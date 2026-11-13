@@ -117,6 +117,18 @@ describe("create_window", () => {
     expect(shell.openExternal.mock.calls).toEqual([["mailto:someone@example.org"]]);
   });
 
+  test("sends another app's links outside only when the app names its scheme", () => {
+    open().window.open_handler!({ url: "stremio:///detail/movie/tt0111161" });
+    expect(shell.openExternal).not.toHaveBeenCalled();
+
+    const { window } = open({ more: { external_schemes: ["stremio:"] } });
+    window.open_handler!({ url: "stremio:///detail/movie/tt0111161" });
+    expect(navigate(window, "stremio:///detail/series/tt0903747")).toBe(true);
+    window.open_handler!({ url: "file:///home/someone/notes.txt" });
+
+    expect(shell.openExternal.mock.calls).toEqual([["stremio:///detail/movie/tt0111161"], ["stremio:///detail/series/tt0903747"]]);
+  });
+
   test("keeps the app's own pages in the window and opens other sites in the browser", () => {
     const { window } = open();
 

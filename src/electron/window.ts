@@ -84,6 +84,8 @@ export interface WindowOptions {
   state_file?: string;
   native_theme: NativeThemeLike;
   shell: ShellLike;
+  // Other apps' link schemes, such as "stremio:", that may open outside too.
+  external_schemes?: string[];
   // Lets a remembered place that is on no screen now fall back to the default.
   screen?: ScreenLike;
   // The background behind the page before it paints, for light and dark themes.
@@ -137,10 +139,11 @@ function overlaps(first: Rectangle, second: Rectangle): boolean {
 
 const EXTERNAL_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
-// Only web and mail links reach the browser, never a file or another app's scheme.
-export function is_external_link(url: string): boolean {
+// Only web and mail links and the app's chosen schemes leave the window, never a file or any other app's scheme.
+export function is_external_link(url: string, extra_schemes: string[] = []): boolean {
   try {
-    return EXTERNAL_SCHEMES.has(new URL(url).protocol);
+    const protocol = new URL(url).protocol;
+    return EXTERNAL_SCHEMES.has(protocol) || extra_schemes.includes(protocol);
   } catch {
     return false;
   }
@@ -158,8 +161,8 @@ export function is_app_page(url: string, options: Pick<WindowOptions, "dev_url" 
   }
 }
 
-function open_outside(shell: ShellLike, url: string): void {
-  if (is_external_link(url)) void shell.openExternal(url);
+function open_outside(options: WindowOptions, url: string): void {
+  if (is_external_link(url, options.external_schemes)) void options.shell.openExternal(url);
 }
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -194,7 +197,7 @@ export function create_window<Window extends BrowserWindowLike>(
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    open_outside(options.shell, url);
+    open_outside(options, url);
     return { action: "deny" };
   });
 
@@ -202,7 +205,7 @@ export function create_window<Window extends BrowserWindowLike>(
   window.webContents.on("will-navigate", (event, url) => {
     if (is_app_page(url, options)) return;
     event.preventDefault();
-    open_outside(options.shell, url);
+    open_outside(options, url);
   });
 
   const follow_theme = () => window.setBackgroundColor(background_color());
