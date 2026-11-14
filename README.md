@@ -1,5 +1,7 @@
 # X-Libs
 
+<a href="https://liberapay.com/BeatLink/donate"><img alt="Donate using Liberapay" src="https://liberapay.com/assets/widgets/donate.svg"></a>
+
 Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-libs`, with a subpath per module.
 
 ## Modules
