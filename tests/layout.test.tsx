@@ -2,9 +2,28 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup, SettingsPage } from "../src/web/react/layout.tsx";
+import { FormGroup, moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup, SettingsPage } from "../src/web/react/layout.tsx";
 
 afterEach(cleanup);
+
+describe("form group", () => {
+  test("folds its contents under the summary, open when asked, and keeps the reader's toggle", () => {
+    const { container, rerender } = render(<FormGroup summary="More nutrients" class_name="extra"><p>Iron</p></FormGroup>);
+    const group = container.querySelector("details")!;
+    expect(group.className).toBe("form-group extra");
+    expect(group.open).toBe(false);
+    expect(screen.getByText("More nutrients").tagName).toBe("SUMMARY");
+
+    group.open = true;
+    fireEvent(group, new Event("toggle"));
+    rerender(<FormGroup summary="More nutrients" class_name="extra"><p>Iron</p></FormGroup>);
+    expect(group.open).toBe(true);
+
+    cleanup();
+    render(<FormGroup summary="More" open><p>Zinc</p></FormGroup>);
+    expect(document.querySelector("details")!.open).toBe(true);
+  });
+});
 
 describe("page heading", () => {
   test("shows the title as the page's heading with its subtitle, banner, icon, actions and what follows", () => {

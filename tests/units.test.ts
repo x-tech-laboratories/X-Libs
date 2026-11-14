@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { convert, format_change, format_measure, format_number, to_shown, to_stored } from "../src/units.ts";
+import { convert, format_change, format_grams, format_measure, format_number, from_grams, to_grams, to_shown, to_stored } from "../src/units.ts";
 
 describe("units", () => {
   it("converts within a quantity and refuses across quantities", () => {
@@ -14,6 +14,22 @@ describe("units", () => {
     expect(to_shown(2.54, "in")).toBeCloseTo(1, 6);
     expect(to_stored(225, "lb")).toBeCloseTo(102.058, 3);
     expect(to_stored(to_shown(80, "lb"), "lb")).toBeCloseTo(80, 9);
+  });
+
+  it("shows grams in g, mg or µg and reads them back", () => {
+    expect(from_grams(0.0023, "mg")).toBeCloseTo(2.3, 9);
+    expect(from_grams(0.00002, "µg")).toBeCloseTo(20, 9);
+    expect(to_grams(400, "µg")).toBeCloseTo(0.0004, 12);
+    expect(to_grams(from_grams(0.074, "mg"), "mg")).toBeCloseTo(0.074, 12);
+  });
+
+  it("formats grams to a tenth, and mg and µg whole from 10 up", () => {
+    expect(format_grams(6.5, "g")).toBe("6.5 g");
+    expect(format_grams(6, "g")).toBe("6 g");
+    expect(format_grams(0.12, "mg")).toBe("120 mg");
+    expect(format_grams(0.0047, "mg")).toBe("4.7 mg");
+    expect(format_grams(0.0000024, "µg")).toBe("2.4 µg");
+    expect(format_grams(0, "mg")).toBe("0 mg");
   });
 
   it("formats a stored value in the unit shown without trailing zeros", () => {

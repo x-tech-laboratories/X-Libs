@@ -8,6 +8,7 @@ import {
   weekday_of, type FrequencyName, type RuleDate, type RuleFormat, type RuleOptions, type RulePart, type Weekday, type WeekdayStr,
 } from "../../recurrence.ts";
 import { NumberField } from "./controls.tsx";
+import { FormGroup } from "./layout.tsx";
 
 // ── Features ─────────────────────────────────────────────────────────────────
 
@@ -626,8 +627,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
       )}
 
       {shown && features.has("more-options") && (
-        <details className="form-group recurrence-more">
-          <summary>More options</summary>
+        <FormGroup summary="More options" class_name="recurrence-more">
           <div className="stack tight">
             {(Object.keys(rule_parts) as RulePart[]).filter((part) => part_allowed[part] !== false).map((part) => (
               <Row key={part} name="part" label={rule_parts[part].label}>
@@ -652,7 +652,7 @@ export function RecurrenceField({ value, on_change, features: features_text, val
               </select>
             </Row>
           </div>
-        </details>
+        </FormGroup>
       )}
 
       {summary && <p className={message ? "small tone-bad field-error" : "muted small"} aria-live="polite">{summary}</p>}

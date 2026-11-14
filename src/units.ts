@@ -1,6 +1,6 @@
 // Measurements kept in one unit and shown in the one each person picks: weights in kilograms or pounds, lengths in
-// centimetres or inches, distances in kilometres or miles, and energy in kilocalories or kilojoules; plain numbers and
-// signed changes to a tenth.
+// centimetres or inches, distances in kilometres or miles, and energy in kilocalories or kilojoules; small amounts such
+// as a food's nutrients kept in grams and shown in g, mg or µg; plain numbers and signed changes to a tenth.
 
 // ── Units ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,32 @@ export function to_shown(value: number, unit: Unit): number {
 // A value typed in the unit shown, back in the stored unit.
 export function to_stored(value: number, unit: Unit): number {
   return convert(value, unit, stored_units[in_stored_unit[unit].quantity]);
+}
+
+// ── Grams ────────────────────────────────────────────────────────────────────
+
+// Small amounts, such as a food's nutrients, kept in grams and shown in whichever reads best: sodium in mg, vitamin D in µg.
+export type GramUnit = "g" | "mg" | "µg";
+
+const per_gram: Record<GramUnit, number> = { g: 1, mg: 1000, "µg": 1_000_000 };
+
+// Grams, in the unit shown.
+export function from_grams(grams: number, unit: GramUnit): number {
+  return grams * per_gram[unit];
+}
+
+// A value typed in the unit shown, back in grams.
+export function to_grams(value: number, unit: GramUnit): number {
+  return value / per_gram[unit];
+}
+
+// Grams in the unit shown with its label: grams to a tenth, mg and µg whole from 10 up and to a tenth below, such as
+// "6.5 g", "120 mg" or "4.7 mg"; no trailing zeros.
+export function format_grams(grams: number, unit: GramUnit): string {
+  const exact = from_grams(grams, unit);
+  const decimals = unit === "g" || Math.abs(exact) < 10 ? 1 : 0;
+  const shown = Number(exact.toFixed(decimals));
+  return `${shown.toLocaleString(undefined, { maximumFractionDigits: decimals })} ${unit}`;
 }
 
 // ── Showing ──────────────────────────────────────────────────────────────────

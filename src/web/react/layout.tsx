@@ -67,6 +67,17 @@ export function Section({ title, tools, class_name, on_context_menu, children }:
   );
 }
 
+// A part of a form or page folded under a line that opens it, such as "More options": Halon's .form-group.
+export function FormGroup({ summary, open = false, class_name, children }: { summary: ReactNode; open?: boolean; class_name?: string; children: ReactNode }) {
+  const [is_open, set_open] = useState(open);
+  return (
+    <details className={class_name ? `form-group ${class_name}` : "form-group"} open={is_open} onToggle={(event) => set_open(event.currentTarget.open)}>
+      <summary>{summary}</summary>
+      {children}
+    </details>
+  );
+}
+
 export type Fact = [label: string, value: ReactNode, class_name?: string];
 
 // Labelled values in a grid of tiles, or as rows of label and value for long values such as paths.
