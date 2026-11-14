@@ -91,7 +91,7 @@ describe("table headers", () => {
     const on_sort = vi.fn();
     render(<DataTable columns={columns} rows={tasks} row_key={(task) => task.id} sorting={{ key: "Title", descending: false }} on_sort={on_sort} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Title/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Title/ }));
 
     expect(on_sort).toHaveBeenCalledWith({ key: "Title", descending: true });
     expect(screen.getAllByRole("columnheader")[0]!.getAttribute("aria-sort")).toBe("ascending");
@@ -104,7 +104,7 @@ describe("table headers", () => {
     const on_sorting_change = vi.fn();
     render(<DataTable columns={columns} rows={tasks} sorting={[{ key: "size", descending: true }, { key: "Title", descending: false }]} on_sorting_change={on_sorting_change} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Title/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /^Title/ }), { shiftKey: true });
 
     expect(on_sorting_change).toHaveBeenCalledWith([{ key: "size", descending: true }, { key: "Title", descending: true }]);
     expect(document.querySelectorAll(".sort-rank")).toHaveLength(2);
@@ -115,7 +115,7 @@ describe("table headers", () => {
     const on_column_order_change = vi.fn();
     render(<DataTable columns={columns} rows={tasks} column_order={["size", "Title", "Note"]} on_column_order_change={on_column_order_change} on_sort={() => {}} />);
 
-    fireEvent.keyDown(screen.getByRole("button", { name: /Size/ }), { key: "ArrowRight", altKey: true });
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Size/ }), { key: "ArrowRight", altKey: true });
 
     expect(header_labels()).toEqual(["Size", "Title", "Note"]);
     expect(on_column_order_change).toHaveBeenCalledWith(["Title", "size", "Note"]);
@@ -227,16 +227,16 @@ describe("table rows from a sorted source", () => {
     expect(shown_titles()).toEqual(["Bake", "Answer", "Clean"]);
     expect(screen.getAllByRole("columnheader")[1]!.getAttribute("aria-sort")).toBe("descending");
 
-    fireEvent.click(screen.getByRole("button", { name: /Title/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /^Title/ }), { shiftKey: true });
     expect(on_sorting_change).toHaveBeenCalledWith([{ key: "size", descending: true }, { key: "Title", descending: false }]);
-    expect(screen.queryByRole("button", { name: /Note/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Note/ })).toBeNull();
   });
 
   it("keeps a sort key that names no column when another is added", () => {
     const on_sorting_change = vi.fn();
     render(<DataTable manual_sorting columns={plain_columns} rows={flat} sorting={[{ key: "disc", descending: false }]} on_sorting_change={on_sorting_change} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Size/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /^Size/ }), { shiftKey: true });
 
     expect(on_sorting_change).toHaveBeenCalledWith([{ key: "disc", descending: false }, { key: "size", descending: false }]);
   });
@@ -325,6 +325,70 @@ describe("table groups", () => {
     render(<DataTable columns={columns} rows={[]} groups={with_empty} row_key={(task) => task.id} row_passes={(task) => task.title === "Clean"} />);
 
     expect(body_rows()).toEqual(["# Later", "Clean", "# Someday"]);
+  });
+});
+
+// ============================================================================
+// Sorting, filtering and grouping on its own
+// ============================================================================
+
+describe("table on its own", () => {
+  const places: Record<string, string> = { a: "Desk", b: "Kitchen", c: "Kitchen" };
+  const plain: TableColumn<Task>[] = [
+    { label: "Title", cell: (task) => task.title },
+    { label: "Place", cell: (task) => places[task.id]! },
+    { label: "Mark", cell: () => <b>✓</b> },
+    { label: "Size", cell: (task) => task.size ?? "", filterable: false, groupable: false },
+  ];
+
+  function type_filter(column: string, words: string): void {
+    fireEvent.click(screen.getByRole("button", { name: `Filter by ${column}` }));
+    const field = screen.getByRole("searchbox", { name: `Filter by ${column}` });
+    fireEvent.change(field, { target: { value: words } });
+    fireEvent.keyDown(field, { key: "Enter" });
+  }
+
+  it("sorts by a column whose cells are text when the app hands it no sorting", () => {
+    render(<DataTable columns={plain} rows={tasks} sorting={{ key: "Title", descending: true }} />);
+
+    expect(shown_titles()).toEqual(["Clean", "Bake", "Answer"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Place/ }));
+    expect(shown_titles()).toEqual(["Answer", "Bake", "Clean"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Title/ }), { shiftKey: true });
+    expect(shown_titles()).toEqual(["Answer", "Bake", "Clean"]);
+    expect(screen.queryByRole("button", { name: /^Mark/ })).toBeNull();
+  });
+
+  it("filters a column by every typed word and clears the filters", () => {
+    render(<DataTable columns={plain} rows={tasks} row_key={(task) => task.id} get_children={(task) => task.children} />);
+
+    type_filter("Title", "us");
+    expect(shown_titles()).toEqual(["Clean", "Dust"]);
+    expect(screen.getByRole("button", { name: "Filter by Title" }).className).toContain("active");
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(shown_titles()).toHaveLength(7);
+    expect(screen.queryByRole("button", { name: "Filter by Mark" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Filter by Size" })).toBeNull();
+  });
+
+  it("groups the rows by a column's words from the Group rows menu, in the column's order", () => {
+    const on_group_by_change = vi.fn();
+    render(<DataTable columns={plain} rows={tasks} sorting={{ key: "Place", descending: true }} on_group_by_change={on_group_by_change} group_by={null} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Group rows" }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["None", "Title", "Place"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Place" }));
+    expect(on_group_by_change).toHaveBeenCalledWith("Place");
+  });
+
+  it("keeps the group it starts with, and leaves grouping to an app that passes groups", () => {
+    const { rerender } = render(<DataTable columns={plain} rows={tasks} group_by="Place" sorting={{ key: "Title", descending: false }} />);
+
+    expect(body_rows()).toEqual(["# Desk1", "Answer", "# Kitchen2", "Bake", "Clean"]);
+
+    rerender(<DataTable columns={plain} rows={[]} groups={[{ key: "all", label: "All", rows: tasks }]} />);
+    expect(screen.queryByRole("button", { name: "Group rows" })).toBeNull();
   });
 });
 
