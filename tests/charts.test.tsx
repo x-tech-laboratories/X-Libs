@@ -166,6 +166,12 @@ test("a gauge prints its value and says how full it is", () => {
   expect(screen.getByRole("meter", { name: "CPU" }).getAttribute("aria-valuenow")).toBe("78");
 });
 
+test("a gauge with an href is a link to it", () => {
+  render(<Gauge label="CPU" value_text="78.0%" percent={78} color="var(--status-warning)" href="#/cpu" />);
+  expect(screen.getByRole("link").getAttribute("href")).toBe("#/cpu");
+  expect(screen.getByRole("meter", { name: "CPU" })).toBeTruthy();
+});
+
 test("a gauge draws no arc when empty, and caps a full one", () => {
   expect(gauge_dash(0)).toBeNull();
   expect(gauge_dash(50)).toMatch(/^\d+\.\d\d 999$/);

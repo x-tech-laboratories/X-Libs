@@ -455,6 +455,8 @@ export interface GaugeProps {
   // A CSS colour, normally a Halon token such as var(--status-danger).
   color: string;
   caption?: string | null;
+  // A link the whole tile follows, as a Tile's does.
+  href?: string | null;
 }
 
 // The arc's dash: `percent` of the 270° sweep, or none for an empty gauge, since a zero-length round cap still shows.
@@ -463,11 +465,12 @@ export function gauge_dash(percent: number): string | null {
   return `${((gauge_sweep * Math.min(100, percent)) / 100).toFixed(2)} 999`;
 }
 
-// A stat tile with its label and value and a small ring beside them, filled by the value's share of the whole.
-export function Gauge({ label, value_text, percent, color, caption }: GaugeProps) {
+// A stat tile with its label and value and a small ring beside them, filled by the value's share of the whole, a link when given `href`.
+export function Gauge({ label, value_text, percent, color, caption, href }: GaugeProps) {
   const dash = gauge_dash(percent);
+  const Box = href ? "a" : "div";
   return (
-    <div className="tile gauge">
+    <Box className="tile gauge" href={href ?? undefined}>
       <div className="gauge-text">
         <span className="tile-label">{label}</span>
         <span className="tile-value">{value_text}</span>
@@ -477,7 +480,7 @@ export function Gauge({ label, value_text, percent, color, caption }: GaugeProps
         <circle className="gauge-track" cx="24" cy="24" r={gauge_radius} transform="rotate(135 24 24)" style={{ strokeDasharray: `${gauge_sweep.toFixed(2)} 999` }} />
         {dash !== null && <circle cx="24" cy="24" r={gauge_radius} transform="rotate(135 24 24)" style={{ stroke: color, strokeDasharray: dash }} />}
       </svg>
-    </div>
+    </Box>
   );
 }
 
