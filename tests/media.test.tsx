@@ -60,6 +60,18 @@ describe("media tile", () => {
     expect(tile.querySelector(".media-blank")).not.toBeNull();
     expect(screen.getByRole("list").className).toBe("media-grid media-rows");
   });
+  it("opens in place on a plain click of its title or picture, leaving other clicks to the link", () => {
+    const on_open = vi.fn();
+    render(<MediaTile title="Squat" href="#/exercises/squat" on_open={on_open} />);
+
+    const title = screen.getByRole("link", { name: "Squat" });
+    expect(fireEvent.click(title)).toBe(false);
+    expect(fireEvent.click(screen.getByRole("listitem").querySelector(".media-picture")!)).toBe(false);
+    expect(on_open).toHaveBeenCalledTimes(2);
+    expect(fireEvent.click(title, { ctrlKey: true })).toBe(true);
+    expect(on_open).toHaveBeenCalledTimes(2);
+    expect(title.getAttribute("href")).toBe("#/exercises/squat");
+  });
 });
 
 // ============================================================================
