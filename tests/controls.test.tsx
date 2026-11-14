@@ -403,6 +403,30 @@ describe("TreePicker", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(on_key_down.mock.calls.map(([event]) => event.key)).not.toContain("Escape");
   });
+
+  test("offers typed text as a new item when no name matches it, last in the list", () => {
+    const on_change = vi.fn();
+    const on_create = vi.fn();
+    render(<TreePicker label="Task" items={tasks} name_of={(task) => task.name} value="" placeholder="Choose a task…" on_change={on_change} on_create={on_create} />);
+    const field = screen.getByRole("combobox", { name: "Task" });
+
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "home" } });
+    expect(names()).toEqual(["Home"]);
+
+    fireEvent.change(field, { target: { value: " Hom " } });
+    expect(names()).toEqual(["Home", 'Add "Hom"']);
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(on_create).toHaveBeenCalledWith("Hom");
+    expect(on_change).not.toHaveBeenCalled();
+
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "zzz" } });
+    expect(screen.queryByText("No matches")).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("option", { name: 'Add "zzz"' }));
+    expect(on_create).toHaveBeenLastCalledWith("zzz");
+  });
 });
 
 // ============================================================================

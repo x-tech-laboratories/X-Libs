@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { FormGroup, moved, PageHeading, RowActions, Section, SelectionBar, SettingRow, SettingsGroup, SettingsPage } from "../src/web/react/layout.tsx";
+import { Crumbs, FormGroup, moved, PageHeading, PathText, RowActions, Section, SelectionBar, SettingRow, SettingsGroup, SettingsPage } from "../src/web/react/layout.tsx";
 
 afterEach(cleanup);
 
@@ -155,5 +155,26 @@ describe("page heading level", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Music folders" })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});
+
+describe("crumbs and paths", () => {
+  test("separates the steps with chevrons, linking, running a function or marking where the reader is", () => {
+    const open_home = vi.fn();
+    render(<Crumbs items={[["All", "#/all"], ["Home", open_home], ["Garden", null]]} />);
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+
+    expect(trail.textContent).toBe("All › Home › Garden");
+    expect(screen.getByRole("link", { name: "All" }).getAttribute("href")).toBe("#/all");
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    expect(open_home).toHaveBeenCalledOnce();
+    expect(screen.getByText("Garden").getAttribute("aria-current")).toBe("page");
+  });
+
+  test("shows a path as plain text with chevrons between its names", () => {
+    const { container } = render(<PathText names={["Protein", "Meat", "Poultry"]} />);
+
+    expect(container.textContent).toBe("Protein › Meat › Poultry");
+    expect(container.querySelectorAll("[aria-hidden]")).toHaveLength(0);
   });
 });

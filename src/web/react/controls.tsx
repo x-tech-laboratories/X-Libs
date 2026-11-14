@@ -495,6 +495,9 @@ interface TreePickerProps<Item extends TreeItem> {
   disabled_ids?: readonly string[];
   auto_focus?: boolean;
   on_change: (id: string) => void;
+  // Offers the typed text as a new item when no name matches it exactly, such as a new category.
+  on_create?: (text: string) => void;
+  create_label?: (text: string) => string;
 }
 
 interface TreePickerRow<Item> {
@@ -524,8 +527,22 @@ function tree_picker_rows<Item extends TreeItem>(items: Item[], name_of: (item: 
     .map((item) => ({ item, depth: path_names(item, items, name_of).length - 1, is_match: matched_ids.has(item.id) }));
 }
 
+// Stands for the new item among the ids, which no real id is.
+const create_id = "\u0000new";
+
 // A search field over a tree: typing narrows the indented list to matching names under their parents, and arrows and Enter pick one.
-export function TreePicker<Item extends TreeItem>({ label, items, name_of, value, placeholder, disabled_ids = [], auto_focus, on_change }: TreePickerProps<Item>) {
+export function TreePicker<Item extends TreeItem>({
+  label,
+  items,
+  name_of,
+  value,
+  placeholder,
+  disabled_ids = [],
+  auto_focus,
+  on_change,
+  on_create,
+  create_label = (text) => `Add "${text}"`,
+}: TreePickerProps<Item>) {
   const list_id = useId();
   const anchor_name = `--tree-picker-${list_id.replace(/[^\w-]/g, "")}`;
   const field = useRef<HTMLInputElement>(null);
@@ -539,9 +556,12 @@ export function TreePicker<Item extends TreeItem>({ label, items, name_of, value
   const is_open = search !== null;
   const rows = is_open ? tree_picker_rows(items, name_of, search) : [];
   const can_pick = (row: TreePickerRow<Item>) => row.is_match && !disabled_ids.includes(row.item.id);
-  const pickable = rows.filter(can_pick);
-  const active = pickable.find((row) => row.item.id === active_id) ?? pickable.find((row) => row.item.id === value) ?? pickable[0];
-  const option_id = (item: Item) => `${list_id}-${item.id}`;
+  const typed = search?.trim() ?? "";
+  const can_create = on_create !== undefined && typed !== "" && !items.some((item) => name_of(item).toLocaleLowerCase() === typed.toLocaleLowerCase());
+  // The ids the arrows step through, the new item's last.
+  const pickable = [...rows.filter(can_pick).map((row) => row.item.id), ...(can_create ? [create_id] : [])];
+  const active = pickable.find((id) => id === active_id) ?? pickable.find((id) => id === value) ?? pickable[0];
+  const option_id = (id: string) => `${list_id}-${id === create_id ? "new" : id}`;
 
   // The list hangs below the field in the top layer, so a dialog around it does not cut it off.
   useLayoutEffect(() => {
@@ -552,17 +572,18 @@ export function TreePicker<Item extends TreeItem>({ label, items, name_of, value
   }, [is_open]);
 
   useEffect(() => {
-    if (active) document.getElementById(option_id(active.item))?.scrollIntoView?.({ block: "nearest" });
-  }, [active?.item.id]);
+    if (active !== undefined) document.getElementById(option_id(active))?.scrollIntoView?.({ block: "nearest" });
+  }, [active]);
 
   function open(): void {
     set_search("");
     set_active_id("");
   }
 
-  function pick(item: Item): void {
+  function pick(id: string): void {
     set_search(null);
-    on_change(item.id);
+    if (id === create_id) on_create?.(typed);
+    else on_change(id);
   }
 
   function key_down(event: KeyboardEvent<HTMLInputElement>): void {
@@ -571,13 +592,13 @@ export function TreePicker<Item extends TreeItem>({ label, items, name_of, value
       if (!is_open) return open();
       if (pickable.length === 0) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      const index = active ? pickable.indexOf(active) : -1;
-      set_active_id(pickable[(index + step + pickable.length) % pickable.length]!.item.id);
+      const index = active === undefined ? -1 : pickable.indexOf(active);
+      set_active_id(pickable[(index + step + pickable.length) % pickable.length]!);
       return;
     }
     if (event.key === "Enter" && is_open) {
       event.preventDefault();
-      if (active) pick(active.item);
+      if (active !== undefined) pick(active);
       return;
     }
     if (event.key === "Escape" && is_open) {
@@ -599,7 +620,7 @@ export function TreePicker<Item extends TreeItem>({ label, items, name_of, value
         aria-autocomplete="list"
         aria-expanded={is_open}
         aria-controls={list_id}
-        aria-activedescendant={active ? option_id(active.item) : undefined}
+        aria-activedescendant={active !== undefined ? option_id(active) : undefined}
         value={search ?? (chosen ? path_of(chosen) : "")}
         placeholder={chosen ? path_of(chosen) : placeholder}
         title={chosen ? path_of(chosen) : undefined}
@@ -616,25 +637,39 @@ export function TreePicker<Item extends TreeItem>({ label, items, name_of, value
       />
       {is_open && (
         <ul ref={list} id={list_id} popover="manual" role="listbox" aria-label={label} className="menu tree-picker-list">
-          {rows.length === 0 && <li className="tree-picker-empty">No matches</li>}
+          {rows.length === 0 && !can_create && <li className="tree-picker-empty">No matches</li>}
           {rows.map((row) => (
             <li
               key={row.item.id}
-              id={option_id(row.item)}
+              id={option_id(row.item.id)}
               role="option"
               className={row.item.id === value ? "menu-item chosen" : "menu-item"}
-              aria-selected={row === active}
+              aria-selected={row.item.id === active}
               aria-disabled={can_pick(row) ? undefined : true}
               title={path_of(row.item)}
               style={{ "--depth": row.depth } as CSSProperties}
               onMouseDown={(event) => {
                 event.preventDefault();
-                if (can_pick(row)) pick(row.item);
+                if (can_pick(row)) pick(row.item.id);
               }}
             >
               {name_of(row.item)}
             </li>
           ))}
+          {can_create && (
+            <li
+              id={option_id(create_id)}
+              role="option"
+              className="menu-item"
+              aria-selected={active === create_id}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                pick(create_id);
+              }}
+            >
+              {create_label(typed)}
+            </li>
+          )}
         </ul>
       )}
     </div>

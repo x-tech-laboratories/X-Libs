@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import "../src/web/react/test_stubs.ts";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, test } from "vitest";
 
-import { ChipField, with_draft } from "../src/web/react/chip_field.tsx";
+import { ChipField, TreeChipField, with_draft } from "../src/web/react/chip_field.tsx";
+import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
 
@@ -67,4 +69,43 @@ test("adds free text by Enter or the Add button, which waits for text, and keeps
 
   expect(chips()).toEqual(["Calves", "Forearms"]);
   expect(add.hasAttribute("disabled")).toBe(true);
+});
+
+interface Category extends TreeItem {
+  name: string;
+}
+
+const categories: Category[] = [
+  { id: "p", parent_id: null, position: 1, name: "Protein" },
+  { id: "m", parent_id: "p", position: 1, name: "Meat" },
+  { id: "s", parent_id: null, position: 2, name: "Snack" },
+];
+
+function Tagged({ initial }: { initial: string[] }) {
+  const [values, set_values] = useState(initial);
+  return (
+    <>
+      <TreeChipField label="Categories" items={categories} name_of={(category) => category.name} values={values} on_change={set_values} can_create />
+      <output>{values.join(",")}</output>
+    </>
+  );
+}
+
+test("shows each chosen item's path, picks more from the tree and takes new text", () => {
+  render(<Tagged initial={["m", "Drinks/Tea"]} />);
+  const field = screen.getByRole("combobox", { name: "Categories" });
+
+  expect(chips()).toEqual(["Protein › Meat", "Drinks/Tea"]);
+  fireEvent.focus(field);
+  expect(screen.getByRole("option", { name: "Meat" }).getAttribute("aria-disabled")).toBe("true");
+  fireEvent.mouseDown(screen.getByRole("option", { name: "Snack" }));
+  expect(screen.getByRole("status").textContent).toBe("m,Drinks/Tea,s");
+
+  fireEvent.focus(field);
+  fireEvent.change(field, { target: { value: "Fruit" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(screen.getByRole("status").textContent).toBe("m,Drinks/Tea,s,Fruit");
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove Protein › Meat" }));
+  expect(screen.getByRole("status").textContent).toBe("Drinks/Tea,s,Fruit");
 });

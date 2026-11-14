@@ -178,16 +178,47 @@ export function Tabs<Id extends string>({ items, active, label = "Sections", on_
   );
 }
 
-export function Crumbs({ items }: { items: [label: string, href: string | null][] }) {
+// The chevron between the steps of a path, such as "Protein › Meat".
+export const path_separator = "›";
+
+// Hidden from screen readers in a trail, whose steps are read one by one, and read out in plain text.
+function PathSeparator({ hidden = true }: { hidden?: boolean }) {
+  return <span className="muted" aria-hidden={hidden || undefined}> {path_separator} </span>;
+}
+
+// A step links to a page, runs a function such as opening a folder, or is null for where the reader is.
+export type CrumbTarget = string | (() => void) | null;
+
+export function Crumbs({ items }: { items: [label: string, target: CrumbTarget][] }) {
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
-      {items.map(([label, href], index) => (
+      {items.map(([label, target], index) => (
         <Fragment key={index}>
-          {index > 0 && <span className="muted" aria-hidden="true"> / </span>}
-          {href ? <a href={href}>{label}</a> : <span aria-current="page">{label}</span>}
+          {index > 0 && <PathSeparator />}
+          {typeof target === "string" ? (
+            <a href={target}>{label}</a>
+          ) : target ? (
+            <button type="button" className="link" onClick={target}>{label}</button>
+          ) : (
+            <span aria-current="page">{label}</span>
+          )}
         </Fragment>
       ))}
     </nav>
+  );
+}
+
+// A path shown as plain text with chevrons between its names, such as a category inside another.
+export function PathText({ names }: { names: string[] }) {
+  return (
+    <span className="tree-path">
+      {names.map((name, index) => (
+        <Fragment key={index}>
+          {index > 0 && <PathSeparator hidden={false} />}
+          {name}
+        </Fragment>
+      ))}
+    </span>
   );
 }
 
