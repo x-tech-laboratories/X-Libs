@@ -1,6 +1,7 @@
 // A React table drawn like the page's own on TanStack Table: sorting by one column or several, columns the user moves, resizes,
 // hides and filters, rows nested under rows, rows in groups under headings, rows dragged by the app's rules, long lists drawn
-// only where they show, and cards on phones.
+// only where they show, and cards on phones. Sorting, filtering by typed text and grouping by a column work on their own
+// unless the app takes them over.
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
@@ -8,6 +9,7 @@ import { cx } from "../dom.ts";
 import { clamp_width, column_id, compare_values, move_column, ordered_columns, sort_after_click, sorting_list, type Sorting, type SortValue } from "../tables.ts";
 import { placement_at, type DropPlacement } from "../tree.ts";
 import { virtual_window } from "../virtual.ts";
+import { SearchBox } from "./controls.tsx";
 import { ContextMenu, Popover } from "./menus.tsx";
 import { ResizeHandle } from "./split.tsx";
 
@@ -23,10 +25,15 @@ export interface TableColumn<Row> {
   // A name that stays put when the label changes, used by the sorting, order, widths and hidden columns; the label when not given.
   id?: string;
   cell: (row: Row) => ReactNode;
-  // A value to sort by; a column without one does not sort, unless the table's rows come sorted.
+  // A value to sort by; the cell itself when it is text or a number, and otherwise the column does not sort, unless the table's rows come sorted.
   sort?: (row: Row) => string | number | null;
-  // Set false to keep a click from sorting by it in a table whose rows come sorted.
+  // Set false to keep a click from sorting by it.
   sortable?: boolean;
+  // The words the cell shows, which the column's own filter searches and its groups are named by; the cell or sort value when it is text or a number.
+  text?: (row: Row) => string;
+  // Set false to leave out the column's own text filter or its Group by choice.
+  filterable?: boolean;
+  groupable?: boolean;
   class?: string;
   // The width it starts at and the narrowest and widest a drag may make it, in pixels.
   width?: number;
@@ -72,7 +79,7 @@ interface DataTableProps<Row> {
   // Classes added to the .table-wrap, such as Halon's scroll or sticky-head.
   wrap_class?: string;
 
-  // One sorting or several, the first deciding first.
+  // One sorting or several, the first deciding first; without on_sort or on_sorting_change it is where the table's own sorting starts.
   sorting?: Sorting | Sorting[];
   // The rows come already in order, such as from a database, so the table only shows and changes the sorting.
   manual_sorting?: boolean;
@@ -95,6 +102,10 @@ interface DataTableProps<Row> {
   row_passes?: (row: Row) => boolean;
   // Shows a Clear filters button while any column's filter is active.
   on_clear_filters?: () => void;
+
+  // The column id whose values group the rows under headings, when the app passes no groups; the user changes it from the Group by button.
+  group_by?: string | null;
+  on_group_by_change?: (group_by: string | null) => void;
 
   // The rows nested under a row, which makes the table a tree sorted level by level.
   get_children?: (row: Row) => Row[] | undefined;
@@ -142,6 +153,27 @@ function heading<Row>(column: TableColumn<Row>): ReactNode {
 }
 
 const is_empty = (value: SortValue): boolean => value === null || value === undefined || value === "";
+
+// The cell when it is text or a number, which sorts, filters and groups a column the app gave no values.
+function plain_cell<Row>(column: TableColumn<Row>, row: Row): string | number | null {
+  const shown = column.cell(row);
+  return typeof shown === "string" || typeof shown === "number" ? shown : null;
+}
+
+// The words a row shows in a column: its text, its cell when that is text or a number, or a sort value that is text; null when none is.
+function text_in<Row>(column: TableColumn<Row>, row: Row): string | null {
+  if (column.text) return column.text(row);
+  const cell = plain_cell(column, row);
+  if (cell !== null) return String(cell);
+  const value = column.sort?.(row);
+  return typeof value === "string" ? value : null;
+}
+
+// Whether the text holds every word typed, ignoring case.
+function holds_words(text: string, typed: string): boolean {
+  const lower = text.toLocaleLowerCase();
+  return typed.toLocaleLowerCase().split(/\s+/).filter(Boolean).every((word) => lower.includes(word));
+}
 
 // The rows that pass and, in a tree, those above a row that passes, with each row's passing children.
 function filtered_tree<Row>(rows: Row[], passes: (row: Row) => boolean, get_children: ((row: Row) => Row[] | undefined) | undefined, kept_children: Map<Row, Row[]>): Row[] {
@@ -280,13 +312,39 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const [measured, set_measured] = useState<Record<string, number>>({});
   const [row_dragging, set_row_dragging] = useState(false);
   const [row_drop, set_row_drop] = useState<{ id: string; placement: DropPlacement } | null>(null);
+  const manual = props.manual_sorting === true;
+
+  // The sorting, filters and grouping the table keeps itself while the app leaves them to it.
+  const sorts_itself = !manual && !props.on_sort && !props.on_sorting_change;
+  const [own_sorting, set_own_sorting] = useState<Sorting[]>(() => sorting_list(props.sorting));
+  const [own_filters, set_own_filters] = useState<Record<string, string>>({});
+  const [own_group_by, set_own_group_by] = useState<string | null>(props.group_by ?? null);
+  const [group_menu, set_group_menu] = useState<{ x: number; y: number } | null>(null);
+  const group_by = groups ? null : props.on_group_by_change ? props.group_by ?? null : own_group_by;
 
   const by_id = useMemo(() => new Map(columns.map((column) => [column_id(column), column])), [columns]);
   const all_ids = columns.map(column_id);
-  const manual = props.manual_sorting === true;
-  const is_sortable = (column: TableColumn<Row> | undefined): boolean => Boolean(column) && (manual ? column!.sortable !== false : Boolean(column!.sort));
+
+  // Only the first rows are read to tell whether a column's cells are text, so a long table stays quick to draw.
+  const sample = useMemo(() => rows.slice(0, 100), [rows]);
+
+  // Each column's sort value: its own, its text, or its cell where any row shows text or a number there.
+  const sort_values = useMemo(() => new Map(columns.map((column) => {
+    const value = column.sortable === false ? undefined
+      : column.sort ?? column.text ?? (sample.some((row) => plain_cell(column, row) !== null) ? (row: Row) => plain_cell(column, row) : undefined);
+    return [column_id(column), value];
+  })), [columns, sample]);
+
+  // Each column's words where any row shows some, which its own filter searches and its groups are named by.
+  const text_values = useMemo(() => new Map(columns.map((column) => {
+    const has_text = column.text !== undefined || sample.some((row) => text_in(column, row) !== null);
+    return [column_id(column), has_text ? (row: Row) => text_in(column, row) ?? "" : undefined];
+  })), [columns, sample]);
+
+  const is_sortable = (column: TableColumn<Row> | undefined): boolean => Boolean(column) && (manual ? column!.sortable !== false : Boolean(sort_values.get(column_id(column!))));
   // Rows that come sorted keep every key, even one naming no column, so a click never drops it.
-  const sorting = manual ? sorting_list(props.sorting) : sorting_list(props.sorting).filter((key) => is_sortable(by_id.get(key.key)));
+  const requested = sorts_itself ? own_sorting : sorting_list(props.sorting);
+  const sorting = manual ? requested : requested.filter((key) => is_sortable(by_id.get(key.key)));
   const hidden = props.hidden_columns ?? [];
   const widths = props.column_widths ?? {};
   const expanded = props.expanded ?? own_expanded;
@@ -294,12 +352,22 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   // ── Rows ──
 
+  // The app's filter and the words typed into the columns' own filters, all of which a row passes.
+  const passes = useMemo(() => {
+    const typed = Object.entries(own_filters).flatMap(([id, words]) => {
+      const text = text_values.get(id);
+      return words.trim() && text ? [{ text, words }] : [];
+    });
+    if (typed.length === 0) return row_passes;
+    return (row: Row) => (!row_passes || row_passes(row)) && typed.every(({ text, words }) => holds_words(text(row), words));
+  }, [own_filters, text_values, row_passes]);
+
   const { data, children_of } = useMemo(() => {
-    if (!row_passes) return { data: rows, children_of: get_children };
+    if (!passes) return { data: rows, children_of: get_children };
     const kept_children = new Map<Row, Row[]>();
-    const kept = filtered_tree(rows, row_passes, get_children, kept_children);
+    const kept = filtered_tree(rows, passes, get_children, kept_children);
     return { data: kept, children_of: get_children && ((row: Row) => kept_children.get(row) ?? []) };
-  }, [rows, row_passes, get_children]);
+  }, [rows, passes, get_children]);
 
   // TanStack flips a descending column's order, so an empty value is flipped first to stay last.
   const descending = useRef(new Set<string>());
@@ -307,14 +375,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   const definitions = useMemo(() => columns.map((column): ColumnDef<Row, SortValue> => ({
     id: column_id(column),
-    accessorFn: column.sort,
-    enableSorting: Boolean(column.sort),
+    accessorFn: sort_values.get(column_id(column)),
+    enableSorting: Boolean(sort_values.get(column_id(column))),
     sortingFn: (left, right, id) => {
       const [first, second] = [left.getValue<SortValue>(id), right.getValue<SortValue>(id)];
       const order = compare_values(first, second);
       return (is_empty(first) || is_empty(second)) && descending.current.has(id) ? -order : order;
     },
-  })), [columns]);
+  })), [columns, sort_values]);
 
   const table = useReactTable<Row>({
     data,
@@ -351,6 +419,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // ── Sorting ──
 
   function sort_by(id: string, adding: boolean): void {
+    if (sorts_itself) return set_own_sorting(sort_after_click(sorting, id, adding));
     if (props.on_sorting_change) return props.on_sorting_change(sort_after_click(sorting, id, adding));
     const current = sorting.find((key) => key.key === id);
     props.on_sort?.({ key: id, descending: current ? !current.descending : false });
@@ -418,7 +487,61 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     set_open_filter(null);
   }
 
-  const any_filter = columns.some((column) => column.filter_active);
+  // A column's own text filter, unless the app gives it one or it shows no words.
+  function own_filter(column: TableColumn<Row>): ((close: () => void) => ReactNode) | undefined {
+    const id = column_id(column);
+    if (column.filter !== undefined || column.filterable === false || !text_values.get(id)) return undefined;
+    return (close) => (
+      <SearchBox label={`Filter by ${column.label}`} value={own_filters[id] ?? ""} on_input={(words) => set_own_filters((before) => ({ ...before, [id]: words }))} on_submit={close} auto_focus />
+    );
+  }
+
+  const filter_of = (column: TableColumn<Row>) => column.filter ?? own_filter(column);
+  const is_filtered = (column: TableColumn<Row>): boolean => column.filter !== undefined ? Boolean(column.filter_active) : Boolean(own_filter(column) && own_filters[column_id(column)]?.trim());
+  const app_filtered = columns.some((column) => column.filter !== undefined && column.filter_active);
+  const own_filtered = columns.some((column) => column.filter === undefined && is_filtered(column));
+  const can_clear = (Boolean(props.on_clear_filters) && app_filtered) || own_filtered;
+
+  function clear_filters(): void {
+    set_own_filters({});
+    if (app_filtered) props.on_clear_filters?.();
+  }
+
+  // ── Grouping ──
+
+  const group_choices = groups ? [] : columns.filter((column) => column.groupable !== false && text_values.get(column_id(column)));
+
+  function choose_group(id: string | null): void {
+    set_own_group_by(id);
+    props.on_group_by_change?.(id);
+  }
+
+  function open_group_menu(event: MouseEvent<HTMLElement>): void {
+    const button = event.currentTarget.getBoundingClientRect();
+    set_group_menu({ x: button.left, y: button.bottom + 4 });
+  }
+
+  const group_items = [
+    { label: "None", checked: group_by === null, radio: true, run: () => choose_group(null) },
+    ...group_choices.map((column) => ({ label: column.label, checked: group_by === column_id(column), radio: true, run: () => choose_group(column_id(column)) })),
+  ];
+
+  // The rows under a heading for each of the grouping column's words, the headings in the column's order and empty words last.
+  const own_groups = useMemo((): RowGroup<Row>[] | undefined => {
+    const text = group_by === null ? undefined : text_values.get(group_by);
+    if (groups || group_by === null || !text) return undefined;
+    const by_words = new Map<string, Row[]>();
+    for (const row of data) {
+      const words = text(row);
+      by_words.set(words, [...(by_words.get(words) ?? []), row]);
+    }
+    const value = sort_values.get(group_by);
+    const down = sorting.find((key) => key.key === group_by)?.descending ?? false;
+    return [...by_words]
+      .map(([words, members]) => ({ words, members, order: words === "" ? null : value ? value(members[0]!) : words }))
+      .sort((first, second) => compare_values(first.order, second.order, down))
+      .map(({ words, members }) => ({ key: words, label: <>{words === "" ? "None" : words}<span className="group-count">{members.length}</span></>, rows: members }));
+  }, [groups, group_by, text_values, sort_values, data, sorting.map((key) => `${key.key} ${key.descending}`).join("\n")]);
 
   // ── Hiding ──
 
@@ -501,12 +624,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const id = column_id(column);
     const index = sorting.findIndex((key) => key.key === id);
     const key = sorting[index];
-    const sortable = is_sortable(column) && Boolean(props.on_sort || props.on_sorting_change);
+    const sortable = is_sortable(column) && (sorts_itself || Boolean(props.on_sort || props.on_sorting_change));
+    const filter = filter_of(column);
+    const filtered = is_filtered(column);
     const filling = fill_last && column === shown[shown.length - 1];
     const width = filling ? undefined : width_of(column);
     const movable = can_move(column);
     const class_name = [
-      column.class, column.filter_active && "filtered", dragged === id && "dragged", drop_target?.id === id && (drop_target.after ? "drop-after" : "drop-before"),
+      column.class, filtered && "filtered", dragged === id && "dragged", drop_target?.id === id && (drop_target.after ? "drop-after" : "drop-before"),
     ].filter(Boolean).join(" ") || undefined;
     const marker = key && (
       <span className="sort-marker" aria-hidden="true">
@@ -539,7 +664,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           <button
             type="button"
             className="sort"
-            title={props.on_sorting_change ? "Click to sort by this column, Shift+click to add it to the sort" : undefined}
+            title={props.on_sorting_change || sorts_itself ? "Click to sort by this column, Shift+click to add it to the sort" : undefined}
             onClick={(event) => sort_by(id, event.shiftKey)}
             onKeyDown={(event) => move_by_key(column, event)}
           >
@@ -548,13 +673,13 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         ) : movable ? (
           <span tabIndex={0} onKeyDown={(event) => move_by_key(column, event)}>{heading(column)}</span>
         ) : heading(column)}
-        {column.filter !== undefined && (
+        {filter !== undefined && (
           <button
             type="button"
-            className={column.filter_active ? "icon filter-button active" : "icon filter-button"}
+            className={filtered ? "icon filter-button active" : "icon filter-button"}
             aria-label={`Filter by ${column.label}`}
             aria-expanded={open_filter?.id === id}
-            title={column.filter_active ? `Filtered by ${column.label}` : `Filter by ${column.label}`}
+            title={filtered ? `Filtered by ${column.label}` : `Filter by ${column.label}`}
             onClick={(event) => toggle_filter(id, event.currentTarget)}
           >
             <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 3h12l-4.5 5.5V13l-3 1.5v-6z" fill="currentColor" /></svg>
@@ -622,7 +747,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       : [{ kind: "group" as const, group }, ...rows_by_group[index]!.map(row_line)]);
   }
 
-  const lines = groups ? grouped_lines(groups) : table.getRowModel().rows.map(row_line);
+  const shown_groups = groups ?? own_groups;
+  const lines = shown_groups ? grouped_lines(shown_groups) : table.getRowModel().rows.map(row_line);
 
   // ── Virtual rows ──
 
@@ -695,8 +821,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const fills_by_fixed = fill_last && shown.slice(0, -1).every((column) => width_of(column) !== undefined);
 
   const filtered_column = open_filter ? by_id.get(open_filter.id) : undefined;
-  const filter_body = filtered_column?.filter;
-  const tools = (props.on_clear_filters && any_filter) || props.on_hidden_columns_change;
+  const filter_body = filtered_column && filter_of(filtered_column);
+  const tools = can_clear || group_choices.length > 0 || props.on_hidden_columns_change;
 
   return (
     <>
@@ -710,7 +836,12 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         {tools && (
           <div className="table-tools">
             <span className="table-tools-inner">
-              {props.on_clear_filters && any_filter && <button type="button" aria-label="Clear filters" title="Clear filters" onClick={props.on_clear_filters}>Clear</button>}
+              {can_clear && <button type="button" aria-label="Clear filters" title="Clear filters" onClick={clear_filters}>Clear</button>}
+              {group_choices.length > 0 && (
+                <button type="button" className={group_by === null ? "icon group-button" : "icon group-button active"} aria-label="Group rows" title="Group rows" aria-haspopup="menu" onClick={open_group_menu}>
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1 2h9v2.5H1zm4 4h10v2H5zm0 3.5h10v2H5zM1 13h9v2H1z" /></svg>
+                </button>
+              )}
               {props.on_hidden_columns_change && (
                 <button type="button" className="icon columns-button" aria-label="Show or hide columns" title="Show or hide columns" aria-haspopup="menu" onClick={open_columns_menu}>
                   <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 2h3v12H2zm4.5 0h3v12h-3zM11 2h3v12h-3z" /></svg>
@@ -737,6 +868,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           {typeof filter_body === "function" ? filter_body(close_filter) : filter_body}
         </Popover>
       )}
+      {group_menu && <ContextMenu x={group_menu.x} y={group_menu.y} label="Group by" items={group_items} on_close={() => set_group_menu(null)} />}
       {columns_menu && <ContextMenu x={columns_menu.x} y={columns_menu.y} label="Columns" items={column_choices} on_close={() => set_columns_menu(null)} />}
     </>
   );
