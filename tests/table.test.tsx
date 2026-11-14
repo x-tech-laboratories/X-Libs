@@ -156,6 +156,22 @@ describe("table headers", () => {
     expect(on_hidden_columns_change).toHaveBeenCalledWith([]);
   });
 
+  it("hides columns on its own while the app leaves hiding to it", () => {
+    render(<DataTable columns={columns} rows={tasks} hidden_columns={["Note"]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show or hide columns" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Size" }));
+
+    expect(header_labels()).toEqual(["Title"]);
+    expect(screen.getByRole("menuitemcheckbox", { name: "Title" }).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("leaves out the Columns button when column_hiding is false", () => {
+    render(<DataTable columns={columns} rows={tasks} column_hiding={false} />);
+
+    expect(screen.queryByRole("button", { name: "Show or hide columns" })).toBeNull();
+  });
+
   it("opens a column's filter from its funnel and keeps only the rows that pass", () => {
     const filtered: TableColumn<Task>[] = [{ ...columns[0]!, filter: (close) => <button onClick={close}>Only B</button>, filter_active: true }, columns[1]!];
     const on_clear_filters = vi.fn();
