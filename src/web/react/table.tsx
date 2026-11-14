@@ -1,7 +1,7 @@
 // A React table drawn like the page's own on TanStack Table: sorting by one column or several, columns the user moves, resizes,
 // hides and filters, rows nested under rows, rows in groups under headings, rows dragged by the app's rules, long lists drawn
-// only where they show, and cards on phones. Sorting, filtering by typed text and grouping by a column work on their own
-// unless the app takes them over.
+// only where they show, and cards on phones. Sorting, filtering by typed text, grouping by a column and hiding columns work
+// on their own unless the app takes them over.
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
@@ -94,9 +94,11 @@ interface DataTableProps<Row> {
   // Widths in pixels by column id; called as an edge is dragged, then with done once it is let go.
   column_widths?: Record<string, number>;
   on_column_widths_change?: (widths: Record<string, number>, done: boolean) => void;
-  // Column ids the user has hidden; a Columns button and right-clicking the header choose them.
+  // Column ids the user has hidden, chosen from a Columns button or by right-clicking the header; without on_hidden_columns_change it is where the table's own hiding starts.
   hidden_columns?: string[];
   on_hidden_columns_change?: (hidden: string[]) => void;
+  // Set false to leave out the Columns button and header menu.
+  column_hiding?: boolean;
 
   // Keeps only the rows that pass, and in a tree the rows above any that pass.
   row_passes?: (row: Row) => boolean;
@@ -314,13 +316,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const [row_drop, set_row_drop] = useState<{ id: string; placement: DropPlacement } | null>(null);
   const manual = props.manual_sorting === true;
 
-  // The sorting, filters and grouping the table keeps itself while the app leaves them to it.
+  // The sorting, filters, grouping and hidden columns the table keeps itself while the app leaves them to it.
   const sorts_itself = !manual && !props.on_sort && !props.on_sorting_change;
   const [own_sorting, set_own_sorting] = useState<Sorting[]>(() => sorting_list(props.sorting));
   const [own_filters, set_own_filters] = useState<Record<string, string>>({});
   const [own_group_by, set_own_group_by] = useState<string | null>(props.group_by ?? null);
   const [group_menu, set_group_menu] = useState<{ x: number; y: number } | null>(null);
   const group_by = groups ? null : props.on_group_by_change ? props.group_by ?? null : own_group_by;
+  const [own_hidden, set_own_hidden] = useState<string[]>(props.hidden_columns ?? []);
 
   const by_id = useMemo(() => new Map(columns.map((column) => [column_id(column), column])), [columns]);
   const all_ids = columns.map(column_id);
@@ -345,7 +348,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // Rows that come sorted keep every key, even one naming no column, so a click never drops it.
   const requested = sorts_itself ? own_sorting : sorting_list(props.sorting);
   const sorting = manual ? requested : requested.filter((key) => is_sortable(by_id.get(key.key)));
-  const hidden = props.hidden_columns ?? [];
+  const hidden = props.on_hidden_columns_change ? props.hidden_columns ?? [] : own_hidden;
+  const can_hide = props.column_hiding !== false && columns.length > 1;
   const widths = props.column_widths ?? {};
   const expanded = props.expanded ?? own_expanded;
   const tree = get_children !== undefined;
@@ -546,11 +550,16 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // ── Hiding ──
 
   function open_columns_menu(event: MouseEvent<HTMLElement>): void {
-    if (!props.on_hidden_columns_change) return;
+    if (!can_hide) return;
     event.preventDefault();
     if (event.type === "contextmenu") return set_columns_menu({ x: event.clientX, y: event.clientY });
     const button = event.currentTarget.getBoundingClientRect();
     set_columns_menu({ x: button.left, y: button.bottom + 4 });
+  }
+
+  function change_hidden(next: string[]): void {
+    if (!props.on_hidden_columns_change) set_own_hidden(next);
+    props.on_hidden_columns_change?.(next);
   }
 
   const column_choices = columns.map((column) => {
@@ -558,7 +567,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const visible = !hidden.includes(id);
     // The last column on show stays, so the table never empties.
     const fixed = column.hideable === false || (visible && shown.length === 1);
-    return { label: column.label, checked: visible, disabled: fixed, keep_open: true, run: () => props.on_hidden_columns_change!(visible ? [...hidden, id] : hidden.filter((each) => each !== id)) };
+    return { label: column.label, checked: visible, disabled: fixed, keep_open: true, run: () => change_hidden(visible ? [...hidden, id] : hidden.filter((each) => each !== id)) };
   });
 
   // ── Dragging rows ──
@@ -822,7 +831,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   const filtered_column = open_filter ? by_id.get(open_filter.id) : undefined;
   const filter_body = filtered_column && filter_of(filtered_column);
-  const tools = can_clear || group_choices.length > 0 || props.on_hidden_columns_change;
+  const tools = can_clear || group_choices.length > 0 || can_hide;
 
   return (
     <>
@@ -842,7 +851,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                   <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1 2h9v2.5H1zm4 4h10v2H5zm0 3.5h10v2H5zM1 13h9v2H1z" /></svg>
                 </button>
               )}
-              {props.on_hidden_columns_change && (
+              {can_hide && (
                 <button type="button" className="icon columns-button" aria-label="Show or hide columns" title="Show or hide columns" aria-haspopup="menu" onClick={open_columns_menu}>
                   <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 2h3v12H2zm4.5 0h3v12h-3zM11 2h3v12h-3z" /></svg>
                 </button>
@@ -852,7 +861,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         )}
         <table className={fill_last ? "responsive fill-last-column" : "responsive"} style={fills_by_fixed ? { tableLayout: "fixed" } : undefined}>
           {caption && <caption className="visually-hidden">{caption}</caption>}
-          <thead ref={head} onContextMenu={props.on_hidden_columns_change && open_columns_menu}><tr>{shown.map(header)}</tr></thead>
+          <thead ref={head} onContextMenu={can_hide ? open_columns_menu : undefined}><tr>{shown.map(header)}</tr></thead>
           <tbody
             onFocus={() => { rows_focused.current = true; }}
             onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) rows_focused.current = false; }}
