@@ -1,6 +1,6 @@
 // Pictures with words beside them: avatars, and tiles for videos, albums or playlists laid out in a grid or as rows.
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 // ── Avatars ──────────────────────────────────────────────────────────────────
 
@@ -36,20 +36,34 @@ interface MediaTileProps {
   actions?: ReactNode;
   // What comes before the picture in a row, such as its place in a playlist.
   lead?: ReactNode;
+  // Opens the tile in place, such as in a dialog, on a plain click of the picture or title; the link still opens a new tab.
+  on_open?: () => void;
+}
+
+// A plain left click, not one asking for a new tab or window.
+function is_plain_click(event: MouseEvent): boolean {
+  return event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
 }
 
 // One video, album or playlist: its picture, its title and a few lines about it.
-export function MediaTile({ title, href, image, corner, lines = [], dimmed = false, actions, lead }: MediaTileProps) {
+export function MediaTile({ title, href, image, corner, lines = [], dimmed = false, actions, lead, on_open }: MediaTileProps) {
   const shown_lines = lines.filter((line) => line !== null && line !== undefined && line !== false && line !== "");
+  const open = on_open
+    ? (event: MouseEvent) => {
+        if (!is_plain_click(event)) return;
+        event.preventDefault();
+        on_open();
+      }
+    : undefined;
   return (
     <div role="listitem" className={dimmed ? "media-tile media-dimmed dimmed" : "media-tile"}>
       {lead !== undefined && <span className="media-lead">{lead}</span>}
-      <a className="media-picture" href={href} tabIndex={-1} aria-hidden="true">
+      <a className="media-picture" href={href} tabIndex={-1} aria-hidden="true" onClick={open}>
         {image ? <img src={image} alt="" loading="lazy" /> : <span className="media-blank" />}
         {corner && <span className="media-corner">{corner}</span>}
       </a>
       <div className="media-text">
-        <a className="media-title" href={href}>{title}</a>
+        <a className="media-title" href={href} onClick={open}>{title}</a>
         {shown_lines.map((line, index) => <div key={index} className="media-line">{line}</div>)}
       </div>
       {actions && <div className="media-actions">{actions}</div>}
