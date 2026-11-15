@@ -1,4 +1,4 @@
-// Small SVG charts: lines or dots over time with a moving average, bars, meters, a donut, a timeline, sparklines, a pass/fail strip, a gauge ring, a share bar and a treemap, colored from Halon's tokens.
+// Small SVG charts: lines or dots over time with a moving average, bars, meters, a donut, a timeline, sparklines, a pass/fail strip, a gauge ring, a donut tile, a share bar and a treemap, colored from Halon's tokens.
 
 import type { CSSProperties, ReactNode } from "react";
 
@@ -479,6 +479,54 @@ export function Gauge({ label, value_text, percent, color, caption, href }: Gaug
       <svg className="gauge-ring" viewBox="0 0 48 48" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={value_text}>
         <circle className="gauge-track" cx="24" cy="24" r={gauge_radius} transform="rotate(135 24 24)" style={{ strokeDasharray: `${gauge_sweep.toFixed(2)} 999` }} />
         {dash !== null && <circle cx="24" cy="24" r={gauge_radius} transform="rotate(135 24 24)" style={{ stroke: color, strokeDasharray: dash }} />}
+      </svg>
+    </Box>
+  );
+}
+
+// ── Donut tile ───────────────────────────────────────────────────────────────
+
+const donut_tile_radius = 48;
+const donut_tile_stroke = 14;
+
+export interface DonutTileProps {
+  label: string;
+  // The value as text, printed in the middle, such as "1,800".
+  value_text: string;
+  // How full the ring is, 0 to 100.
+  percent: number;
+  // A CSS colour, normally a Halon token such as var(--accent).
+  color: string;
+  // A line under the value inside the ring, such as "of 2,200 kcal".
+  caption?: string | null;
+  // A link the whole tile follows, as a Tile's does.
+  href?: string | null;
+}
+
+// The fill's dash: `percent` of the whole circle, or none for an empty ring, since a zero-length round cap still shows.
+export function donut_tile_dash(percent: number): string | null {
+  if (percent <= 0) return null;
+  const circumference = 2 * Math.PI * donut_tile_radius;
+  return `${((circumference * Math.min(100, percent)) / 100).toFixed(2)} ${circumference.toFixed(2)}`;
+}
+
+// A stat tile drawn as a full ring filled by the value's share of the whole, the value in its middle, a link when given `href`.
+export function DonutTile({ label, value_text, percent, color, caption, href }: DonutTileProps) {
+  const dash = donut_tile_dash(percent);
+  const middle = donut_size / 2;
+  const Box = href ? "a" : "div";
+  return (
+    <Box className="tile donut-tile" href={href ?? undefined}>
+      <span className="tile-label">{label}</span>
+      <svg viewBox={`0 0 ${donut_size} ${donut_size}`} role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={caption ? `${value_text} ${caption}` : value_text}>
+        <circle cx={middle} cy={middle} r={donut_tile_radius} fill="none" className="donut-track" strokeWidth={donut_tile_stroke} />
+        {dash !== null && (
+          <circle cx={middle} cy={middle} r={donut_tile_radius} className="donut-fill" stroke={color} strokeWidth={donut_tile_stroke} strokeDasharray={dash} transform={`rotate(-90 ${middle} ${middle})`}>
+            <title>{`${Math.round(percent)}%`}</title>
+          </circle>
+        )}
+        <text x={middle} y={caption ? middle + 2 : middle + 7} textAnchor="middle" className="donut-value">{value_text}</text>
+        {caption ? <text x={middle} y={middle + 20} textAnchor="middle" className="tick">{caption}</text> : null}
       </svg>
     </Box>
   );
