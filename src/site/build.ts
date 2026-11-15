@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 import { build, createServer, preview, type InlineConfig, type Manifest } from "vite";
 import { text_direction } from "../i18n.ts";
 import { read_content } from "./content.ts";
-import { mdx_plugin } from "./markdown.ts";
+import { has_mermaid, mdx_plugin } from "./markdown.ts";
 import {
   build_sidebar, extract_headings, neighbours, page_path, plan_routes, root_locale, site_locales, with_base,
   type NavItem, type PageData, type Route, type SiteConfig, type SourcePage,
@@ -130,8 +130,9 @@ export function page_data(project: SiteProject, plan: SitePlan, route: Route | n
 
 // ── Vite ─────────────────────────────────────────────────────────────────────
 
-// The entries Vite starts from: the page modules by content file, the browser's entry with the site's stylesheets, and
-// the server's; written only when they change, so the dev server does not reload for nothing.
+// The entries Vite starts from: the page modules by content file, the browser's entry with the site's stylesheets (and
+// mermaid, when a page draws a diagram), and the server's; written only when they change, so the dev server does not
+// reload for nothing.
 export function write_entries(project: SiteProject, plan: SitePlan): void {
   mkdirSync(project.work_folder, { recursive: true });
   const from_work = (file: string) => {
@@ -140,9 +141,13 @@ export function write_entries(project: SiteProject, plan: SitePlan): void {
   };
   const page_lines = plan.pages.map((page) => `  ${JSON.stringify(page.id)}: () => import(${JSON.stringify(from_work(join(project.content_folder, page.id)))}),`);
   const css_lines = (project.config.css ?? []).map((sheet) => `import ${JSON.stringify(sheet.startsWith(".") ? from_work(resolve(project.root, sheet)) : sheet)};`);
+  const draws_diagrams = plan.pages.some((page) => has_mermaid(readFileSync(join(project.content_folder, page.id), "utf8")));
+  const start = draws_diagrams
+    ? `import { mermaid_drawer } from "@x-tech-laboratories/x-libs/web/site/mermaid";\nimport { pages } from "./pages.js";\n\nstart_site(pages, { draw_diagram: mermaid_drawer(() => import("mermaid")) });\n`
+    : `import { pages } from "./pages.js";\n\nstart_site(pages);\n`;
   const files: Record<string, string> = {
     "pages.js": `export const pages = {\n${page_lines.join("\n")}\n};\n`,
-    "client.js": `${css_lines.join("\n")}\nimport { start_site } from "@x-tech-laboratories/x-libs/web/site/client";\nimport { pages } from "./pages.js";\n\nstart_site(pages);\n`,
+    "client.js": `${css_lines.join("\n")}\nimport { start_site } from "@x-tech-laboratories/x-libs/web/site/client";\n${start}`,
     "server.js": `export { load_content, render_content, render_page } from "@x-tech-laboratories/x-libs/web/site/server";\nexport { pages } from "./pages.js";\n`,
     ".gitignore": "*\n",
   };

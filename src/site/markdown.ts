@@ -1,6 +1,6 @@
 // How a site's Markdown and MDX become pages, on MDX's own compiler: GitHub's tables, task lists, autolinks, alerts
 // and raw HTML, frontmatter and a leading title heading kept out of the page, an id and an anchor link on every heading, code coloured by Shiki through Halon's
-// tokens, and links within the site moved under its base.
+// tokens, mermaid blocks kept for the page to draw, and links within the site moved under its base.
 
 import mdx from "@mdx-js/rollup";
 import rehype_shiki from "@shikijs/rehype";
@@ -85,6 +85,25 @@ export function remark_drop_title_heading() {
   };
 }
 
+// A ```mermaid block kept as its source in a marked <pre>, which the page draws as a diagram and Shiki leaves alone.
+export function rehype_mermaid_blocks() {
+  return (tree: Root): void => {
+    visit(tree, "element", (node: Element) => {
+      const code = node.tagName === "pre" ? node.children.find((child): child is Element => child.type === "element" && child.tagName === "code") : undefined;
+      const classes = code?.properties.className;
+      if (!code || !Array.isArray(classes) || !classes.includes("language-mermaid")) return;
+      const source = code.children.map((child) => (child.type === "text" ? child.value : "")).join("");
+      node.properties = { dataMermaid: "" };
+      node.children = [{ type: "text", value: source }];
+    });
+  };
+}
+
+// Whether a page's Markdown holds a ```mermaid block, so the site's browser entry loads mermaid.
+export function has_mermaid(text: string): boolean {
+  return /^[ \t]*(```|~~~)[ \t]*mermaid\b/m.test(text);
+}
+
 // MDX's own nodes, which raw HTML parsing must pass through untouched.
 const mdx_node_types = ["mdxFlowExpression", "mdxJsxFlowElement", "mdxJsxTextElement", "mdxTextExpression", "mdxjsEsm"];
 
@@ -96,6 +115,7 @@ export function mdx_plugin(base: string): Plugin {
       [rehype_raw, { passThrough: mdx_node_types }],
       rehype_slug,
       [rehype_autolink_headings, { behavior: "append", properties: { className: ["heading-anchor"], ariaHidden: "true", tabIndex: -1, dataPagefindIgnore: "" }, content: { type: "text", value: "#" } }],
+      rehype_mermaid_blocks,
       [rehype_shiki, { theme: halon_code_theme, defaultLanguage: "text", fallbackLanguage: "text" }],
       [rehype_base_links, base],
     ],

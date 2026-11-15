@@ -2,10 +2,11 @@
 // the top bar, the page's outline beside it, and edit, date and previous and next links at its foot. The pieces a page's
 // MDX can use, such as cards and asides, are here too.
 
-import { createContext, useContext, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ComponentProps, type ComponentType, type ReactNode } from "react";
 import { with_base, type NavItem, type PageData, type SocialLink } from "../../site/model.ts";
 import { create_translator, type Translate } from "../../i18n.ts";
 import { theme_choice } from "../theme.ts";
+import type { DiagramDrawer } from "../site/mermaid.ts";
 import { Card as LayoutCard, Cards } from "./layout.tsx";
 import { Outline } from "./outline.tsx";
 import { SearchButton, SearchDialog, type SearchHit } from "./search_dialog.tsx";
@@ -24,17 +25,71 @@ export function use_site_page(): PageData {
   return page;
 }
 
+// ── Diagrams ─────────────────────────────────────────────────────────────────
+
+const DiagramDrawing = createContext<DiagramDrawer | null>(null);
+
+// Whether the page shows its dark scheme: the theme picked, else the system's, followed as either changes.
+function use_dark_page(): boolean {
+  return useSyncExternalStore(
+    (changed) => {
+      const media = matchMedia("(prefers-color-scheme: dark)");
+      const observer = new MutationObserver(changed);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+      media.addEventListener("change", changed);
+      return () => {
+        observer.disconnect();
+        media.removeEventListener("change", changed);
+      };
+    },
+    () => {
+      const theme = document.documentElement.dataset.theme;
+      return theme === undefined ? matchMedia("(prefers-color-scheme: dark)").matches : theme === "dark";
+    },
+    () => false,
+  );
+}
+
+// A ```mermaid block: its source until the page has drawn it, then the diagram, drawn again when the scheme changes.
+function Diagram({ source }: { source: string }) {
+  const draw = useContext(DiagramDrawing);
+  const dark = use_dark_page();
+  const [svg, set_svg] = useState<string | null>(null);
+  useEffect(() => {
+    if (draw === null) return;
+    let shown = true;
+    draw(source, dark).then((drawn) => shown && set_svg(drawn), () => shown && set_svg(null));
+    return () => {
+      shown = false;
+    };
+  }, [draw, source, dark]);
+  if (svg === null) return <pre className="site-diagram-source" data-pagefind-ignore="">{source}</pre>;
+  return <div className="site-diagram" data-pagefind-ignore="" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+// A Markdown <pre>: a diagram when the build marked it as mermaid, else code as it is.
+function SitePre({ "data-mermaid": mermaid, ...props }: ComponentProps<"pre"> & { "data-mermaid"?: string }) {
+  if (mermaid === undefined) return <pre {...props} />;
+  return <Diagram source={typeof props.children === "string" ? props.children : String(props.children ?? "")} />;
+}
+
+const content_components = { pre: SitePre };
+
 // ── The frame ────────────────────────────────────────────────────────────────
+
+// A page's content, from its Markdown or MDX, which takes the components its HTML is drawn with.
+type PageContent = ComponentType<{ components?: Record<string, ComponentType<never>> }>;
 
 interface SitePageProps {
   page: PageData;
-  // The page's content, from its Markdown or MDX.
-  Content: ComponentType;
+  Content: PageContent;
   // Finds search hits; the search button is left out without it.
   search?: (query: string) => Promise<SearchHit[]>;
+  // Draws the page's ```mermaid blocks; they stay as their source without it.
+  draw_diagram?: DiagramDrawer;
 }
 
-export function SitePage({ page, Content, search }: SitePageProps) {
+export function SitePage({ page, Content, search, draw_diagram }: SitePageProps) {
   const t: Translate = create_translator(page.ui);
   const theme = useMemo(() => theme_choice(page.site.theme_key), [page.site.theme_key]);
   const [is_searching, set_searching] = useState(false);
@@ -61,33 +116,35 @@ export function SitePage({ page, Content, search }: SitePageProps) {
 
   return (
     <SiteData.Provider value={page}>
-      <Shell
-        brand={page.site.title}
-        brand_icon={page.site.logo_replaces_title ? undefined : page.site.logo}
-        brand_logo={page.site.logo_replaces_title ? page.site.logo : undefined}
-        brand_href={page.site.home}
-        sidebar={<SiteNav items={page.nav} current={page.href} />}
-        theme={theme}
-        tools={tools}
-        labels={labels}
-        view_key={page.href}
-      >
-        {page.template === "splash" ? <SplashLayout page={page} Content={Content} t={t} /> : <DocLayout page={page} Content={Content} t={t} />}
-      </Shell>
-      {is_searching && search && (
-        <SearchDialog
-          search={search}
-          on_close={() => set_searching(false)}
-          labels={{ title: t("search_title"), placeholder: t("search_placeholder"), no_results: t("search_no_results"), searching: t("search_searching") }}
-        />
-      )}
+      <DiagramDrawing.Provider value={draw_diagram ?? null}>
+        <Shell
+          brand={page.site.title}
+          brand_icon={page.site.logo_replaces_title ? undefined : page.site.logo}
+          brand_logo={page.site.logo_replaces_title ? page.site.logo : undefined}
+          brand_href={page.site.home}
+          sidebar={<SiteNav items={page.nav} current={page.href} />}
+          theme={theme}
+          tools={tools}
+          labels={labels}
+          view_key={page.href}
+        >
+          {page.template === "splash" ? <SplashLayout page={page} Content={Content} t={t} /> : <DocLayout page={page} Content={Content} t={t} />}
+        </Shell>
+        {is_searching && search && (
+          <SearchDialog
+            search={search}
+            on_close={() => set_searching(false)}
+            labels={{ title: t("search_title"), placeholder: t("search_placeholder"), no_results: t("search_no_results"), searching: t("search_searching") }}
+          />
+        )}
+      </DiagramDrawing.Provider>
     </SiteData.Provider>
   );
 }
 
 interface LayoutProps {
   page: PageData;
-  Content: ComponentType;
+  Content: PageContent;
   t: Translate;
 }
 
@@ -113,7 +170,7 @@ function DocLayout({ page, Content, t }: LayoutProps) {
           <h1 className="site-title">{page.title}</h1>
           {page.description && <p className="site-lead">{page.description}</p>}
           {page.fallback_language && <p className="banner site-notice">{t("not_translated", { language: page.fallback_language })}</p>}
-          <div className="markdown site-content"><Content /></div>
+          <div className="markdown site-content"><Content components={content_components} /></div>
         </article>
         <PageFoot page={page} t={t} />
       </div>
@@ -149,7 +206,7 @@ function SplashLayout({ page, Content, t }: LayoutProps) {
             {hero.image && <img className="site-hero-image" src={hero.image} alt="" />}
           </header>
           {page.fallback_language && <p className="banner site-notice">{t("not_translated", { language: page.fallback_language })}</p>}
-          <div className="markdown site-content"><Content /></div>
+          <div className="markdown site-content"><Content components={content_components} /></div>
         </article>
         <PageFoot page={page} t={t} />
       </div>

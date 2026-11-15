@@ -1,10 +1,13 @@
 import { compile } from "@mdx-js/mdx";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { redirect_html } from "../src/site/build.ts";
+import { plan_site, redirect_html, write_entries, type SiteProject } from "../src/site/build.ts";
 import rehype_raw from "rehype-raw";
 
-import { rehype_base_links, remark_drop_title_heading, remark_github_alerts } from "../src/site/markdown.ts";
+import { has_mermaid, rehype_base_links, rehype_mermaid_blocks, remark_drop_title_heading, remark_github_alerts } from "../src/site/markdown.ts";
 
 async function compiled(text: string, format: "md" | "mdx" = "md"): Promise<string> {
   const output = await compile(text, { format, remarkPlugins: [remark_github_alerts], rehypePlugins: [[rehype_base_links, "/repo/"]], jsx: true });
@@ -67,5 +70,42 @@ describe("raw HTML", () => {
     });
 
     expect(String(output)).toContain(`src="/repo/shots/happy.png" width="160" alt="happy"`);
+  });
+});
+
+describe("mermaid blocks", () => {
+  it("keeps a mermaid block's source in a marked pre and leaves other code alone", async () => {
+    const output = await compile("```mermaid\nflowchart LR\n  a --> b\n```\n\n```ts\nconst x = 1;\n```\n", { format: "md", rehypePlugins: [rehype_mermaid_blocks], jsx: true });
+    const page = String(output);
+
+    expect(page).toContain(`_components.pre data-mermaid=""`);
+    expect(page).toContain("flowchart LR\\n  a --> b");
+    expect(page).toContain(`className="language-ts"`);
+  });
+
+  it("finds a mermaid fence in a page's text", () => {
+    expect(has_mermaid("Intro\n\n```mermaid\nerDiagram\n```\n")).toBe(true);
+    expect(has_mermaid("  ~~~ mermaid\n")).toBe(true);
+    expect(has_mermaid("```ts\nconst mermaid = 1;\n```\n")).toBe(false);
+  });
+
+  it("loads mermaid in the browser entry only when a page draws a diagram", () => {
+    const root = mkdtempSync(join(tmpdir(), "x-site-"));
+    try {
+      const content = join(root, "docs");
+      mkdirSync(content);
+      writeFileSync(join(content, "index.md"), "# Home\n");
+      const project: SiteProject = { root, config: { title: "Test" }, base: "/", content_folder: content, out_folder: join(root, "dist"), work_folder: join(root, ".x-site") };
+      const client = () => readFileSync(join(project.work_folder, "client.js"), "utf8");
+
+      write_entries(project, plan_site(project));
+      expect(client()).not.toContain("mermaid");
+
+      writeFileSync(join(content, "flow.md"), "# Flow\n\n```mermaid\nflowchart LR\n```\n");
+      write_entries(project, plan_site(project));
+      expect(client()).toContain(`start_site(pages, { draw_diagram: mermaid_drawer(() => import("mermaid")) });`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

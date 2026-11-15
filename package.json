@@ -48,6 +48,7 @@
     "@shikijs/rehype": "^4.6.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "fastify": "^5.12.7",
+    "mermaid": "^11.0.0",
     "nodemailer": "^10.3.1",
     "pagefind": "^1.6.0",
     "react": "^19",
@@ -103,6 +104,9 @@
       "optional": true
     },
     "fastify": {
+      "optional": true
+    },
+    "mermaid": {
       "optional": true
     },
     "nodemailer": {

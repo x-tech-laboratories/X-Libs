@@ -411,6 +411,9 @@ so it reads without JavaScript and its search, outline, menus and theme work wit
 - **GitHub's own Markdown**: alerts such as `> [!TIP]` show as asides and raw HTML such as a table of pictures is
   kept, so a page reads the same on GitHub and on the site; a page with no `title` takes its opening `# heading`, which
   is then not drawn twice, so an MDX page can show a README with `import Readme from "../README.md"`; links that start at the root move under the base in Markdown and in a component's `href` or `src`.
+- **Diagrams**: a ```` ```mermaid ```` block, which GitHub draws too, is drawn with [Mermaid](https://mermaid.js.org/) in
+  Halon's colours and drawn again when the scheme changes; the page shows its source until then, and without
+  JavaScript. The browser loads mermaid only on a site with a diagram, which adds `mermaid` to its own dependencies.
 - **Pages beside a package**: the scan skips `node_modules`, `dist`, `public` and hidden folders, so a site can live in
   an app's `docs/` folder with a `package.json` of its own.
 
