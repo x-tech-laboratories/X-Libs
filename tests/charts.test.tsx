@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { BarChart, Donut, Gauge, gauge_dash, LineChart, Meters, moving_average, ShareBar, Sparkline, squarify, StackedBarChart, Strip, Timeline, Treemap } from "../src/web/react/charts.tsx";
+import { BarChart, Donut, DonutTile, donut_tile_dash, Gauge, gauge_dash, LineChart, Meters, moving_average, ShareBar, Sparkline, squarify, StackedBarChart, Strip, Timeline, Treemap } from "../src/web/react/charts.tsx";
 
 afterEach(cleanup);
 
@@ -176,6 +176,27 @@ test("a gauge draws no arc when empty, and caps a full one", () => {
   expect(gauge_dash(0)).toBeNull();
   expect(gauge_dash(50)).toMatch(/^\d+\.\d\d 999$/);
   expect(gauge_dash(150)).toBe(gauge_dash(100));
+});
+
+test("a donut tile prints its value and caption in the ring and says how full it is", () => {
+  render(<DonutTile label="Energy today" value_text="1,800" caption="of 2,200 kcal" percent={82} color="var(--accent)" />);
+  expect(screen.getByText("Energy today")).toBeTruthy();
+  expect(screen.getByText("1,800")).toBeTruthy();
+  expect(screen.getByText("of 2,200 kcal")).toBeTruthy();
+  expect(screen.getByRole("meter", { name: "Energy today" }).getAttribute("aria-valuenow")).toBe("82");
+  expect(screen.queryByRole("link")).toBeNull();
+});
+
+test("a donut tile with an href is a link to it", () => {
+  render(<DonutTile label="Protein" value_text="95" percent={60} color="var(--accent)" href="#/diet" />);
+  expect(screen.getByRole("link").getAttribute("href")).toBe("#/diet");
+});
+
+test("a donut tile draws no fill when empty, and caps a full one at the whole ring", () => {
+  expect(donut_tile_dash(0)).toBeNull();
+  expect(donut_tile_dash(150)).toBe(donut_tile_dash(100));
+  const [fill, gap] = donut_tile_dash(100)!.split(" ");
+  expect(fill).toBe(gap);
 });
 
 test("a share bar prints every part's value in its legend, or only the names", () => {
