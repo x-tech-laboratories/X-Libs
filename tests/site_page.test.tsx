@@ -68,6 +68,15 @@ describe("site page", () => {
     expect(document.querySelector("article")!.hasAttribute("data-pagefind-body")).toBe(true);
   });
 
+  it("draws a logo that holds the site's name in place of the icon and title", () => {
+    const page = page_data();
+    render(<SitePage page={{ ...page, site: { ...page.site, logo: "/repo/_x/logo.svg", logo_replaces_title: true } }} Content={Content} />);
+
+    const brand = screen.getByRole("link", { name: "X-Test" });
+    expect(brand.querySelector("img")!.getAttribute("src")).toBe("/repo/_x/logo.svg");
+    expect(brand.textContent).toBe("");
+  });
+
   it("moves a link card under the base and marks an aside's kind", () => {
     render(<SitePage page={page_data()} Content={Content} />);
 

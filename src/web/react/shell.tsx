@@ -140,6 +140,12 @@ function FootLink({ href, current, icon, label, on_open }: { href: string; curre
   );
 }
 
+// The brand: its full logo when it has one, named for screen readers, else its icon before its name.
+function BrandMark({ brand, icon, logo }: { brand: string; icon?: string; logo?: string }) {
+  if (logo) return <img className="brand-logo" src={logo} alt={brand} />;
+  return <>{icon && <img className="brand-icon" src={icon} alt="" />}{brand}</>;
+}
+
 // ── Shell ────────────────────────────────────────────────────────────────────
 
 export interface ShellSection {
@@ -173,6 +179,8 @@ interface ShellProps {
   brand: string;
   // The app's icon, as an image URL, drawn before the brand.
   brand_icon?: string;
+  // The brand's full logo, as an image URL, already holding its name, drawn in place of the icon and the name.
+  brand_logo?: string;
   // The sidebar's links, unless `sidebar` gives its whole content.
   sections?: ShellSection[];
   // The section to light up, such as the route's first part.
@@ -229,7 +237,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, brand_icon, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
+  brand, brand_icon, brand_logo, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -296,12 +304,12 @@ export function Shell({
       <a className="skip" href="#main">{labels.skip_to_content}</a>
       <header className="topbar">
         <button ref={menu_button} className="icon menu-button" aria-label={labels.open_menu} aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
-        {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
+        {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand"><BrandMark brand={brand} icon={brand_icon} logo={brand_logo} /></a>}
         {!logged_out && tools}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <nav ref={sidebar} id="sidebar" className="sidebar" aria-label={labels.main_navigation}>
-          {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
+          {brand_in_sidebar && <a href={brand_href} className="sidebar-brand"><BrandMark brand={brand} icon={brand_icon} logo={brand_logo} /></a>}
           {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : (
             <div className="sidebar-links">
               {sections.map((section) => (
