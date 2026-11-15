@@ -112,6 +112,7 @@ export function page_data(project: SiteProject, plan: SitePlan, route: Route | n
     site: {
       title: config.title,
       logo: config.logo && asset(resolve(project.root, config.logo)),
+      logo_replaces_title: config.logo_replaces_title,
       social: config.social ?? [],
       search: config.search !== false,
       home: with_base(base, page_path(locale, "")),

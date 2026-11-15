@@ -35,6 +35,15 @@ describe("shell sidebar", () => {
     expect(brand.firstElementChild?.getAttribute("src")).toBe("icon.svg");
   });
 
+  it("draws the brand's full logo alone, named for screen readers, in place of the icon and name", () => {
+    render(<Shell brand="X-Test" brand_icon="icon.svg" brand_logo="logo.svg" sections={sections} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    const brand = screen.getByRole("link", { name: "X-Test" });
+    expect(brand.children).toHaveLength(1);
+    expect(brand.firstElementChild?.getAttribute("src")).toBe("logo.svg");
+    expect(brand.textContent).toBe("");
+  });
+
   it("shows the app's own sidebar in place of the sections", () => {
     render(<Shell brand="X-Test" sections={sections} sidebar={<button>My Day</button>} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
 

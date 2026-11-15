@@ -63,7 +63,8 @@ export function SitePage({ page, Content, search }: SitePageProps) {
     <SiteData.Provider value={page}>
       <Shell
         brand={page.site.title}
-        brand_icon={page.site.logo}
+        brand_icon={page.site.logo_replaces_title ? undefined : page.site.logo}
+        brand_logo={page.site.logo_replaces_title ? page.site.logo : undefined}
         brand_href={page.site.home}
         sidebar={<SiteNav items={page.nav} current={page.href} />}
         theme={theme}

@@ -72,6 +72,8 @@ export interface SiteConfig {
   public?: string;
   // The site's icon, drawn before its title, as a file relative to the site's folder.
   logo?: string;
+  // The logo already holds the site's name, so it is drawn alone in place of the icon and title.
+  logo_replaces_title?: boolean;
   // The favicon's path inside the public folder, or an address.
   favicon?: string;
   social?: SocialLink[];
@@ -297,6 +299,7 @@ export interface PageData {
   site: {
     title: string;
     logo?: string;
+    logo_replaces_title?: boolean;
     social: SocialLink[];
     search: boolean;
     home: string;
