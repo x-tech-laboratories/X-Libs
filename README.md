@@ -18,6 +18,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `units`                                  | `convert`, `to_shown`, `to_stored` and `format_measure`; `GramUnit` with `from_grams`, `to_grams` and `format_grams` for small amounts kept in grams and shown in g, mg or µg, such as a food's nutrients; weights, lengths, distances and energy kept in kg, cm, km and kcal and shown in the unit each person picks, such as `"225 lb"`; `format_number`, whole numbers whole and the rest to a tenth, and `format_change`, a signed difference such as `"+1.5 kg"`. |
 | `categories`                             | Categories nested by `/` paths such as `"Protein/Meat"`: normalizing, depth, leaf and parents, `is_in_category`, `all_categories` with the parents paths imply, `rename_in_categories` moving the subtree and merging onto a name in use, `drop_from_categories` taking the subtree, `filter_by_category` with descendants or the uncategorised, and `group_by_category` for grouped lists and selects. |
 | `money`                                  | `format_money` in a currency and locale to a set number of places, falling back to the number and code on a currency Intl refuses; `round_money` rounding halves away from zero, `money_step`, `sum_money`, `is_currency_code` and `currency_options` naming each currency for a select. |
+| `i18n`                                   | Words in the reader's language: `create_translator` looks each key up in catalogs in turn, so a missing translation falls back to the next, with `{name}` placeholders filled; `merge_messages`; `best_locale`, the available locale that best fits the reader's preferred ones, an exact tag before the same language; `text_direction` for the `dir` attribute. |
 | `sql`                                    | `SqlDatabase`, the part of a synchronous SQLite connection the apps use, met by node:sqlite and by `web/sqlite_wasm`; `in_transaction`, and `migrate`, each step once in its own transaction, through `user_version` or, with an `owner` such as a feature or plugin, its own row in `schema_versions`. |
 | `api_spec`                               | An app's calls described once for other programs: `ApiSpec` gives each method its words and a JSON Schema per argument, so a method without one fails to compile; `input_schema` takes the arguments as one object, `positional_args` puts named arguments back in the method's order, and `openapi_document` writes an OpenAPI 3.1 document with one POST per call. |
 | `drizzle`, `drizzle_migrations`          | Typed SQLite on Drizzle ORM 1.0.0-rc.5, chosen over Kysely and hand-written SQL because it types rows from one schema in TypeScript, writes the migration SQL from it with drizzle-kit and runs synchronously: `open_drizzle` over any `SqlDatabase`, so the same queries run on node:sqlite and in a phone's page, `synced_tables` reading the sync list from the schema's primary keys, `migrate_drizzle` per owner, the schema builders and query operators so an app never imports Drizzle, and `x-libs-bundle-migrations <folder>`, which turns drizzle-kit's migration folders into an `index.ts` a server running .ts files can import. |
@@ -89,8 +90,8 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/store`, `web/react/store`           | `create_store`: a value with a watch, set or updated, redrawing at a steady pace when `coalesce_in_milliseconds` is given; `use_store` reads it. |
 | `web/prefs`, `web/react/prefs`           | Remembered view settings that read as their default when stored corrupt, stale or of the wrong shape; `use_pref` keeps one as component state. |
 | `web/selection`, `web/virtual`, `web/drag` | Picking rows with plain, Ctrl and Shift clicks from a fixed anchor, or as lists of ids with the anchor kept by id, the row an arrow or page key moves to; which rows of a long list a viewport needs; a badge such as "3 tasks" as the drag image. |
-| `web/react/shell`                        | `Shell`: top bar with the brand and its icon and the app's `tools`; section links or the app's own sidebar in a `.sidebar-content` box, scrolling above a foot pinned to the sidebar's bottom that holds the app's `sidebar_foot` rows, then the theme, the signed-in `user` linked to `user_href` with Sign out, and `settings` last; resizable; a `status_bar` at the foot of the window, toasts, dialogs and menus, with or without logins (no account row without a `user`, `logged_out` hiding the sidebar and tools), its phone menu held by the Shell or the app, and for app-like pages a `contained` window where only main scrolls and the brand heading the sidebar; `ThemeRow`, the theme as a sidebar row, `ThemeButton`, as an icon button, and `use_route`. |
-| `web/react/layout`, `badges`, `states`   | `PageHeading` with a subtitle, icon, banner, actions and a `level` for inside dialogs and panels; panels, facts, tiles, cards, tabs, `Crumbs` with chevrons between steps that link, run a function or mark where the reader is, `PathText` for a path shown with the same chevrons, steppers, `FormRow` for a form's labelled fields, `FormGroup` folding part of a form under a summary line such as "More options", `SettingsPage` with an outline beside its sections that marks the one being read, settings rows, `RowActions` and `moved` for ordered lists, `SelectionBar` for picked rows; badges, chips in an item's own colour, dashed or removable, `ColorDot` and `StatusPill`, a state dot with text and an action; `use_resource` with its `status` (idle until `enabled`, loading, loaded, failed), a `watch` that reloads it quietly, and its loading states, `Loaded` going by the status so a null result shows its `empty` slot or the children. |
+| `web/react/shell`                        | `Shell`: top bar with the brand and its icon and the app's `tools`; section links or the app's own sidebar in a `.sidebar-content` box, scrolling above a foot pinned to the sidebar's bottom that holds the app's `sidebar_foot` rows, then the theme, the signed-in `user` linked to `user_href` with Sign out, and `settings` last; resizable; a `status_bar` at the foot of the window, toasts, dialogs and menus, with or without logins (no account row without a `user`, `logged_out` hiding the sidebar and tools), its phone menu held by the Shell or the app, and for app-like pages a `contained` window where only main scrolls and the brand heading the sidebar; `labels` for its own words in another language; `ThemeRow`, the theme as a sidebar row, `ThemeButton`, as an icon button, both drawing the system theme on a server and until the page is picked up, and `use_route`. |
+| `web/react/layout`, `badges`, `states`   | `PageHeading` with a subtitle, icon, banner, actions and a `level` for inside dialogs and panels; panels, facts, tiles, cards, tabs, `Crumbs` with chevrons between steps that link, run a function or mark where the reader is, `PathText` for a path shown with the same chevrons, steppers, `FormRow` for a form's labelled fields, `FormGroup` folding part of a form under a summary line such as "More options", `SettingsPage` with an `Outline` beside its sections, settings rows, `RowActions` and `moved` for ordered lists, `SelectionBar` for picked rows; badges, chips in an item's own colour, dashed or removable, `ColorDot` and `StatusPill`, a state dot with text and an action; `use_resource` with its `status` (idle until `enabled`, loading, loaded, failed), a `watch` that reloads it quietly, and its loading states, `Loaded` going by the status so a null result shows its `empty` slot or the children. |
 | `web/react/sync_settings`, `backup_settings` | The settings rows every device shows: `SyncSettings`, the sync status and who the device syncs as, or the server's address, name, password and the code when asked, choosing which copy wins after a confirm; `BackupSettings`, back up now, the daily schedule, and each backup to restore or delete after a confirm. |
 | `web/react/certificates`                 | `CertificateDialog`: what is wrong with a server's certificate in plain words, the certificate itself with its fingerprint, and Trust or Don't connect; `offer_certificate_trust` and `ask_to_trust_certificate` open it from anywhere, `with_certificate_prompt` wraps a fetch to ask and retry once, `SyncCertificatePrompt` asks whenever sync fails over the certificate, `SyncSettings` asks when connecting does given `certificates`, and `TrustedCertificates` lists them to forget. |
 | `web/react/time`                         | `Age`: a time as how long ago, with the full stamp on hover; `use_now`, the time read again each minute; `use_countdown`, a countdown on a wall-clock deadline, so a page that slept shows the time really left, with start, stop, pause, resume and extend and a callback once at zero. |
@@ -115,6 +116,9 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/volume`                       | `VolumeButton`: a speaker button that opens a slider; scrolling over it adjusts the volume and a middle-click mutes. |
 | `web/react/following`                    | `use_follow_tail`, `FollowingOutput` and `FollowToggle`: output that keeps its newest lines in view as they arrive unless the reader scrolled up, with a Follow switch. |
 | `web/react/markdown`                     | `Markdown` and `render_markdown` on marked and DOMPurify, chosen because marked covers the hand-written parser feature for feature and adds tables and nested lists: raw HTML shows as text, only web links are clickable and open in a new tab, and `follow` keeps streamed text in view. |
+| `web/react/outline`                      | `Outline`: a long page's sections in groups under headings, such as an article's headings or a settings page's sections, each link jumping to its section, the one being read marked as the page scrolls, deeper ones indented by `data-level`, and the section put in the address with `update_hash`. |
+| `web/react/search_dialog`                | `SearchDialog`: results that come in as the reader types, a pause apart, each page with its matching sections under it, worked with the arrow keys and Enter as a combobox over a listbox, excerpts keeping only their `<mark>`s; `SearchButton`, a field-like button that also opens it from Ctrl+K (Cmd+K) or "/". |
+| `site/*`, `web/react/site`, `web/site/*` | A static site for GitHub Pages in the X-apps' frame: see [A static site](#a-static-site). |
 | `web/react/rich_text`                    | `RichText`: a formatted text field on Tiptap that reads and writes Markdown, chosen because Tiptap ships no look of its own, so its toolbar is Halon markup, and its Markdown extension keeps the stored text plain: bold, italic, strikethrough, code, headings, lists, checklists, quotes, code blocks and web links, `on_change` only for typing, never for showing a value. |
 | `web/react/suggestions`                  | `Suggestions`: completions under any text field from a sync or async source; arrow keys choose, Tab or Enter take, Escape dismisses, other keys pass through; `open_on_focus` lists them once the field is entered, nothing lit, so Enter still hands on free text. `ComboField`: that mode over known values, every one listed on focus and narrowed as typed. |
 | `web/react/chip_field`                   | `ChipField`: values as removable chips with a `ComboField` that suggests those not yet chosen and an Add button; `with_draft` takes in a value still in the field when a form saves; `TreeChipField`: items of a tree as chips showing their paths, with a `TreePicker` to add one or, with `can_create`, new text. |
@@ -378,6 +382,50 @@ The protocol carries run, stream, long-run and ping messages. An app adds its ow
   and ask with `hub.request(host, "health")`.
 - **Messages** either way: `session.send(...)` from the agent, with `on_hello` to send once logged in; `connection.send(...)`
   from the server, with the hub's `on_message` to receive; the agent's `on_message` receives the server's.
+
+## A static site
+
+`x-libs-site` builds a documentation or project site from a folder of Markdown and MDX, drawn in the same `Shell`, widgets and
+Halon look as the apps, and served as plain files from GitHub Pages. It stands on established tools: Vite bundles and serves
+it, MDX's own compiler reads the pages (with GitHub's tables and task lists), Shiki colours code through Halon's tokens and
+Pagefind indexes the built pages for search. Each page is drawn to HTML at build time and picked up again in the browser,
+so it reads without JavaScript and its search, outline, menus and theme work with it.
+
+- **Pages**: `content/**/*.md(x)` with a `title` in the frontmatter, `index` files at their folder; `template: splash` makes a
+  landing page with a `hero` (title, tagline, image, actions); `sidebar.order`, `sidebar.label` and `sidebar.hidden` place a
+  page; `toc: false` hides its outline. MDX imports `Card`, `CardGrid`, `LinkCard` and `Aside` from `web/react/site`, and the
+  site's own React components.
+- **Sidebar**: links, pages by slug, groups and whole folders (`autogenerate`), each label with `translations`; previous and
+  next links follow its order.
+- **Search**: a Pagefind index per language, its results by page and by heading; Ctrl+K or "/" opens it.
+- **Languages**: `locales` by key, `root` at the top and the others under `/<key>/`; a page missing in a language is shown in
+  the default one with a notice and left out of that language's search; the frame's words come in English, Spanish, French,
+  German, Portuguese and Italian, and `ui` adds or overrides them; `hreflang` links tie the versions together.
+- **GitHub Pages**: `base` for a project site under `/<repo>/`, moving every link that starts at the root; `404.html`,
+  `sitemap.xml`, canonical and Open Graph tags, `.nojekyll`, an "Edit this page" link and the last commit date of each page.
+- **More files**: `files` adds generated ones, such as JSON made from the site's data.
+
+```ts
+// site.config.ts
+import { define_site } from "@x-tech-laboratories/x-libs/site/model";
+
+export default define_site({
+  title: "X-Example",
+  site: "https://x-tech-laboratories.github.io",
+  base: "/X-Example/",
+  logo: "./resources/icon.svg",
+  locales: { root: { label: "English", lang: "en" }, es: { label: "Español", lang: "es" } },
+  css: ["@x-tech-laboratories/halon/halon-tokens.css", "@x-tech-laboratories/halon/halon.css", "@x-tech-laboratories/halon/site.css"],
+  sidebar: [{ slug: "" }, { label: "Guides", translations: { es: "Guías" }, autogenerate: { directory: "guides" } }],
+});
+```
+
+`x-libs-site dev` serves it with live reloading (search needs a build), `x-libs-site build` writes `dist/` and
+`x-libs-site preview` serves that. The site installs `react`, `react-dom`, `vite`, `@mdx-js/rollup`, `remark-gfm`,
+`remark-frontmatter`, `rehype-slug`, `rehype-autolink-headings`, `shiki`, `@shikijs/rehype`, `unist-util-visit`, `yaml` and
+`pagefind`, the optional peers the build uses, and ignores the `.x-site/` folder the build writes its entries to. A GitHub
+Actions job runs `npm ci` and `npm run build` with `fetch-depth: 0`, for the dates, and uploads `dist/` with
+`actions/upload-pages-artifact`.
 
 ## Development
 

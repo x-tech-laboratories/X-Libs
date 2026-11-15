@@ -1,7 +1,7 @@
 // The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, its foot
 // pinned with the theme, the signed-in user and Settings, a status bar, and the toasts, dialogs and menus.
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
 import { store_sizes, stored_sizes } from "../split.ts";
 import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
@@ -31,7 +31,7 @@ const theme_labels: Record<Theme, [icon: string, text: string]> = { system: ["�
 export function ThemeButton({ choice }: { choice: ThemeChoice }) {
   const [theme, set_theme] = useState(choice.get);
   useEffect(() => choice.on_change(set_theme), []);
-  const [icon, text] = theme_labels[theme];
+  const [icon, text] = theme_labels[use_is_hydrated() ? theme : "system"];
   return (
     <button id="theme" className="icon" title={`${text} (click to change)`} aria-label={`${text}, click to change`} onClick={() => choice.set(next_theme(choice.get()))}>
       {icon}
@@ -39,15 +39,50 @@ export function ThemeButton({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-const theme_names: Record<Theme, string> = { system: "System theme", light: "Light theme", dark: "Dark theme" };
+// ── Words ────────────────────────────────────────────────────────────────────
+
+// The words the Shell shows, for a page in another language.
+export interface ShellLabels {
+  skip_to_content: string;
+  open_menu: string;
+  // The sidebar's name for screen readers.
+  main_navigation: string;
+  resize_sidebar: string;
+  sign_out: string;
+  settings: string;
+  theme_names: Record<Theme, string>;
+  change_theme: string;
+}
+
+export const shell_labels: ShellLabels = {
+  skip_to_content: "Skip to content",
+  open_menu: "Open the menu",
+  main_navigation: "Main",
+  resize_sidebar: "Resize the sidebar",
+  sign_out: "Sign out",
+  settings: "Settings",
+  theme_names: { system: "System theme", light: "Light theme", dark: "Dark theme" },
+  change_theme: "Click to change the theme",
+};
+
+// False while a page drawn on the server is being picked up in the browser, so the first draw matches the server's.
+function use_is_hydrated(): boolean {
+  return useSyncExternalStore(never_changes, () => true, () => false);
+}
+
+function never_changes(): () => void {
+  return () => undefined;
+}
 
 // The theme as a sidebar row, its icon and name showing the current one, stepping to the next on each click.
-export function ThemeRow({ choice }: { choice: ThemeChoice }) {
+export function ThemeRow({ choice, labels = shell_labels }: { choice: ThemeChoice; labels?: Pick<ShellLabels, "theme_names" | "change_theme"> }) {
   const [theme, set_theme] = useState(choice.get);
   useEffect(() => choice.on_change(set_theme), []);
+  // The server cannot know the reader's choice, so it draws the system theme, as does the browser's first draw.
+  const shown = use_is_hydrated() ? theme : "system";
   return (
-    <button className="tree-row" title="Click to change the theme" onClick={() => choice.set(next_theme(choice.get()))}>
-      <span className="tree-label"><ThemeIcon theme={theme} /><span>{theme_names[theme]}</span></span>
+    <button className="tree-row" title={labels.change_theme} onClick={() => choice.set(next_theme(choice.get()))}>
+      <span className="tree-label"><ThemeIcon theme={shown} /><span>{labels.theme_names[shown]}</span></span>
     </button>
   );
 }
@@ -176,6 +211,8 @@ interface ShellProps {
   contained?: boolean;
   // Heads the sidebar with the brand and leaves the top bar to the tools.
   brand_in_sidebar?: boolean;
+  // The Shell's own words in the page's language.
+  labels?: ShellLabels;
   children: ReactNode;
 }
 
@@ -193,7 +230,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 
 export function Shell({
   brand, brand_icon, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
-  menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, children,
+  menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
   const menu_open = held_menu_open ?? own_menu_open;
@@ -244,22 +281,26 @@ export function Shell({
   // A new view closes the menu and takes focus, which tells a screen reader the page changed, but not on the first load.
   useEffect(() => {
     set_menu_open(false);
-    if (!first_view.current) main.current?.focus({ preventScroll: true });
-    first_view.current = false;
+    // The first load keeps where the browser put it, such as at a heading named in the address.
+    if (first_view.current) {
+      first_view.current = false;
+      return;
+    }
+    main.current?.focus({ preventScroll: true });
     window.scrollTo(0, 0);
     main.current?.scrollTo?.(0, 0);
   }, [view_key]);
 
   return (
     <>
-      <a className="skip" href="#main">Skip to content</a>
+      <a className="skip" href="#main">{labels.skip_to_content}</a>
       <header className="topbar">
-        <button ref={menu_button} className="icon menu-button" aria-label="Open the menu" aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
+        <button ref={menu_button} className="icon menu-button" aria-label={labels.open_menu} aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
         {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
         {!logged_out && tools}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
-        <nav ref={sidebar} id="sidebar" className="sidebar" aria-label="Main">
+        <nav ref={sidebar} id="sidebar" className="sidebar" aria-label={labels.main_navigation}>
           {brand_in_sidebar && <a href={brand_href} className="sidebar-brand">{brand_icon && <img className="brand-icon" src={brand_icon} alt="" />}{brand}</a>}
           {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : (
             <div className="sidebar-links">
@@ -272,16 +313,16 @@ export function Shell({
           )}
           <div className="sidebar-foot">
             {sidebar_foot}
-            <ThemeRow choice={theme} />
+            <ThemeRow choice={theme} labels={labels} />
             {user_name !== undefined && (
               <div className="sidebar-account">
                 {user_href
                   ? <FootLink href={user_href} current={location.hash === user_href} icon={<PersonIcon />} label={user_name} />
                   : <span className="tree-row"><span className="tree-label"><PersonIcon /><span className="user-name">{user_name}</span></span></span>}
-                {on_logout && <button className="tree-row" onClick={on_logout}>Sign out</button>}
+                {on_logout && <button className="tree-row" onClick={on_logout}>{labels.sign_out}</button>}
               </div>
             )}
-            {settings && <FootLink href={settings.href} current={settings.active ?? active === "settings"} icon={<CogIcon />} label="Settings" on_open={settings.on_open} />}
+            {settings && <FootLink href={settings.href} current={settings.active ?? active === "settings"} icon={<CogIcon />} label={labels.settings} on_open={settings.on_open} />}
           </div>
           {sidebar_width && width !== undefined && (
             <ResizeHandle
@@ -292,7 +333,7 @@ export function Shell({
               default_size={sidebar_width.default_width}
               on_resize={(next) => change_width(next, false)}
               on_resize_end={(next) => change_width(next, true)}
-              label="Resize the sidebar"
+              label={labels.resize_sidebar}
               class_name="sidebar-resize"
             />
           )}
