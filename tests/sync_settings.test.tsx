@@ -6,7 +6,7 @@ import { afterEach, expect, test } from "vitest";
 import type { CertificateClient } from "../src/certificate_protocol.ts";
 import type { SyncCredentials, SyncDeviceClient, SyncStatus } from "../src/sync_protocol.ts";
 import { Dialogs } from "../src/web/react/dialog.tsx";
-import { SyncSettings } from "../src/web/react/sync_settings.tsx";
+import { SyncButton, SyncSettings } from "../src/web/react/sync_settings.tsx";
 
 afterEach(cleanup);
 
@@ -93,4 +93,32 @@ test("offers to trust a server's self-signed certificate when connecting fails o
   fireEvent.click(await screen.findByRole("button", { name: "Trust this certificate" }));
 
   await waitFor(() => screen.getByText("Signed in as ada"));
+});
+
+test("the sidebar button hides while off, shows what is waiting, syncs on a click and opens the settings when sync fails", async () => {
+  let status: SyncStatus = off;
+  let syncs = 0;
+  let opened = 0;
+  const device: SyncDeviceClient = {
+    get_sync_status: async () => status,
+    connect_sync: async () => status,
+    disconnect_sync: async () => off,
+    sync_now: async () => ((syncs++, status = { ...status, pending_changes: 0 }), status),
+  };
+  let listener = () => {};
+  const { container } = render(<SyncButton device={device} subscribe={(next) => ((listener = next), () => {})} on_open_settings={() => opened++} />);
+  await waitFor(() => expect(container.innerHTML).toBe(""));
+
+  status = { ...off, state: "idle", server_url: "https://fit.example.org/", pending_changes: 3 };
+  listener();
+  fireEvent.click(await screen.findByRole("button", { name: /Synced/ }));
+  expect(screen.getByText("3 pending")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("3 pending")).toBeNull());
+  expect(syncs).toBe(1);
+
+  status = { ...status, state: "failed", error: "Wrong password" };
+  listener();
+  fireEvent.click(await screen.findByRole("button", { name: /Sync failed/ }));
+  expect(opened).toBe(1);
+  expect(syncs).toBe(1);
 });

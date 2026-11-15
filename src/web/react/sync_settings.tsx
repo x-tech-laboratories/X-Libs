@@ -1,6 +1,7 @@
 // The Sync section every app with a sync server shows in its settings: the status, and either who the device is signed
 // in as with Sync now and Stop syncing, or the server's address, a name and password (and the code when asked) and the
 // choice of which copy wins the first time, asked before it replaces anything. It pairs with sync_client, which runs wherever the app keeps its database.
+// SyncButton is the same status as a sidebar row that syncs on a click.
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { CertificateClient } from "../../certificate_protocol.ts";
@@ -126,5 +127,77 @@ export function SyncSettings({ device, subscribe, data_name, placeholder = "http
       )}
       {extra?.(connected ? status.server_url : server_url || status.server_url)}
     </>
+  );
+}
+
+// ── Sidebar button ───────────────────────────────────────────────────────────
+
+const SYNC_STATUS_POLL_MS = 2000;
+
+export interface SyncButtonProps {
+  device: SyncDeviceClient;
+  // Reads the status again whenever it calls back, besides every two seconds; returns how to stop.
+  subscribe?: (listener: () => void) => () => void;
+  // Opens the Sync settings, which a click does when sync failed or needs a choice.
+  on_open_settings: () => void;
+}
+
+const button_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing…", offline: "Offline", needs_setup: "Sync needs setup", failed: "Sync failed" } as const;
+
+// Today's syncs show only the time; older ones show the day too.
+function synced_at_text(iso_time: string): string {
+  if (iso_time === "") return "Not synced yet";
+  const time = new Date(iso_time);
+  const is_today = time.toDateString() === new Date().toDateString();
+  return `Last synced ${is_today ? time.toLocaleTimeString(undefined, { timeStyle: "short" }) : time.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
+}
+
+function SyncIcon({ spinning }: { spinning: boolean }) {
+  return (
+    <svg className={spinning ? "line-icon spinning" : "line-icon"} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" />
+      <path d="M3 21v-5h5" />
+      <path d="M3 12a9 9 0 0 1 15.36-6.36L21 8" />
+      <path d="M21 3v5h-5" />
+    </svg>
+  );
+}
+
+// A sidebar row showing whether this device is synced and how many changes wait to go out; a click syncs now, or opens
+// the settings when sync needs the user. A device that does not sync shows nothing.
+export function SyncButton({ device, subscribe, on_open_settings }: SyncButtonProps) {
+  const [status, set_status] = useState<SyncStatus | null>(null);
+  // Set while a sync asked for here runs, so the button spins before the next status arrives.
+  const [syncing, set_syncing] = useState(false);
+
+  useEffect(() => {
+    const read = () => void device.get_sync_status().then(set_status, () => {});
+    read();
+    const timer = setInterval(read, SYNC_STATUS_POLL_MS);
+    const stop = subscribe?.(read);
+    return () => {
+      clearInterval(timer);
+      stop?.();
+    };
+  }, [device, subscribe]);
+
+  if (!status || status.state === "off") return null;
+  const state = syncing ? "syncing" : status.state;
+  const needs_user = state === "failed" || state === "needs_setup";
+
+  function click(): void {
+    if (needs_user) return on_open_settings();
+    set_syncing(true);
+    void device.sync_now().then(set_status, () => {}).finally(() => set_syncing(false));
+  }
+
+  return (
+    <button type="button" className={needs_user ? "tree-row tone-bad" : "tree-row"} title={[synced_at_text(status.last_synced_at), status.error || `with ${status.server_url}`].join("\n")} disabled={state === "syncing"} onClick={click}>
+      <span className="tree-label">
+        <SyncIcon spinning={state === "syncing"} />
+        <span>{button_text[state]}</span>
+      </span>
+      {status.pending_changes > 0 && <span className="tree-extra">{status.pending_changes} pending</span>}
+    </button>
   );
 }
