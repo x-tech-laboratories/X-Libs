@@ -21,6 +21,17 @@ function is_skipped(name: string): boolean {
   return skipped_folders.has(name) || name.startsWith(".") || name.startsWith("_");
 }
 
+// The text of the page's opening "# heading", after any frontmatter and imports, with its inline code marks dropped.
+export function title_heading(text: string): string | undefined {
+  const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  for (const line of body.split(/\r?\n/)) {
+    if (line.trim() === "" || /^(import|export) /.test(line)) continue;
+    const heading = /^# +(.+?)\s*#*\s*$/.exec(line);
+    return heading ? heading[1].replace(/`/g, "") : undefined;
+  }
+  return undefined;
+}
+
 // Every .md and .mdx file under the folder, as paths with forward slashes, in a steady order, never looking inside
 // node_modules, dist, public or hidden folders.
 export function list_content_files(folder: string, prefix = ""): string[] {
@@ -52,8 +63,10 @@ function last_commit_dates(folder: string): Map<string, string> {
 export function read_content(folder: string, locale_keys: readonly string[], with_dates = false): SourcePage[] {
   const dates = with_dates ? last_commit_dates(folder) : new Map<string, string>();
   return list_content_files(folder).map((id) => {
-    const frontmatter = read_frontmatter(readFileSync(join(folder, id), "utf8"));
-    if (typeof frontmatter.title !== "string") throw new Error(`${id} has no title in its frontmatter.`);
+    const text = readFileSync(join(folder, id), "utf8");
+    const frontmatter = read_frontmatter(text);
+    frontmatter.title ??= title_heading(text);
+    if (typeof frontmatter.title !== "string") throw new Error(`${id} has no title in its frontmatter or a # heading.`);
     return { id, ...place_of_file(id, locale_keys), frontmatter, last_updated: dates.get(id) };
   });
 }

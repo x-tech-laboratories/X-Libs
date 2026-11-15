@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { list_content_files, read_content, read_frontmatter } from "../src/site/content.ts";
+import { list_content_files, read_content, read_frontmatter, title_heading } from "../src/site/content.ts";
 
 let folder = "";
 
@@ -39,10 +39,16 @@ describe("site content", () => {
     ]);
   });
 
+  it("takes a page's title from its opening # heading when its frontmatter has none", () => {
+    expect(title_heading("# RoboBuddy for the `web`\n\nText")).toBe("RoboBuddy for the web");
+    expect(title_heading("---\nsidebar:\n  order: 1\n---\n\nimport A from './a.md';\n\n# Usage #\n")).toBe("Usage");
+    expect(title_heading("Text first\n\n# Too late")).toBeUndefined();
+  });
+
   it("refuses a page with no title", () => {
     folder = mkdtempSync(join(tmpdir(), "x-site-"));
     write("untitled.md", "Text");
 
-    expect(() => read_content(folder, ["root"])).toThrow("untitled.md has no title");
+    expect(() => read_content(folder, ["root"])).toThrow("untitled.md has no title in its frontmatter or a # heading");
   });
 });
