@@ -68,6 +68,17 @@ describe("site page", () => {
     expect(document.querySelector("article")!.hasAttribute("data-pagefind-body")).toBe(true);
   });
 
+  it("links a group's row to its own page and marks it when that page is open", () => {
+    const nav: PageData["nav"] = [{ kind: "group", label: "Guides", href: "/repo/guides/", collapsed: true, items: [{ kind: "link", label: "Alpha", href: "/repo/guides/a/" }] }];
+
+    render(<SitePage page={page_data({ nav, path: "/guides/", href: "/repo/guides/" })} Content={Content} />);
+
+    const row = screen.getAllByRole("link", { name: "Guides" }).find((link) => link.closest("summary"))!;
+    expect(row.getAttribute("href")).toBe("/repo/guides/");
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.closest("details")!.open).toBe(true);
+  });
+
   it("draws a logo that holds the site's name in place of the icon and title", () => {
     const page = page_data();
     render(<SitePage page={{ ...page, site: { ...page.site, logo: "/repo/_x/logo.svg", logo_replaces_title: true } }} Content={Content} />);

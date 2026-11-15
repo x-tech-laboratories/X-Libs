@@ -76,16 +76,16 @@ describe("sidebar", () => {
     const nav = build_sidebar(entries, routes, "root", "/repo/");
 
     expect(nav[0]).toEqual({ kind: "link", label: "Home", href: "/repo/" });
-    expect(nav[1]).toMatchObject({ kind: "group", label: "Guides", collapsed: false });
-    expect(nav[1].kind === "group" && nav[1].items.map((item) => item.label)).toEqual(["Overview", "Zulu", "Alpha", "Bravo"]);
+    expect(nav[1]).toMatchObject({ kind: "group", label: "Guides", href: "/repo/guides/", collapsed: false });
+    expect(nav[1].kind === "group" && nav[1].items.map((item) => item.label)).toEqual(["Zulu", "Alpha", "Bravo"]);
     expect(nav[2]).toEqual({ kind: "group", label: "More", collapsed: true, items: [{ kind: "link", label: "Source", href: "https://example.org/" }] });
   });
 
-  it("nests each subfolder as a group headed by its index page, however deep", () => {
+  it("makes each subfolder a page of its own holding its pages, however deep", () => {
     const deep_pages = [
       page("guides/index.mdx", "root", "guides", { title: "Guides", sidebar: { label: "Overview", order: 0 } }),
       page("guides/setup.mdx", "root", "guides/setup", { title: "Setup" }),
-      page("guides/advanced/index.mdx", "root", "guides/advanced", { title: "Advanced", sidebar: { label: "Overview", order: 0 } }),
+      page("guides/advanced/index.mdx", "root", "guides/advanced", { title: "Advanced", sidebar: { order: 0 } }),
       page("guides/advanced/tuning.mdx", "root", "guides/advanced/tuning", { title: "Tuning" }),
       page("guides/advanced/deep/deeper/last.mdx", "root", "guides/advanced/deep/deeper/last", { title: "Last" }),
       page("guides/advanced/secret.mdx", "root", "guides/advanced/secret", { sidebar: { hidden: true } }),
@@ -94,10 +94,8 @@ describe("sidebar", () => {
 
     const nav = build_sidebar([{ label: "Guides", autogenerate: { directory: "guides" }, collapsed: true }], deep_routes, "root", "/");
 
-    expect(nav).toEqual([{ kind: "group", label: "Guides", collapsed: true, items: [
-      { kind: "link", label: "Overview", href: "/guides/" },
-      { kind: "group", label: "Advanced", collapsed: true, items: [
-        { kind: "link", label: "Overview", href: "/guides/advanced/" },
+    expect(nav).toEqual([{ kind: "group", label: "Guides", href: "/guides/", collapsed: true, items: [
+      { kind: "group", label: "Advanced", href: "/guides/advanced/", collapsed: true, items: [
         { kind: "group", label: "deep", collapsed: true, items: [
           { kind: "group", label: "deeper", collapsed: true, items: [{ kind: "link", label: "Last", href: "/guides/advanced/deep/deeper/last/" }] },
         ] },
@@ -112,8 +110,24 @@ describe("sidebar", () => {
 
     expect(nav[0]).toEqual({ kind: "link", label: "Inicio", href: "/es/" });
     expect(nav[1].kind === "group" && nav[1].items.map((item) => item.kind === "link" && `${item.label} ${item.href}`)).toEqual([
-      "Overview /es/guides/", "Zulu /es/guides/first/", "Alfa /es/guides/a/", "Bravo /es/guides/b/",
+      "Zulu /es/guides/first/", "Alfa /es/guides/a/", "Bravo /es/guides/b/",
     ]);
+  });
+
+  it("takes a page beside a folder of the same name as that folder's page, and a folder page with nothing under it as a link", () => {
+    const sibling_routes = plan_routes([
+      page("notes/plants.mdx", "root", "notes/plants", { title: "Plants" }),
+      page("notes/plants/ferns.mdx", "root", "notes/plants/ferns", { title: "Ferns" }),
+      page("notes/empty/index.mdx", "root", "notes/empty", { title: "Empty" }),
+      page("notes/empty/secret.mdx", "root", "notes/empty/secret", { sidebar: { hidden: true } }),
+    ], ["root"]);
+
+    const nav = build_sidebar([{ label: "Notes", autogenerate: { directory: "notes" } }], sibling_routes, "root", "/");
+
+    expect(nav).toEqual([{ kind: "group", label: "Notes", collapsed: false, items: [
+      { kind: "link", label: "Empty", href: "/notes/empty/" },
+      { kind: "group", label: "Plants", href: "/notes/plants/", collapsed: false, items: [{ kind: "link", label: "Ferns", href: "/notes/plants/ferns/" }] },
+    ] }]);
   });
 
   it("refuses a page that does not exist", () => {
@@ -123,7 +137,7 @@ describe("sidebar", () => {
   it("finds the pages before and after one, skipping other sites", () => {
     const nav = build_sidebar(entries, routes, "root", "/");
 
-    expect(neighbours(nav, "/guides/first/")).toEqual({ previous: { label: "Overview", href: "/guides/" }, next: { label: "Alpha", href: "/guides/a/" } });
+    expect(neighbours(nav, "/guides/first/")).toEqual({ previous: { label: "Guides", href: "/guides/" }, next: { label: "Alpha", href: "/guides/a/" } });
     expect(neighbours(nav, "/guides/b/").next).toBeUndefined();
     expect(neighbours(nav, "/nowhere/")).toEqual({});
   });

@@ -188,9 +188,10 @@ export function plan_routes(pages: readonly SourcePage[], locale_keys: readonly 
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
+// A group with an `href` is a page of its own whose row also folds its children, as a folder is in a notes tree.
 export type NavItem =
   | { kind: "link"; label: string; href: string }
-  | { kind: "group"; label: string; items: NavItem[]; collapsed: boolean };
+  | { kind: "group"; label: string; href?: string; items: NavItem[]; collapsed: boolean };
 
 function label_in(entry: Labelled, locale: string, fallback: string): string {
   return entry.translations?.[locale] ?? entry.label ?? fallback;
@@ -204,8 +205,20 @@ function title_of(route: Route): string {
 export function build_sidebar(entries: readonly SidebarEntry[], routes: readonly Route[], locale: string, base: string): NavItem[] {
   const own_routes = routes.filter((route) => route.locale === locale);
   const by_slug = new Map(own_routes.map((route) => [route.slug, route]));
+  const shown = (slug: string): Route | undefined => {
+    const route = by_slug.get(slug);
+    return route && !route.page.frontmatter.sidebar?.hidden ? route : undefined;
+  };
 
   const link_to = (route: Route, label?: string): NavItem => ({ kind: "link", label: label ?? title_of(route), href: with_base(base, route.path) });
+
+  // A folder's row, linking to its own page when it has one, or that page alone when nothing is under it.
+  const folder = (directory: string, label: string, collapsed: boolean): NavItem => {
+    const own = shown(directory);
+    const items = folder_items(directory, collapsed);
+    if (own && items.length === 0) return link_to(own, label);
+    return { kind: "group", label, ...(own && { href: with_base(base, own.path) }), items, collapsed };
+  };
 
   const resolve = (entry: SidebarEntry): NavItem[] => {
     if ("link" in entry) return [{ kind: "link", label: label_in(entry, locale, entry.link), href: with_base(base, entry.link) }];
@@ -216,26 +229,27 @@ export function build_sidebar(entries: readonly SidebarEntry[], routes: readonly
     }
     if ("items" in entry) return [{ kind: "group", label: label_in(entry, locale, ""), items: entry.items.flatMap(resolve), collapsed: entry.collapsed ?? false }];
     const directory = entry.autogenerate.directory.replace(/^\/|\/$/g, "");
-    const collapsed = entry.collapsed ?? false;
-    return [{ kind: "group", label: label_in(entry, locale, directory), items: folder_items(directory, collapsed), collapsed }];
+    return [folder(directory, label_in(entry, locale, directory), entry.collapsed ?? false)];
   };
 
-  // A folder's own pages as links and each subfolder as a nested group, however deep, sorted together.
+  // A folder's pages and subfolders sorted together, a subfolder placed and labelled by its own page, however deep.
   const folder_items = (directory: string, collapsed: boolean): NavItem[] => {
     const prefix = directory === "" ? "" : `${directory}/`;
-    const places: { order: number; title: string; item: NavItem }[] = [];
     const subfolders = new Set<string>();
     for (const route of own_routes) {
-      if (route.page.frontmatter.sidebar?.hidden) continue;
-      if (route.slug !== directory && !route.slug.startsWith(prefix)) continue;
-      const rest = route.slug === directory ? "" : route.slug.slice(prefix.length);
-      if (rest === "" || (!rest.includes("/") && !is_index(route))) places.push({ order: order_of(route), title: title_of(route), item: link_to(route) });
-      else subfolders.add(rest.split("/")[0]);
+      const rest = route.slug.startsWith(prefix) ? route.slug.slice(prefix.length) : "";
+      if (rest.includes("/") && !route.page.frontmatter.sidebar?.hidden) subfolders.add(rest.split("/")[0]);
+    }
+    const places: { order: number; title: string; item: NavItem }[] = [];
+    for (const route of own_routes) {
+      if (route.page.frontmatter.sidebar?.hidden || route.slug === directory || !route.slug.startsWith(prefix)) continue;
+      const rest = route.slug.slice(prefix.length);
+      if (!rest.includes("/") && !subfolders.has(rest)) places.push({ order: order_of(route), title: title_of(route), item: link_to(route) });
     }
     for (const name of subfolders) {
-      const index = by_slug.get(`${prefix}${name}`);
-      const label = index && is_index(index) ? (index.page.frontmatter.title ?? name) : name;
-      places.push({ order: Number.MAX_SAFE_INTEGER, title: label, item: { kind: "group", label, items: folder_items(`${prefix}${name}`, collapsed), collapsed } });
+      const own = shown(`${prefix}${name}`);
+      const label = own ? title_of(own) : name;
+      places.push({ order: own ? order_of(own) : Number.MAX_SAFE_INTEGER, title: label, item: folder(`${prefix}${name}`, label, collapsed) });
     }
     places.sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
     return places.map((place) => place.item);
@@ -244,17 +258,16 @@ export function build_sidebar(entries: readonly SidebarEntry[], routes: readonly
   return entries.flatMap(resolve);
 }
 
-function is_index(route: Route): boolean {
-  return /(^|\/)index\.mdx?$/.test(route.page.id);
-}
-
 function order_of(route: Route): number {
   return route.page.frontmatter.sidebar?.order ?? Number.MAX_SAFE_INTEGER;
 }
 
 // The sidebar's links in reading order.
 export function nav_links(items: readonly NavItem[]): { label: string; href: string }[] {
-  return items.flatMap((item) => (item.kind === "link" ? [{ label: item.label, href: item.href }] : nav_links(item.items)));
+  return items.flatMap((item) => {
+    if (item.kind === "link") return [{ label: item.label, href: item.href }];
+    return [...(item.href ? [{ label: item.label, href: item.href }] : []), ...nav_links(item.items)];
+  });
 }
 
 // The pages before and after one in the sidebar's reading order, skipping links that leave the site.

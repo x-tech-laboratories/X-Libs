@@ -250,13 +250,13 @@ function PageFoot({ page, t }: { page: PageData; t: Translate }) {
   );
 }
 
-// The sidebar's links, groups folding open, the one holding the page you are on always open.
+// The sidebar's links, groups folding open from the arrow before their label, the one holding the page you are on always open.
 export function SiteNav({ items, current }: { items: NavItem[]; current: string }) {
   return <div className="site-nav">{items.map((item, index) => <NavEntry key={index} item={item} current={current} />)}</div>;
 }
 
 function holds(item: NavItem, href: string): boolean {
-  return item.kind === "link" ? item.href === href : item.items.some((inner) => holds(inner, href));
+  return item.href === href || (item.kind === "group" && item.items.some((inner) => holds(inner, href)));
 }
 
 function NavEntry({ item, current }: { item: NavItem; current: string }) {
@@ -270,7 +270,11 @@ function NavEntry({ item, current }: { item: NavItem; current: string }) {
   }
   return (
     <details className="site-nav-group" open={!item.collapsed || holds(item, current)}>
-      <summary className="site-nav-heading">{item.label}</summary>
+      <summary className="site-nav-heading">
+        {item.href
+          ? <a href={item.href} aria-current={item.href === current ? "page" : undefined}>{item.label}</a>
+          : <span>{item.label}</span>}
+      </summary>
       <div className="site-nav-items">{item.items.map((inner, index) => <NavEntry key={index} item={inner} current={current} />)}</div>
     </details>
   );
