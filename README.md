@@ -392,14 +392,16 @@ npm run lint
 `npm pack` and `npm publish` build first.
 
 An app whose flake packages npm dependencies calls `.github/workflows/npm-deps-hash.yml` from its own `ci.yml`. It
-checks each package's npm deps hash against `package-lock.json`, pushes a refreshed hash to a pull request's branch, and
-fails with the right hash on `main` or a fork's pull request:
+checks each package's npm deps hash against `package-lock.json`, pushes a refreshed hash to a pull request's branch and
+runs `ci.yml` again on it, and fails with the right hash on `main` or a fork's pull request. `ci.yml` lists
+`workflow_dispatch` among its triggers so it can be run again:
 
 ```yaml
   npm-deps-hash:
     uses: x-tech-laboratories/X-Libs/.github/workflows/npm-deps-hash.yml@main
     permissions:
       contents: write
+      actions: write
 ```
 
 ## License

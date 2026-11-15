@@ -1,6 +1,7 @@
 # Checks every flake package's npm deps hash against package-lock.json. A pull request from a branch of the same repo
-# gets a stale hash refreshed in its .nix file and pushed back; anywhere else a stale hash fails with the right one.
-# An app calls it from its ci.yml as a job of its own, granting `contents: write`.
+# gets a stale hash refreshed in its .nix file and pushed back, then the calling workflow run again on it, since a push
+# by the workflow's token starts no run; anywhere else a stale hash fails with the right one. An app calls it from its
+# ci.yml as a job of its own, granting `contents: write` and `actions: write`, with `workflow_dispatch` among its triggers.
 name: npm deps hash
 
 on:
@@ -11,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,6 +41,8 @@ jobs:
         env:
           SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
           HEAD_REF: ${{ github.head_ref }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if git diff --quiet; then exit 0; fi
@@ -51,3 +55,6 @@ jobs:
           git config user.email "41898341+github-actions[bot]@users.noreply.github.com"
           git commit -qam "build(nix): refresh the npm deps hash"
           git push origin "HEAD:refs/heads/$HEAD_REF"
+          # The calling workflow's file, from owner/repo/.github/workflows/ci.yml@ref.
+          workflow=${WORKFLOW_REF#*/*/}
+          gh workflow run "${workflow%%@*}" --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
