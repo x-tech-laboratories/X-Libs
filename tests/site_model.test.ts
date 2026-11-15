@@ -81,6 +81,32 @@ describe("sidebar", () => {
     expect(nav[2]).toEqual({ kind: "group", label: "More", collapsed: true, items: [{ kind: "link", label: "Source", href: "https://example.org/" }] });
   });
 
+  it("nests each subfolder as a group headed by its index page, however deep", () => {
+    const deep_pages = [
+      page("guides/index.mdx", "root", "guides", { title: "Guides", sidebar: { label: "Overview", order: 0 } }),
+      page("guides/setup.mdx", "root", "guides/setup", { title: "Setup" }),
+      page("guides/advanced/index.mdx", "root", "guides/advanced", { title: "Advanced", sidebar: { label: "Overview", order: 0 } }),
+      page("guides/advanced/tuning.mdx", "root", "guides/advanced/tuning", { title: "Tuning" }),
+      page("guides/advanced/deep/deeper/last.mdx", "root", "guides/advanced/deep/deeper/last", { title: "Last" }),
+      page("guides/advanced/secret.mdx", "root", "guides/advanced/secret", { sidebar: { hidden: true } }),
+    ];
+    const deep_routes = plan_routes(deep_pages, ["root"]);
+
+    const nav = build_sidebar([{ label: "Guides", autogenerate: { directory: "guides" }, collapsed: true }], deep_routes, "root", "/");
+
+    expect(nav).toEqual([{ kind: "group", label: "Guides", collapsed: true, items: [
+      { kind: "link", label: "Overview", href: "/guides/" },
+      { kind: "group", label: "Advanced", collapsed: true, items: [
+        { kind: "link", label: "Overview", href: "/guides/advanced/" },
+        { kind: "group", label: "deep", collapsed: true, items: [
+          { kind: "group", label: "deeper", collapsed: true, items: [{ kind: "link", label: "Last", href: "/guides/advanced/deep/deeper/last/" }] },
+        ] },
+        { kind: "link", label: "Tuning", href: "/guides/advanced/tuning/" },
+      ] },
+      { kind: "link", label: "Setup", href: "/guides/setup/" },
+    ] }]);
+  });
+
   it("labels and links a locale's sidebar in that locale", () => {
     const nav = build_sidebar(entries, routes, "es", "/");
 
