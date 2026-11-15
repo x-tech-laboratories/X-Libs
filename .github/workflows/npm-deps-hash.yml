@@ -1,0 +1,53 @@
+# Checks every flake package's npm deps hash against package-lock.json. A pull request from a branch of the same repo
+# gets a stale hash refreshed in its .nix file and pushed back; anywhere else a stale hash fails with the right one.
+# An app calls it from its ci.yml as a job of its own, granting `contents: write`.
+name: npm deps hash
+
+on:
+  workflow_call:
+
+jobs:
+  npm-deps-hash:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: cachix/install-nix-action@v31
+      - name: Refresh stale hashes
+        run: |
+          set -euo pipefail
+          packages=$(nix eval --raw .#packages.x86_64-linux --apply 'packages: builtins.concatStringsSep " " (builtins.filter (name: packages.${name} ? npmDeps) (builtins.attrNames packages))')
+          for package in $packages; do
+            # Several packages can share one hash, and a package can be stale again after another's refresh.
+            for attempt in 1 2 3; do
+              if nix build --no-link ".#packages.x86_64-linux.$package.npmDeps" 2> build.log; then break; fi
+              specified=$(grep -oP 'specified:\s+\Ksha256-\S+' build.log | head -1 || true)
+              got=$(grep -oP 'got:\s+\Ksha256-\S+' build.log | head -1 || true)
+              if [ -z "$specified" ] || [ -z "$got" ]; then cat build.log; exit 1; fi
+              files=$(git grep -l -F "$specified" -- '*.nix' || true)
+              if [ -z "$files" ]; then echo "::error::$package: no .nix file holds $specified"; exit 1; fi
+              sed -i "s|$specified|$got|g" $files
+              echo "::warning::$package: the npm deps hash was stale; it is now $got in $files"
+            done
+          done
+          rm -f build.log
+      - name: Push the refreshed hashes
+        env:
+          SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then exit 0; fi
+          git diff
+          if [ "$SAME_REPO" != true ]; then
+            echo "::error::The npm deps hash is stale; set the hash above in the .nix file shown."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898341+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "build(nix): refresh the npm deps hash"
+          git push origin "HEAD:refs/heads/$HEAD_REF"
