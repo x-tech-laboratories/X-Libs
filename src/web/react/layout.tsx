@@ -1,7 +1,8 @@
 // The pieces a page is laid out with: the page heading, panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings pages and rows, and list row buttons.
 
-import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useState, type MouseEvent, type ReactNode } from "react";
 import type { Tone } from "./badges.tsx";
+import { Outline } from "./outline.tsx";
 
 export { moved } from "../tables.ts";
 
@@ -296,18 +297,16 @@ function section_anchor(id: string): string {
   return `settings-${id}`;
 }
 
-// How far below the top of the outline a section's heading may sit and still count as the one being read.
-const CURRENT_SECTION_SLACK_PX = 48;
-
-// How long a jump from the outline may take before the outline follows scrolling again.
-const JUMP_TIMEOUT_MS = 1000;
-
 // Every setting under its category's heading, with an outline beside them that jumps to a section and marks the one being read.
 export function SettingsPage({ categories }: { categories: SettingsCategory[] }) {
+  const outline = categories.map((category) => ({
+    heading: category.heading,
+    items: category.sections.map((section) => ({ target: section_anchor(section.id), label: section.heading })),
+  }));
   return (
     <div className="settings-page">
       <div className="settings-layout">
-        <SettingsOutline categories={categories} />
+        <Outline groups={outline} label="Settings sections" class_name="settings-outline" />
         <div className="settings-sections">
           {categories.map((category) => (
             <section key={category.heading} className="settings-category">
@@ -322,85 +321,6 @@ export function SettingsPage({ categories }: { categories: SettingsCategory[] })
         </div>
       </div>
     </div>
-  );
-}
-
-function SettingsOutline({ categories }: { categories: SettingsCategory[] }) {
-  const ids = categories.flatMap((category) => category.sections.map((section) => section.id));
-  const [current_id, set_current_id] = useState<string | undefined>(ids[0]);
-  const outline = useRef<HTMLElement>(null);
-  const is_jumping = useRef(false);
-  const jump_timer = useRef<number>(undefined);
-  const ids_key = ids.join(" ");
-
-  useEffect(() => {
-    // The section being read is the last one whose heading has reached the top of the outline, or the last one once scrolled to the end.
-    function follow_scroll(event: Event): void {
-      if (is_jumping.current || !outline.current || outline.current.contains(event.target as Node)) return;
-      const top = outline.current.getBoundingClientRect().top + CURRENT_SECTION_SLACK_PX;
-      const scroller = event.target instanceof Element ? event.target : document.scrollingElement;
-      const is_at_end = scroller !== null && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
-
-      let reached = ids[0];
-      for (const id of ids) {
-        const element = document.getElementById(section_anchor(id));
-        if (element && element.getBoundingClientRect().top <= top) reached = id;
-      }
-      set_current_id(is_at_end ? ids.at(-1) : reached);
-    }
-
-    function end_jump(): void {
-      is_jumping.current = false;
-    }
-
-    document.addEventListener("scroll", follow_scroll, { capture: true, passive: true });
-    document.addEventListener("scrollend", end_jump, { capture: true });
-    return () => {
-      document.removeEventListener("scroll", follow_scroll, { capture: true });
-      document.removeEventListener("scrollend", end_jump, { capture: true });
-      window.clearTimeout(jump_timer.current);
-    };
-  }, [ids_key]);
-
-  // An outline taller than the window scrolls itself to keep the current section's link in view.
-  useEffect(() => {
-    const nav = outline.current;
-    const link = nav?.querySelector<HTMLElement>("[aria-current]");
-    if (!nav || !link) return;
-    if (link.offsetTop < nav.scrollTop) nav.scrollTop = link.offsetTop;
-    else if (link.offsetTop + link.offsetHeight > nav.scrollTop + nav.clientHeight) nav.scrollTop = link.offsetTop + link.offsetHeight - nav.clientHeight;
-  }, [current_id]);
-
-  function jump_to(id: string): void {
-    set_current_id(id);
-    is_jumping.current = true;
-    window.clearTimeout(jump_timer.current);
-    jump_timer.current = window.setTimeout(() => (is_jumping.current = false), JUMP_TIMEOUT_MS);
-    document.getElementById(section_anchor(id))?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }
-
-  return (
-    <nav ref={outline} className="settings-outline" aria-label="Settings sections">
-      {categories.map((category) => (
-        <div key={category.heading} className="settings-outline-category">
-          <span className="settings-outline-heading">{category.heading}</span>
-          {category.sections.map((section) => (
-            <a
-              key={section.id}
-              href={`#${section_anchor(section.id)}`}
-              className="settings-outline-link"
-              aria-current={section.id === current_id ? "location" : undefined}
-              onClick={(event) => {
-                event.preventDefault();
-                jump_to(section.id);
-              }}
-            >
-              {section.heading}
-            </a>
-          ))}
-        </div>
-      ))}
-    </nav>
   );
 }
 
