@@ -407,8 +407,9 @@ so it reads without JavaScript and its search, outline, menus and theme work wit
 - **Moved pages**: `redirects` maps old addresses, such as a Jekyll site's `/guide.html`, to new ones with small pages
   that send the reader on.
 - **More files**: `files` adds generated ones, such as JSON made from the site's data.
-- **GitHub's own Markdown**: alerts such as `> [!TIP]` show as asides, so a page reads the same on GitHub and on the
-  site; links that start at the root move under the base in Markdown and in a component's `href` or `src`.
+- **GitHub's own Markdown**: alerts such as `> [!TIP]` show as asides and raw HTML such as a table of pictures is
+  kept, so a page reads the same on GitHub and on the site; a page with no `title` takes its opening `# heading`, which
+  is then not drawn twice, so an MDX page can show a README with `import Readme from "../README.md"`; links that start at the root move under the base in Markdown and in a component's `href` or `src`.
 - **Pages beside a package**: the scan skips `node_modules`, `dist`, `public` and hidden folders, so a site can live in
   an app's `docs/` folder with a `package.json` of its own.
 
@@ -429,7 +430,7 @@ export default define_site({
 
 `x-libs-site dev` serves it with live reloading (search needs a build), `x-libs-site build` writes `dist/` and
 `x-libs-site preview` serves that. The site installs `react`, `react-dom`, `vite`, `@mdx-js/rollup`, `remark-gfm`,
-`remark-frontmatter`, `rehype-slug`, `rehype-autolink-headings`, `shiki`, `@shikijs/rehype`, `unist-util-visit`, `yaml` and
+`remark-frontmatter`, `rehype-raw`, `rehype-slug`, `rehype-autolink-headings`, `shiki`, `@shikijs/rehype`, `unist-util-visit`, `yaml` and
 `pagefind`, the optional peers the build uses, and ignores the `.x-site/` folder the build writes its entries to. A GitHub
 Actions job runs `npm ci` and `npm run build` with `fetch-depth: 0`, for the dates, and uploads `dist/` with
 `actions/upload-pages-artifact`.

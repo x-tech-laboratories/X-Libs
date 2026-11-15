@@ -1,12 +1,13 @@
-// How a site's Markdown and MDX become pages, on MDX's own compiler: GitHub's tables, task lists, autolinks and
-// alerts, frontmatter kept out of the page, an id and an anchor link on every heading, code coloured by Shiki through Halon's
+// How a site's Markdown and MDX become pages, on MDX's own compiler: GitHub's tables, task lists, autolinks, alerts
+// and raw HTML, frontmatter and a leading title heading kept out of the page, an id and an anchor link on every heading, code coloured by Shiki through Halon's
 // tokens, and links within the site moved under its base.
 
 import mdx from "@mdx-js/rollup";
 import rehype_shiki from "@shikijs/rehype";
 import type { Element, Root } from "hast";
-import type { Blockquote, Root as MarkdownRoot } from "mdast";
+import type { Blockquote, Heading, Root as MarkdownRoot } from "mdast";
 import rehype_autolink_headings from "rehype-autolink-headings";
+import rehype_raw from "rehype-raw";
 import rehype_slug from "rehype-slug";
 import remark_frontmatter from "remark-frontmatter";
 import remark_gfm from "remark-gfm";
@@ -74,11 +75,25 @@ export function remark_github_alerts() {
   };
 }
 
+// A page's opening "# heading" is its title, which the site draws above the page, so it is not drawn twice; this lets
+// a README with no frontmatter be a page as it is.
+export function remark_drop_title_heading() {
+  return (tree: MarkdownRoot): void => {
+    const index = tree.children.findIndex((node) => !["yaml", "toml", "mdxjsEsm"].includes(node.type));
+    const first = tree.children[index];
+    if (first?.type === "heading" && (first as Heading).depth === 1) tree.children.splice(index, 1);
+  };
+}
+
+// MDX's own nodes, which raw HTML parsing must pass through untouched.
+const mdx_node_types = ["mdxFlowExpression", "mdxJsxFlowElement", "mdxJsxTextElement", "mdxTextExpression", "mdxjsEsm"];
+
 export function mdx_plugin(base: string): Plugin {
   return mdx({
     jsxImportSource: "react",
-    remarkPlugins: [remark_frontmatter, remark_gfm, remark_github_alerts],
+    remarkPlugins: [remark_frontmatter, remark_drop_title_heading, remark_gfm, remark_github_alerts],
     rehypePlugins: [
+      [rehype_raw, { passThrough: mdx_node_types }],
       rehype_slug,
       [rehype_autolink_headings, { behavior: "append", properties: { className: ["heading-anchor"], ariaHidden: "true", tabIndex: -1, dataPagefindIgnore: "" }, content: { type: "text", value: "#" } }],
       [rehype_shiki, { theme: halon_code_theme, defaultLanguage: "text", fallbackLanguage: "text" }],
