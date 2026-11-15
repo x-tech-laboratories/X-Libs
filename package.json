@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.48.0",
+  "version": "0.50.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -18,7 +18,8 @@
   ],
   "bin": {
     "x-libs-bundle-migrations": "dist/drizzle_migrations.js",
-    "x-libs-icons": "dist/app_icons.js"
+    "x-libs-icons": "dist/app_icons.js",
+    "x-libs-site": "dist/site/cli.js"
   },
   "exports": {
     "./*": {
@@ -41,13 +42,24 @@
     "@fastify/session": "^11.1.6",
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
+    "@mdx-js/rollup": "^3.1.1",
     "@modelcontextprotocol/server": "^2.4.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@shikijs/rehype": "^4.6.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "fastify": "^5.12.7",
     "nodemailer": "^10.3.1",
+    "pagefind": "^1.6.0",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-slug": "^6.0.0",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.6.0",
+    "unist-util-visit": "^5.2.0",
+    "vite": "^8.3.8",
+    "yaml": "^2.9.1"
   },
   "peerDependenciesMeta": {
     "@capacitor/core": {
@@ -74,10 +86,16 @@
     "@fastify/websocket": {
       "optional": true
     },
+    "@mdx-js/rollup": {
+      "optional": true
+    },
     "@modelcontextprotocol/server": {
       "optional": true
     },
     "@resvg/resvg-js": {
+      "optional": true
+    },
+    "@shikijs/rehype": {
       "optional": true
     },
     "@sqlite.org/sqlite-wasm": {
@@ -89,10 +107,37 @@
     "nodemailer": {
       "optional": true
     },
+    "pagefind": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },
     "react-dom": {
+      "optional": true
+    },
+    "rehype-autolink-headings": {
+      "optional": true
+    },
+    "rehype-slug": {
+      "optional": true
+    },
+    "remark-frontmatter": {
+      "optional": true
+    },
+    "remark-gfm": {
+      "optional": true
+    },
+    "shiki": {
+      "optional": true
+    },
+    "unist-util-visit": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "yaml": {
       "optional": true
     }
   },
@@ -105,11 +150,14 @@
     "@fastify/session": "^11.1.6",
     "@fastify/static": "^10.1.10",
     "@fastify/websocket": "^11.3.5",
+    "@mdx-js/rollup": "^3.1.1",
     "@modelcontextprotocol/server": "^2.4.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@shikijs/rehype": "^4.6.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
+    "@types/hast": "^3.0.5",
     "@types/node": "^24.19.2",
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
@@ -120,10 +168,19 @@
     "jsdom": "^31.0.0",
     "nodemailer": "^10.3.1",
     "oxlint": "^1.90.0",
+    "pagefind": "^1.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-slug": "^6.0.0",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.6.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "unist-util-visit": "^5.2.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
   },
   "dependencies": {
     "@inquirer/password": "^5.2.5",

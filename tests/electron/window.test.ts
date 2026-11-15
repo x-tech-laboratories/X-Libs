@@ -15,6 +15,7 @@ class FakeWindow implements BrowserWindowLike {
   shown = false;
   loaded = "";
   background = "";
+  menu_removed = false;
   navigate_handler: ((event: NavigationEventLike, url: string) => void) | undefined;
   webContents = {
     setWindowOpenHandler: (handler: (details: { url: string }) => { action: "deny" }) => { this.open_handler = handler; },
@@ -33,6 +34,7 @@ class FakeWindow implements BrowserWindowLike {
   once(event: string, listener: () => void) { this.on(event, listener); }
   emit(event: string) { for (const listener of this.listeners.get(event) ?? []) listener(); }
   show() { this.shown = true; }
+  removeMenu() { this.menu_removed = true; }
   maximize() { this.maximized = true; }
   isMaximized() { return this.maximized; }
   getNormalBounds() { return this.bounds; }
@@ -197,6 +199,11 @@ describe("create_window", () => {
 
     expect(window.options.webPreferences.backgroundThrottling).toBe(false);
     expect(window.options.titleBarStyle).toBe("hiddenInset");
+  });
+
+  test("drops the menu bar unless asked to keep it", () => {
+    expect(open().window.menu_removed).toBe(true);
+    expect(open({ more: { menu_bar: true } }).window.menu_removed).toBe(false);
   });
 
   test("runs the write guard before each save, and skips a save it refuses", () => {
