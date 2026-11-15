@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import { parse as parse_yaml } from "yaml";
 import { place_of_file, type Frontmatter, type SourcePage } from "./model.ts";
 
@@ -14,11 +14,22 @@ export function read_frontmatter(text: string): Frontmatter {
   return parsed !== null && typeof parsed === "object" ? (parsed as Frontmatter) : {};
 }
 
-// Every .md and .mdx file under the folder, as paths with forward slashes, in a steady order.
-export function list_content_files(folder: string): string[] {
-  const files = readdirSync(folder, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.mdx?$/.test(entry.name))
-    .map((entry) => relative(folder, join(entry.parentPath, entry.name)).split(sep).join("/"));
+// Folders that never hold pages, so a site can keep its package, build and public files beside its pages.
+const skipped_folders = new Set(["node_modules", "dist", "public"]);
+
+function is_skipped(name: string): boolean {
+  return skipped_folders.has(name) || name.startsWith(".") || name.startsWith("_");
+}
+
+// Every .md and .mdx file under the folder, as paths with forward slashes, in a steady order, never looking inside
+// node_modules, dist, public or hidden folders.
+export function list_content_files(folder: string, prefix = ""): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(join(folder, prefix), { withFileTypes: true })) {
+    const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory() && !is_skipped(entry.name)) files.push(...list_content_files(folder, path));
+    else if (entry.isFile() && /\.mdx?$/.test(entry.name)) files.push(path);
+  }
   return files.sort();
 }
 

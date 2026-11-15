@@ -404,7 +404,13 @@ so it reads without JavaScript and its search, outline, menus and theme work wit
   German, Portuguese and Italian, and `ui` adds or overrides them; `hreflang` links tie the versions together.
 - **GitHub Pages**: `base` for a project site under `/<repo>/`, moving every link that starts at the root; `404.html`,
   `sitemap.xml`, canonical and Open Graph tags, `.nojekyll`, an "Edit this page" link and the last commit date of each page.
+- **Moved pages**: `redirects` maps old addresses, such as a Jekyll site's `/guide.html`, to new ones with small pages
+  that send the reader on.
 - **More files**: `files` adds generated ones, such as JSON made from the site's data.
+- **GitHub's own Markdown**: alerts such as `> [!TIP]` show as asides, so a page reads the same on GitHub and on the
+  site; links that start at the root move under the base in Markdown and in a component's `href` or `src`.
+- **Pages beside a package**: the scan skips `node_modules`, `dist`, `public` and hidden folders, so a site can live in
+  an app's `docs/` folder with a `package.json` of its own.
 
 ```ts
 // site.config.ts
