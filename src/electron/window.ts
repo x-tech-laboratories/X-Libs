@@ -1,4 +1,4 @@
-// An Electron app's main window: links and pages of other sites open in the browser, the background follows the system theme, and its size and place are remembered.
+// An Electron app's main window: links and pages of other sites open in the browser, the background follows the system theme, its size and place are remembered, and it has no File/Edit/View menu bar.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -41,6 +41,7 @@ export interface BrowserWindowLike {
   on(event: string, listener: () => void): unknown;
   once(event: string, listener: () => void): unknown;
   show(): void;
+  removeMenu(): void;
   maximize(): void;
   isMaximized(): boolean;
   getNormalBounds(): Rectangle;
@@ -95,6 +96,8 @@ export interface WindowOptions {
   // Whether timers slow down while the window is hidden; a player turns this off to keep time.
   background_throttling?: boolean;
   title_bar_style?: "default" | "hidden" | "hiddenInset";
+  // Keeps Electron's default File/Edit/View menu bar, which the window drops otherwise since the page has its own controls.
+  menu_bar?: boolean;
   // Runs before every write of the state file, such as the app's write guard; a throw skips that save.
   before_write?: (path: string) => void;
   save_delay_ms?: number;
@@ -190,6 +193,8 @@ export function create_window<Window extends BrowserWindowLike>(
     ...(options.title_bar_style ? { titleBarStyle: options.title_bar_style } : {}),
     webPreferences: { preload: options.preload, sandbox: options.sandbox ?? false, contextIsolation: true, nodeIntegration: false, backgroundThrottling: options.background_throttling ?? true },
   });
+
+  if (!options.menu_bar) window.removeMenu();
 
   window.once("ready-to-show", () => {
     if (saved?.is_maximized) window.maximize();
