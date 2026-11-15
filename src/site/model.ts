@@ -90,6 +90,8 @@ export interface SiteConfig {
   theme_key?: string;
   // Turns the search off.
   search?: boolean;
+  // Old addresses that move to new ones, both inside the site, such as { "/guide.html": "/guide/" }.
+  redirects?: Record<string, string>;
   // More files for the built site, such as JSON made from the site's data.
   files?: () => ExtraFile[] | Promise<ExtraFile[]>;
 }

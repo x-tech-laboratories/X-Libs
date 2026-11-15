@@ -20,12 +20,16 @@ describe("site content", () => {
     expect(read_frontmatter("# Just text")).toEqual({});
   });
 
-  it("lists the Markdown and MDX files in order and places each in its locale", () => {
+  it("lists the Markdown and MDX files in order, skipping packages, public and hidden folders, and places each in its locale", () => {
     folder = mkdtempSync(join(tmpdir(), "x-site-"));
     write("index.mdx", "---\ntitle: Home\n---\n");
     write("guides/b.md", "---\ntitle: B\n---\n");
     write("es/index.mdx", "---\ntitle: Inicio\n---\n");
     write("guides/notes.txt", "not a page");
+    write("node_modules/pkg/README.md", "---\ntitle: Package\n---\n");
+    write("public/assets/notes.md", "---\ntitle: Asset\n---\n");
+    write(".github/pull.md", "---\ntitle: Hidden\n---\n");
+    write("_drafts/next.md", "---\ntitle: Draft\n---\n");
 
     expect(list_content_files(folder)).toEqual(["es/index.mdx", "guides/b.md", "index.mdx"]);
     expect(read_content(folder, ["root", "es"]).map((page) => [page.id, page.locale, page.slug, page.frontmatter.title])).toEqual([

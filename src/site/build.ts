@@ -253,6 +253,12 @@ function sitemap(project: SiteProject, routes: Route[]): string | undefined {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
 }
 
+// A page that sends the reader on to where the old address moved, kept out of search.
+export function redirect_html(target: string): string {
+  const address = escape_html(target);
+  return `<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>Moved</title>\n<meta name="robots" content="noindex">\n<link rel="canonical" href="${address}">\n<meta http-equiv="refresh" content="0; url=${address}">\n</head>\n<body>\n<p>This page moved to <a href="${address}">${address}</a>.</p>\n</body>\n</html>\n`;
+}
+
 function output_file(out_folder: string, path: string): string {
   return path.endsWith("/") ? join(out_folder, path, "index.html") : join(out_folder, path);
 }
@@ -292,6 +298,9 @@ export async function build_site(root: string, log: (line: string) => void = con
   if (map) write_file(join(project.out_folder, "sitemap.xml"), map);
   // GitHub Pages would hide the folders whose names start with an underscore, such as _x, without this.
   write_file(join(project.out_folder, ".nojekyll"), "");
+  for (const [from, to] of Object.entries(project.config.redirects ?? {})) {
+    write_file(output_file(project.out_folder, from), redirect_html(with_base(project.base, to)));
+  }
   for (const extra of (await project.config.files?.()) ?? []) write_file(join(project.out_folder, extra.path), extra.content);
   log(`Wrote ${plan.routes.length} pages to ${relative(process.cwd(), project.out_folder) || "."}.`);
 
@@ -332,6 +341,12 @@ export async function serve_site(root: string, port: number): Promise<void> {
       write_entries(project, plan);
 
       const route = plan.routes.find((candidate) => candidate.path === path);
+      const moved_to = project.config.redirects?.[path];
+      if (!route && moved_to !== undefined) {
+        response.statusCode = 301;
+        response.setHeader("Location", with_base(project.base, moved_to));
+        return response.end();
+      }
       if (!route) {
         if (!path.endsWith("/") && extname(path) === "" && plan.routes.some((candidate) => candidate.path === `${path}/`)) {
           response.statusCode = 301;
