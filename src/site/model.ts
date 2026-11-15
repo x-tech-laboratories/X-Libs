@@ -212,12 +212,36 @@ export function build_sidebar(entries: readonly SidebarEntry[], routes: readonly
     }
     if ("items" in entry) return [{ kind: "group", label: label_in(entry, locale, ""), items: entry.items.flatMap(resolve), collapsed: entry.collapsed ?? false }];
     const directory = entry.autogenerate.directory.replace(/^\/|\/$/g, "");
-    const inside = own_routes.filter((route) => (route.slug === directory || route.slug.startsWith(`${directory}/`)) && !route.page.frontmatter.sidebar?.hidden);
-    inside.sort((left, right) => order_of(left) - order_of(right) || title_of(left).localeCompare(title_of(right)));
-    return [{ kind: "group", label: label_in(entry, locale, directory), items: inside.map((route) => link_to(route)), collapsed: entry.collapsed ?? false }];
+    const collapsed = entry.collapsed ?? false;
+    return [{ kind: "group", label: label_in(entry, locale, directory), items: folder_items(directory, collapsed), collapsed }];
+  };
+
+  // A folder's own pages as links and each subfolder as a nested group, however deep, sorted together.
+  const folder_items = (directory: string, collapsed: boolean): NavItem[] => {
+    const prefix = directory === "" ? "" : `${directory}/`;
+    const places: { order: number; title: string; item: NavItem }[] = [];
+    const subfolders = new Set<string>();
+    for (const route of own_routes) {
+      if (route.page.frontmatter.sidebar?.hidden) continue;
+      if (route.slug !== directory && !route.slug.startsWith(prefix)) continue;
+      const rest = route.slug === directory ? "" : route.slug.slice(prefix.length);
+      if (rest === "" || (!rest.includes("/") && !is_index(route))) places.push({ order: order_of(route), title: title_of(route), item: link_to(route) });
+      else subfolders.add(rest.split("/")[0]);
+    }
+    for (const name of subfolders) {
+      const index = by_slug.get(`${prefix}${name}`);
+      const label = index && is_index(index) ? (index.page.frontmatter.title ?? name) : name;
+      places.push({ order: Number.MAX_SAFE_INTEGER, title: label, item: { kind: "group", label, items: folder_items(`${prefix}${name}`, collapsed), collapsed } });
+    }
+    places.sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+    return places.map((place) => place.item);
   };
 
   return entries.flatMap(resolve);
+}
+
+function is_index(route: Route): boolean {
+  return /(^|\/)index\.mdx?$/.test(route.page.id);
 }
 
 function order_of(route: Route): number {

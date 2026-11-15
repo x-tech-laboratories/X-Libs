@@ -396,8 +396,8 @@ so it reads without JavaScript and its search, outline, menus and theme work wit
   landing page with a `hero` (title, tagline, image, actions); `sidebar.order`, `sidebar.label` and `sidebar.hidden` place a
   page; `toc: false` hides its outline. MDX imports `Card`, `CardGrid`, `LinkCard` and `Aside` from `web/react/site`, and the
   site's own React components.
-- **Sidebar**: links, pages by slug, groups and whole folders (`autogenerate`), each label with `translations`; previous and
-  next links follow its order.
+- **Sidebar**: links, pages by slug, groups and whole folders (`autogenerate`, each subfolder a nested group under its
+  index page's title, however deep), each label with `translations`; previous and next links follow its order.
 - **Search**: a Pagefind index per language, its results by page and by heading; Ctrl+K or "/" opens it.
 - **Languages**: `locales` by key, `root` at the top and the others under `/<key>/`; a page missing in a language is shown in
   the default one with a notice and left out of that language's search; the frame's words come in English, Spanish, French,
