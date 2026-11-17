@@ -230,12 +230,12 @@ export function FacetPane({
   }
 
   return (
-    <section className="facet-pane" aria-label={label} style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, height: "100%" }}>
+    <section className="scroll-pane" aria-label={label}>
       <div className="panel-head">
         {heading}
         {values.length > 0 && <span className="muted small">{labels.summary(selected.length, values.length)}</span>}
       </div>
-      <div ref={scroller} style={{ minHeight: 0, overflowY: "auto" }} onScroll={row_height === undefined ? undefined : measure}>
+      <div ref={scroller} className="scroll-pane-body" onScroll={row_height === undefined ? undefined : measure}>
         {body}
       </div>
     </section>

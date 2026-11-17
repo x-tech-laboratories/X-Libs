@@ -79,6 +79,17 @@ describe("merge grid", () => {
     expect(survivors.map((button) => button.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
   });
 
+  it("marks the survivor's column and the picked cells with Halon's classes", () => {
+    render(<Merging />);
+
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((header) => header.classList.contains("picked-column"))).toEqual([false, true, false, false]);
+    const year_cells = [...row_of("Year").querySelectorAll("td")];
+    expect(year_cells.map((cell) => cell.className)).toEqual(["picked-column picked", "", ""]);
+    expect(row_of("Title").querySelector("td")!.className).toBe("muted picked-column");
+    expect(within(row_of("Year")).getAllByRole("button").every((button) => button.className === "cell-button")).toBe(true);
+  });
+
   it("offers buttons only where the records disagree and says Empty for a missing value", () => {
     render(<Merging />);
 

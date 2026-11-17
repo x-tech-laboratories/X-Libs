@@ -27,26 +27,29 @@ interface CoverProps {
   src: string | null | undefined;
   // Words for screen readers, left empty for a cover beside the title that already names it.
   alt?: string;
-  // Width over height, square unless given; the cover fills the width it is given.
+  // Width over height, square unless given.
   aspect?: string;
+  // Halon's fixed width of 48, 96 or 160 pixels; the cover fills the width it is given when left out.
+  size?: "small" | "medium" | "large";
   // What shows when there is no picture or it fails to load, such as a music note icon.
   placeholder?: ReactNode;
 }
 
 // An album's or film's picture, holding its place while it loads and showing the placeholder when there is none.
-export function Cover({ src, alt = "", aspect = "1", placeholder }: CoverProps) {
+export function Cover({ src, alt = "", aspect, size, placeholder }: CoverProps) {
   const [broken, set_broken] = useState<string | null>(null);
   const loading = src === undefined;
   const shown = typeof src === "string" && src !== "" && src !== broken;
   const named_blank = !shown && alt !== "";
   return (
     <span
-      className="media-picture cover" style={{ "--media-aspect": aspect } as CSSProperties} aria-busy={loading || undefined}
+      className={size ? `media-picture cover cover-${size}` : "media-picture cover"}
+      style={aspect === undefined ? undefined : { "--media-aspect": aspect } as CSSProperties} aria-busy={loading || undefined}
       role={named_blank ? "img" : undefined} aria-label={named_blank ? alt : undefined}
     >
       {shown
         ? <img src={src} alt={alt} loading="lazy" onError={() => set_broken(src)} />
-        : <span className="media-blank" style={{ display: "grid", placeItems: "center" }} aria-hidden="true">{!loading && placeholder}</span>}
+        : <span className="media-blank" aria-hidden="true">{!loading && placeholder}</span>}
     </span>
   );
 }

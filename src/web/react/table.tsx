@@ -78,6 +78,8 @@ interface DataTableProps<Row> {
   fill_last_column?: boolean;
   // Classes added to the .table-wrap, such as Halon's scroll or sticky-head.
   wrap_class?: string;
+  // Keeps every row one line high, cutting long text off with an ellipsis, as a virtual table's fixed row height needs; pair it with Halon's fit or set widths.
+  single_line?: boolean;
 
   // One sorting or several, the first deciding first; without on_sort or on_sorting_change it is where the table's own sorting starts.
   sorting?: Sorting | Sorting[];
@@ -855,7 +857,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     <>
       <div
         ref={wrap}
-        className={cx("table-wrap", props.virtual && "virtual", props.wrap_class)}
+        className={cx("table-wrap", props.virtual && "virtual", props.single_line && "single-line", props.wrap_class)}
         style={props.virtual ? { overflowY: "auto" } : undefined}
         onScroll={line_height === undefined ? undefined : measure}
       >

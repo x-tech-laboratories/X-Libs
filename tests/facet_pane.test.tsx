@@ -70,6 +70,16 @@ describe("facet pane", () => {
     expect(screen.getByText("4 values")).toBeTruthy();
   });
 
+  it("lays out as Halon's scroll pane, the head above a body that scrolls", () => {
+    render(<Picking />);
+
+    const pane = screen.getByRole("region", { name: "Genre" });
+    expect(pane.className).toBe("scroll-pane");
+    expect(pane.getAttribute("style")).toBeNull();
+    expect([...pane.children].map((child) => child.className)).toEqual(["panel-head", "scroll-pane-body"]);
+    expect(pane.querySelector(".scroll-pane-body")!.getAttribute("style")).toBeNull();
+  });
+
   it("picks by plain, Ctrl and Shift clicks, and All clears", () => {
     const on_change = vi.fn();
     render(<Picking on_change={on_change} />);

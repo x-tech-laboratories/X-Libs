@@ -1,6 +1,7 @@
 // A merge grid: records side by side, one row per field, each disagreement settled by picking the value that wins.
 
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { cx } from "../dom.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ export function MergeGrid<Item>({
             {items.map((item, index) => {
               const key = keys[index]!;
               return (
-                <th key={key} scope="col">
+                <th key={key} scope="col" className={survivor === key ? "picked-column" : undefined}>
                   <div>{item_heading(item, index)}</div>
                   {item_detail && <div className="muted small">{item_detail(item)}</div>}
                   <div className="panel-tools">
@@ -180,11 +181,12 @@ export function MergeGrid<Item>({
                 {items.map((item, index) => {
                   const key = keys[index]!;
                   const value_text = text(field.value(item));
-                  if (!conflict) return <td key={key} className="muted" title={value_text}><ValueText text={value_text} empty={labels.empty} /></td>;
+                  const column_class = survivor === key ? "picked-column" : undefined;
+                  if (!conflict) return <td key={key} className={cx("muted", column_class)} title={value_text}><ValueText text={value_text} empty={labels.empty} /></td>;
                   return (
-                    <td key={key} className={winner === key ? "picked" : undefined}>
+                    <td key={key} className={cx(column_class, winner === key && "picked") || undefined}>
                       <button
-                        type="button" aria-pressed={winner === key} title={value_text || labels.empty}
+                        type="button" className="cell-button" aria-pressed={winner === key} title={value_text || labels.empty}
                         data-merge-row={row_index} data-merge-column={index}
                         onClick={() => pick(field, { kind: "value", from: key })}
                       >

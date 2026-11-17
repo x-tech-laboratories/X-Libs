@@ -619,4 +619,10 @@ describe("wrap class", () => {
 
     expect(container.querySelector(".table-wrap")!.className).toBe("table-wrap scroll sticky-head");
   });
+
+  it("keeps the rows one line high with Halon's single-line on single_line", () => {
+    const { container } = render(<DataTable columns={columns} rows={[]} wrap_class="fit" single_line />);
+
+    expect(container.querySelector(".table-wrap")!.className).toBe("table-wrap single-line fit");
+  });
 });
