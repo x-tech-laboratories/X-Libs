@@ -79,6 +79,13 @@ export function plural(count: number, word: string): string {
   return `${count.toLocaleString()} ${word}${plurals.select(count) === "one" ? "" : "s"}`;
 }
 
+const whole = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
+
+// A count in full with its thousands separated, such as "60,000".
+export function format_count(count: number): string {
+  return whole.format(count);
+}
+
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
 // A count in a few characters, such as "1.4M", "150K" or "950".
