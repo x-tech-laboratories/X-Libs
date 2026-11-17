@@ -51,4 +51,16 @@ describe("format_clock", () => {
     expect(format_clock(undefined, "—")).toBe("—");
     expect(format_clock(Number.NaN, "—")).toBe("—");
   });
+
+  it("writes hours under an hour when asked to always", () => {
+    expect(format_clock(187_000, { hours: "always" })).toBe("0:03:07");
+    expect(format_clock(3_723_400, { hours: "always" })).toBe("1:02:03");
+    expect(format_clock(0, { hours: "always" })).toBe("0:00:00");
+    expect(format_clock(187_000, { hours: "auto" })).toBe("3:07");
+  });
+
+  it("takes the empty text among the options too", () => {
+    expect(format_clock(null, { empty: "—", hours: "always" })).toBe("—");
+    expect(format_clock(null, {})).toBe("0:00");
+  });
 });

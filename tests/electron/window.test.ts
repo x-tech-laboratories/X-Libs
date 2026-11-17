@@ -1,9 +1,10 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { create_window, is_app_page, is_external_link, type WindowOptions, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type NavigationEventLike, type Rectangle } from "../../src/electron/window.ts";
+import { create_window, halon_background, HALON_BACKGROUND, is_app_page, read_halon_background, is_external_link, type WindowOptions, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type NavigationEventLike, type Rectangle } from "../../src/electron/window.ts";
 
 // A stand-in for BrowserWindow that records what it was asked and lets a test fire its events.
 class FakeWindow implements BrowserWindowLike {
@@ -89,7 +90,7 @@ describe("create_window", () => {
   test("opens at the default size, hidden until ready, and loads the built page", () => {
     const { window } = open();
 
-    expect(window.options).toMatchObject({ title: "X-Notes", width: 1100, height: 700, minWidth: 640, minHeight: 400, show: false, backgroundColor: "#f5f6f8" });
+    expect(window.options).toMatchObject({ title: "X-Notes", width: 1100, height: 700, minWidth: 640, minHeight: 400, show: false, backgroundColor: "#f1f5f9" });
     expect(window.options.webPreferences).toEqual({ preload: "/app/preload.mjs", sandbox: false, contextIsolation: true, nodeIntegration: false, backgroundThrottling: true });
     expect(window.options.titleBarStyle).toBeUndefined();
     expect(window.options.x).toBeUndefined();
@@ -151,11 +152,11 @@ describe("create_window", () => {
 
   test("follows the system theme until the window closes", () => {
     const { window, native_theme } = open({ dark: true });
-    expect(window.options.backgroundColor).toBe("#0f1115");
+    expect(window.options.backgroundColor).toBe("#060b14");
 
     native_theme.shouldUseDarkColors = false;
     for (const listener of native_theme.listeners) listener();
-    expect(window.background).toBe("#f5f6f8");
+    expect(window.background).toBe("#f1f5f9");
 
     window.emit("closed");
     expect(native_theme.listeners.size).toBe(0);
@@ -218,5 +219,22 @@ describe("create_window", () => {
 
     expect(guarded).toEqual([state_file, state_file]);
     expect(JSON.parse(readFileSync(state_file, "utf8")).is_maximized).toBe(false);
+  });
+});
+
+describe("Halon's background", () => {
+  test("reads each scheme's root surface from Halon's token sheet", () => {
+    const sheet = `:root {\n  --surface-root: #ffffff;\n}\n@media (prefers-color-scheme: dark) {\n  :root:not([data-theme="light"]) { --surface-root: #111111; }\n}\n:root[data-theme="dark"] {\n  --surface-root: #000000;\n}`;
+
+    expect(read_halon_background(sheet)).toEqual({ light: "#ffffff", dark: "#000000" });
+    expect(read_halon_background(":root { --surface-root: #ffffff; }")).toBeNull();
+    expect(read_halon_background("")).toBeNull();
+  });
+
+  test("takes the installed Halon's colours, which the fallback matches", () => {
+    const sheet = readFileSync(createRequire(import.meta.url).resolve("@x-tech-laboratories/halon/halon-tokens.css"), "utf8");
+
+    expect(halon_background()).toEqual(read_halon_background(sheet));
+    expect(HALON_BACKGROUND).toEqual(read_halon_background(sheet));
   });
 });

@@ -1,6 +1,7 @@
-// An Electron app's main window: links and pages of other sites open in the browser, the background follows the system theme, its size and place are remembered, and it has no File/Edit/View menu bar.
+// An Electron app's main window: links and pages of other sites open in the browser, the background is Halon's and follows the system theme, its size and place are remembered, and it has no File/Edit/View menu bar.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -89,8 +90,8 @@ export interface WindowOptions {
   external_schemes?: string[];
   // Lets a remembered place that is on no screen now fall back to the default.
   screen?: ScreenLike;
-  // The background behind the page before it paints, for light and dark themes.
-  background?: { light: string; dark: string };
+  // The background behind the page before it paints, for light and dark themes; Halon's root surface unless given.
+  background?: WindowBackground;
   // An ES module preload needs the sandbox off.
   sandbox?: boolean;
   // Whether timers slow down while the window is hidden; a player turns this off to keep time.
@@ -108,8 +109,41 @@ export interface WindowState {
   is_maximized: boolean;
 }
 
-const DEFAULT_BACKGROUND = { light: "#f5f6f8", dark: "#0f1115" };
+export interface WindowBackground {
+  light: string;
+  dark: string;
+}
+
 const DEFAULT_SAVE_DELAY_MS = 500;
+
+// ── Halon's background ───────────────────────────────────────────────────────
+
+// Halon's root surface as its token sheet had it when this was released, for an app that does not install the sheet.
+export const HALON_BACKGROUND: WindowBackground = { light: "#f1f5f9", dark: "#060b14" };
+
+const surface_root = /--surface-root:\s*([^;]+);/;
+
+// The root surface of each scheme in Halon's token sheet, or null when the sheet does not name both.
+export function read_halon_background(token_sheet: string): WindowBackground | null {
+  const dark_rules = token_sheet.indexOf(':root[data-theme="dark"]');
+  const light = surface_root.exec(token_sheet)?.[1]?.trim();
+  const dark = dark_rules === -1 ? undefined : surface_root.exec(token_sheet.slice(dark_rules))?.[1]?.trim();
+  return light && dark ? { light, dark } : null;
+}
+
+let installed_background: WindowBackground | undefined;
+
+// Read from the Halon the app installs, so the window matches the page's own background, and once per run.
+export function halon_background(): WindowBackground {
+  if (installed_background) return installed_background;
+  try {
+    const sheet = createRequire(import.meta.url).resolve("@x-tech-laboratories/halon/halon-tokens.css");
+    installed_background = read_halon_background(readFileSync(sheet, "utf8")) ?? HALON_BACKGROUND;
+  } catch {
+    installed_background = HALON_BACKGROUND;
+  }
+  return installed_background;
+}
 
 // ── State file ───────────────────────────────────────────────────────────────
 
@@ -174,7 +208,7 @@ export function create_window<Window extends BrowserWindowLike>(
   BrowserWindow: new (options: BrowserWindowOptionsLike) => Window,
   options: WindowOptions,
 ): Window {
-  const background = options.background ?? DEFAULT_BACKGROUND;
+  const background = options.background ?? halon_background();
   const background_color = () => options.native_theme.shouldUseDarkColors ? background.dark : background.light;
   const saved = options.state_file ? read_window_state(options.state_file) : null;
   const on_a_screen = saved && (!options.screen || options.screen.getAllDisplays().some((display) => overlaps(saved.bounds, display.workArea)));
