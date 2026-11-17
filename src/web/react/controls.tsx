@@ -41,9 +41,11 @@ interface SwitchProps {
   // Resolves false, or throws, when the change did not take, which flips the switch back.
   on_change: (on: boolean) => Promise<boolean | void> | boolean | void;
   disabled?: boolean;
+  // Shows the label beside the switch; otherwise it only names the switch to screen readers.
+  show_label?: boolean;
 }
 
-export function Switch({ label, checked, on_change, disabled = false }: SwitchProps) {
+export function Switch({ label, checked, on_change, disabled = false, show_label = false }: SwitchProps) {
   const [busy, set_busy] = useState(false);
 
   async function change(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -60,7 +62,9 @@ export function Switch({ label, checked, on_change, disabled = false }: SwitchPr
     }
   }
 
-  return <input type="checkbox" role="switch" aria-label={label} checked={checked} disabled={disabled || busy} onChange={change} />;
+  const box = <input type="checkbox" role="switch" aria-label={show_label ? undefined : label} checked={checked} disabled={disabled || busy} onChange={change} />;
+  if (!show_label) return box;
+  return <label className="check">{box}<span>{label}</span></label>;
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────────

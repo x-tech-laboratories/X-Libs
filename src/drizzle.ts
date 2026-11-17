@@ -31,6 +31,7 @@ export {
   text,
   unique,
   uniqueIndex,
+  type AnySQLiteColumn,
   type SQLiteTable,
 } from "drizzle-orm/sqlite-core";
 export {

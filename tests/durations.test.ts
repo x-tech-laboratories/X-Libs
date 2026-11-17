@@ -25,6 +25,13 @@ describe("durations", () => {
     expect(format_age(120)).toBe("2 minutes ago");
   });
 
+  it("writes a time under a second as less than one, and none at all as 0 seconds", () => {
+    expect(format_duration(0.4)).toBe("less than a second");
+    expect(format_duration(0.999)).toBe("less than a second");
+    expect(format_age(0.2)).toBe("less than a second ago");
+    expect(format_duration(0)).toBe("0 seconds");
+  });
+
   it("counts weeks and 30-day months", () => {
     expect(format_duration(9 * 86400)).toBe("1 week, 2 days");
     expect(format_duration(35 * 86400)).toBe("1 month, 5 days");

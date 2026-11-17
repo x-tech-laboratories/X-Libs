@@ -1,6 +1,7 @@
 // A speaker button that opens a volume slider; scrolling over it adjusts the volume and a middle-click mutes.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Icon, MuteIcon, VolumeHighIcon, VolumeLowIcon, VolumeOffIcon, type IconGlyph } from "./icons.tsx";
 import { Popover } from "./menus.tsx";
 
 interface VolumeButtonProps {
@@ -12,7 +13,7 @@ interface VolumeButtonProps {
   label?: string;
 }
 
-const speaker_icon = (volume: number): string => volume === 0 ? "🔇" : volume < 34 ? "🔈" : volume < 67 ? "🔉" : "🔊";
+const speaker_icon = (volume: number): IconGlyph => volume === 0 ? MuteIcon : volume < 34 ? VolumeOffIcon : volume < 67 ? VolumeLowIcon : VolumeHighIcon;
 
 export function VolumeButton({ volume, on_change, step = 5, label = "Volume" }: VolumeButtonProps) {
   const [open, set_open] = useState(false);
@@ -60,12 +61,12 @@ export function VolumeButton({ volume, on_change, step = 5, label = "Volume" }: 
         title={`${label} ${volume}% — scroll to adjust, middle-click to mute`}
         onClick={() => { if (Date.now() - closed_at.current > 300) set_open(!open); }}
         onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); toggle_mute(); } }}
-      >{speaker_icon(volume)}</button>
+      ><Icon icon={speaker_icon(volume)} /></button>
 
       {open && (
         <Popover anchor={trigger.current} label={label} on_close={() => { closed_at.current = Date.now(); set_open(false); }}>
           <div className="volume-popover">
-            <button type="button" className="icon" onClick={toggle_mute} aria-label={volume === 0 ? "Unmute" : "Mute"}>{volume === 0 ? "🔇" : "🔊"}</button>
+            <button type="button" className="icon" onClick={toggle_mute} aria-label={volume === 0 ? "Unmute" : "Mute"}><Icon icon={volume === 0 ? MuteIcon : VolumeHighIcon} /></button>
             <input className="seek input-sm" style={{ "--range-progress": `${volume}%` } as CSSProperties} type="range" min={0} max={100} step={step} value={volume} aria-label={label} onChange={(event) => set(Number(event.currentTarget.value))} />
             <span className="volume-percent">{volume}%</span>
           </div>

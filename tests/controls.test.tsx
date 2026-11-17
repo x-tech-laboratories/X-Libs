@@ -3,7 +3,7 @@ import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ColorPicker, CommitInput, DateTimeField, NumberField, PathInput, PeriodStepper, SearchBox, Select, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
+import { ColorPicker, CommitInput, DateTimeField, NumberField, PathInput, PeriodStepper, SearchBox, Select, Switch, TreePicker, TreeSelect } from "../src/web/react/controls.tsx";
 import type { TreeItem } from "../src/web/tree.ts";
 
 afterEach(cleanup);
@@ -109,6 +109,30 @@ describe("SearchBox", () => {
 
     fireEvent.change(field, { target: { value: "" } });
     expect(on_submit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================================
+// Switch
+// ============================================================================
+
+describe("Switch", () => {
+  test("is named for screen readers alone by default", () => {
+    const { container } = render(<Switch label="Follow" checked={false} on_change={() => {}} />);
+
+    expect(screen.getByRole("switch", { name: "Follow" })).toBeTruthy();
+    expect(container.textContent).toBe("");
+  });
+
+  test("shows its label beside it when asked, and a click on the words flips it", () => {
+    const on_change = vi.fn();
+    render(<Switch label="Shuffle" checked={false} on_change={on_change} show_label />);
+
+    fireEvent.click(screen.getByText("Shuffle"));
+
+    expect(screen.getByRole("switch", { name: "Shuffle" })).toBeTruthy();
+    expect(screen.getByText("Shuffle").closest("label")!.className).toBe("check");
+    expect(on_change).toHaveBeenCalledWith(true);
   });
 });
 

@@ -110,7 +110,8 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
     (["insert", "update", "delete"] as const).map((event) => {
       const row = event === "delete" ? "OLD" : "NEW";
       const noted = [...(watch.item_columns ?? []).map((column) => `${row}.${column}`), ...(watch.item_lookup ? [`(${watch.item_lookup(row)})`] : [])];
-      const notes = noted.map((item) => `INSERT OR IGNORE INTO ${pending} SELECT item FROM (SELECT ${item} AS item) WHERE item IS NOT NULL;`).join(" ");
+      // An upsert's own conflict handling overrides OR IGNORE inside its triggers, so an item already noted is skipped by a check.
+      const notes = noted.map((item) => `INSERT INTO ${pending} SELECT item FROM (SELECT ${item} AS item) WHERE item IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${pending} WHERE ${item_column} = item);`).join(" ");
       return { name: `${versions}_${watch.table}_${event}`, sql: `AFTER ${event.toUpperCase()} ON ${watch.table} BEGIN ${notes} END` };
     }),
   );

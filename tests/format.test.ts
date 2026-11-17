@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { age, bytes, compact_count, count_change, duration, plural, size, size_change, until } from "../src/web/format.ts";
+import { age, bytes, compact_count, count_change, duration, format_count, plural, size, size_change, until } from "../src/web/format.ts";
 
 const now = 1_800_000_000;
 
@@ -55,5 +55,11 @@ describe("formatting", () => {
     expect(compact_count(150_000)).toBe("150K");
     expect(compact_count(1_432_912)).toBe("1.4M");
     expect(compact_count(2_000_000_000)).toBe("2B");
+  });
+
+  it("writes a whole count with thousands separated", () => {
+    expect(format_count(950)).toBe("950");
+    expect(format_count(60_000)).toBe("60,000");
+    expect(format_count(1_432_912)).toBe("1,432,912");
   });
 });

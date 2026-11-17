@@ -2,6 +2,7 @@
 
 import { Fragment, useState, type MouseEvent, type ReactNode } from "react";
 import type { Tone } from "./badges.tsx";
+import { format_count } from "../format.ts";
 import { Outline } from "./outline.tsx";
 
 export { moved } from "../tables.ts";
@@ -53,14 +54,17 @@ interface SectionProps {
   tools?: ReactNode;
   class_name?: string;
   on_context_menu?: (event: MouseEvent<HTMLElement>) => void;
+  // The title's heading level, 2 on a page and 3 or 4 inside a dialog or under another section.
+  level?: 2 | 3 | 4;
   children?: ReactNode;
 }
 
-export function Section({ title, tools, class_name, on_context_menu, children }: SectionProps) {
+export function Section({ title, tools, class_name, on_context_menu, level = 2, children }: SectionProps) {
+  const Title = `h${level}` as const;
   return (
     <section className={class_name ? `panel ${class_name}` : "panel"} onContextMenu={on_context_menu}>
       <div className="panel-head">
-        <h2>{title}</h2>
+        <Title>{title}</Title>
         {tools && <div className="panel-tools">{tools}</div>}
       </div>
       {children}
@@ -361,7 +365,7 @@ export function SelectionBar({ count, total, on_clear, on_select_all, children }
   return (
     <div className="selection-bar" role="toolbar" aria-label="Selected rows">
       <button type="button" className="icon remove" aria-label="Clear selection" title="Clear selection (Esc)" onClick={on_clear}>✕</button>
-      <span className="selection-count">{count} selected</span>
+      <span className="selection-count">{format_count(count)} selected</span>
       {count < total && <button type="button" onClick={on_select_all}>Select all</button>}
       <span className="selection-divider" aria-hidden="true" />
       {children}

@@ -152,3 +152,18 @@ test("a row that names its item only through another table records a version of 
     ["created", []],
   ]);
 });
+
+test("an upsert on a watched table records its item, even one already noted, and replaces the triggers an older install left", () => {
+  const database = open();
+  database.exec(`CREATE TABLE task_versions_pending (item_id TEXT PRIMARY KEY) WITHOUT ROWID;
+                 CREATE TRIGGER task_versions_tasks_update AFTER UPDATE ON tasks BEGIN INSERT OR IGNORE INTO task_versions_pending SELECT NEW.id; END;`);
+  history.install(database);
+  database.exec("INSERT INTO tasks VALUES ('a', 'One', NULL)");
+  const upsert = database.prepare("INSERT INTO tasks (id, title) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET title = excluded.title");
+
+  upsert.run("a", "Two");
+  upsert.run("a", "Three");
+  history.record(database);
+
+  expect(history.read_versions(database, "a").map((version) => [version.kind, version.snapshot.title])).toEqual([["created", "Three"]]);
+});

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { describe_error } from "../src/web/errors.ts";
+import { describe_call_error, describe_error } from "../src/web/errors.ts";
 
 describe("describe_error", () => {
   test("gives an Error's message, or its name when the message is empty", () => {
@@ -18,5 +18,13 @@ describe("describe_error", () => {
     expect(describe_error("just words")).toBe("just words");
     expect(describe_error({ reason: "odd" })).toBe('{"reason":"odd"}');
     expect(describe_error(undefined)).toBe("Unknown error");
+  });
+});
+
+describe("describe_call_error", () => {
+  test("describes anything thrown without Electron's remote-method prefix", () => {
+    expect(describe_call_error(new Error("Error invoking remote method 'x_music:play': Error: file is gone"))).toBe("file is gone");
+    expect(describe_call_error("Error invoking remote method 'x_music:scan': busy")).toBe("busy");
+    expect(describe_call_error({ code: 7 })).toBe("Error 7");
   });
 });

@@ -63,6 +63,13 @@ describe("panels and settings", () => {
     expect(on_context_menu).toHaveBeenCalled();
   });
 
+  test("a section's title is a second-level heading unless a level is given", () => {
+    render(<><Section title="Folders">Body</Section><Section title="Advanced" level={3}>More</Section></>);
+
+    expect(screen.getByRole("heading", { level: 2, name: "Folders" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Advanced" })).toBeTruthy();
+  });
+
   test("a settings group takes any heading, and a row a class", () => {
     render(<SettingsGroup heading={<em>Views</em>}><SettingRow label="Order" class_name="list-row">x</SettingRow></SettingsGroup>);
 
@@ -146,6 +153,12 @@ describe("SelectionBar", () => {
 
     rerender(<SelectionBar count={5} total={5} on_clear={on_clear} on_select_all={on_select_all}><button>Delete</button></SelectionBar>);
     expect(screen.queryByRole("button", { name: "Select all" })).toBeNull();
+  });
+
+  test("separates the thousands of a large count", () => {
+    render(<SelectionBar count={60000} total={60000} on_clear={() => {}} on_select_all={() => {}}>{null}</SelectionBar>);
+
+    expect(screen.getByRole("toolbar", { name: "Selected rows" }).textContent).toContain("60,000 selected");
   });
 });
 

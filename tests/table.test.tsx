@@ -406,6 +406,17 @@ describe("table on its own", () => {
     rerender(<DataTable columns={plain} rows={[]} groups={[{ key: "all", label: "All", rows: tasks }]} />);
     expect(screen.queryByRole("button", { name: "Group rows" })).toBeNull();
   });
+
+  it("groups 60,000 rows in a moment", () => {
+    const rows: Task[] = Array.from({ length: 60_000 }, (_, index) => ({ id: `r${index}`, title: index % 2 === 0 ? "Even" : "Odd", size: index }));
+    const by_title: TableColumn<Task>[] = [{ label: "Title", cell: (task) => task.title }, { label: "Size", cell: (task) => task.size ?? "" }];
+    const started = performance.now();
+
+    render(<DataTable columns={by_title} rows={rows} row_key={(task) => task.id} group_by="Title" virtual={{ row_height: 40 }} />);
+
+    expect(document.querySelector(".group-row")!.textContent).toBe("Even30000");
+    expect(performance.now() - started).toBeLessThan(4000);
+  });
 });
 
 // ============================================================================
@@ -556,6 +567,21 @@ describe("table virtual rows", () => {
     expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
   });
 
+  it("measures a drawn row when the app gives no row height", () => {
+    const measure = vi.spyOn(HTMLTableRowElement.prototype, "getBoundingClientRect").mockReturnValue({ top: 0, height: 50, bottom: 50, left: 0, right: 200, width: 200, x: 0, y: 0, toJSON: () => ({}) });
+    try {
+      render(<DataTable columns={columns} rows={many} row_key={(task) => task.id} manual_sorting virtual={{ overscan: 2 }} on_row_key_down={() => {}} />);
+      const wrap = scroller(5000);
+
+      fireEvent.scroll(wrap);
+
+      expect(drawn_keys()).toEqual(Array.from({ length: 12 }, (_, index) => `r${98 + index}`));
+      expect(spacers()).toEqual(["4900px", `${(1000 - 110) * 50}px`]);
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
   it("draws every row as a card on phones unless a card height is given", () => {
     const before = window.matchMedia;
     window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
@@ -563,6 +589,24 @@ describe("table virtual rows", () => {
       render(virtual_table("r0"));
       expect(drawn_keys()).toHaveLength(1000);
       expect(spacers()).toEqual([]);
+    } finally {
+      window.matchMedia = before;
+    }
+  });
+});
+
+describe("table tools on phones", () => {
+  it("gives the tools a line of their own above the cards, where on a wide page they sit over the heading band", () => {
+    const tools = () => document.querySelector<HTMLElement>(".table-tools")!;
+    render(<DataTable columns={columns} rows={tasks} />);
+    expect(tools().style.height).toBe("");
+    cleanup();
+
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    try {
+      render(<DataTable columns={columns} rows={tasks} />);
+      expect(tools().style.height).toBe("auto");
     } finally {
       window.matchMedia = before;
     }

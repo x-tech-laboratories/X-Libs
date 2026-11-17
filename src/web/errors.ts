@@ -28,3 +28,11 @@ export function describe_error(error: unknown): string {
     return String(error);
   }
 }
+
+// Electron's wrapping of a failed call, which electron/bridge's clean_error_message strips too.
+const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )?/;
+
+// describe_error's words without Electron's "Error invoking remote method" wrapping, for a failed call shown to the user.
+export function describe_call_error(error: unknown): string {
+  return describe_error(error).replace(REMOTE_ERROR_PREFIX, "");
+}
