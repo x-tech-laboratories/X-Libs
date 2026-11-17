@@ -781,6 +781,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     if (height > 0 && Math.abs(height - measured_height) > 0.25) set_measured_height(height);
   });
   const head = useRef<HTMLTableSectionElement>(null);
+  const tools_box = useRef<HTMLDivElement>(null);
   const [view, set_view] = useState({ top: 0, height: 0 });
   const rows_focused = useRef(false);
   const measure = () => {
@@ -795,7 +796,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     return () => observer.disconnect();
   }, [line_height === undefined]);
 
-  const head_height = head.current?.offsetHeight ?? 0;
+  // Phones hide the heading band, so there the tools' own line sits above the rows instead.
+  const head_height = (head.current?.offsetHeight ?? 0) + (phone ? tools_box.current?.offsetHeight ?? 0 : 0);
   const viewport = view.height || window.innerHeight;
   const windowed = line_height === undefined ? undefined : virtual_window(lines.length, line_height, view.top - head_height, Math.max(line_height, viewport - head_height), props.virtual!.overscan);
   const active_index = props.active_row === undefined ? -1 : lines.findIndex((line) => line.kind === "row" && line.key === String(props.active_row));
@@ -857,9 +859,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         style={props.virtual ? { overflowY: "auto" } : undefined}
         onScroll={line_height === undefined ? undefined : measure}
       >
-        {/* The tools take no height of their own and sit over the right end of the heading band. */}
+        {/* The tools sit over the right end of the heading band, and on a phone, where it is hidden, on a line of their own above the first card. */}
         {tools && (
-          <div className="table-tools">
+          <div ref={tools_box} className="table-tools" style={phone ? { height: "auto" } : undefined}>
             <span className="table-tools-inner">
               {can_clear && <button type="button" aria-label="Clear filters" title="Clear filters" onClick={clear_filters}>Clear</button>}
               {group_choices.length > 0 && (

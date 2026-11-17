@@ -595,6 +595,24 @@ describe("table virtual rows", () => {
   });
 });
 
+describe("table tools on phones", () => {
+  it("gives the tools a line of their own above the cards, where on a wide page they sit over the heading band", () => {
+    const tools = () => document.querySelector<HTMLElement>(".table-tools")!;
+    render(<DataTable columns={columns} rows={tasks} />);
+    expect(tools().style.height).toBe("");
+    cleanup();
+
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    try {
+      render(<DataTable columns={columns} rows={tasks} />);
+      expect(tools().style.height).toBe("auto");
+    } finally {
+      window.matchMedia = before;
+    }
+  });
+});
+
 describe("wrap class", () => {
   it("adds the app's classes to the table's wrapper, such as Halon's scroll", () => {
     const { container } = render(<DataTable columns={columns} rows={[]} wrap_class="scroll sticky-head" />);
