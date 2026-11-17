@@ -537,7 +537,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const by_words = new Map<string, Row[]>();
     for (const row of data) {
       const words = text(row);
-      by_words.set(words, [...(by_words.get(words) ?? []), row]);
+      const members = by_words.get(words);
+      if (members) members.push(row);
+      else by_words.set(words, [row]);
     }
     const value = sort_values.get(group_by);
     const down = sorting.find((key) => key.key === group_by)?.descending ?? false;

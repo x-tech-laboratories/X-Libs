@@ -406,6 +406,17 @@ describe("table on its own", () => {
     rerender(<DataTable columns={plain} rows={[]} groups={[{ key: "all", label: "All", rows: tasks }]} />);
     expect(screen.queryByRole("button", { name: "Group rows" })).toBeNull();
   });
+
+  it("groups 60,000 rows in a moment", () => {
+    const rows: Task[] = Array.from({ length: 60_000 }, (_, index) => ({ id: `r${index}`, title: index % 2 === 0 ? "Even" : "Odd", size: index }));
+    const by_title: TableColumn<Task>[] = [{ label: "Title", cell: (task) => task.title }, { label: "Size", cell: (task) => task.size ?? "" }];
+    const started = performance.now();
+
+    render(<DataTable columns={by_title} rows={rows} row_key={(task) => task.id} group_by="Title" virtual={{ row_height: 40 }} />);
+
+    expect(document.querySelector(".group-row")!.textContent).toBe("Even30000");
+    expect(performance.now() - started).toBeLessThan(4000);
+  });
 });
 
 // ============================================================================
