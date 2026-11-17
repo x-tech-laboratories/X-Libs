@@ -28,9 +28,10 @@ export function parse_duration(value: unknown, key: string): number {
   return Math.floor(seconds);
 }
 
-// The two largest whole units, such as "1 day, 2 hours" or, with a space between, "1 week 2 days".
+// The two largest whole units, such as "1 day, 2 hours" or, with a space between, "1 week 2 days"; "less than a second" below one.
 export function format_duration(seconds: number, wording: DurationWording = {}): string {
-  if (seconds < 1) return "0 seconds";
+  if (seconds <= 0) return "0 seconds";
+  if (seconds < 1) return "less than a second";
   const first_unit = unit_names.findIndex(([name]) => name === (wording.largest_unit ?? "months"));
   const parts: Partial<Record<DurationUnit, number>> = {};
   let remaining = Math.floor(seconds);
