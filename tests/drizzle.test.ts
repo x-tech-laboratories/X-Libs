@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { asc, eq, migrate_drizzle, open_drizzle, primaryKey, real, sqliteTable, synced_tables, text, type DrizzleMigration } from "../src/drizzle.ts";
+import { asc, eq, getTableConfig, migrate_drizzle, open_drizzle, primaryKey, real, sqliteTable, synced_tables, text, type AnySQLiteColumn, type DrizzleMigration } from "../src/drizzle.ts";
 import { bundle_migrations, read_migrations } from "../src/drizzle_migrations.ts";
 import { migrate, type SqlDatabase } from "../src/sql.ts";
 import { create_sync_engine } from "../src/sync_engine.ts";
@@ -18,6 +18,8 @@ const readings = sqliteTable(
   (table) => [primaryKey({ columns: [table.metric_id, table.day] })],
 );
 const notes = sqliteTable("notes", { text: text() });
+// A table whose rows point at rows of the same table, which needs the column type spelled out.
+const folders = sqliteTable("folders", { id: text().primaryKey(), parent_id: text().references((): AnySQLiteColumn => folders.id) });
 
 // What drizzle-kit writes for the two tables, one statement per breakpoint.
 const start_migration: DrizzleMigration = {
@@ -51,6 +53,10 @@ async function exercise(database: SqlDatabase): Promise<void> {
 }
 
 describe("drizzle", () => {
+  it("builds a table that points at itself", () => {
+    expect(getTableConfig(folders).foreignKeys[0]!.reference().foreignTable).toBe(folders);
+  });
+
   it("migrates and runs typed queries on node:sqlite", async () => {
     await exercise(new DatabaseSync(":memory:"));
   });
