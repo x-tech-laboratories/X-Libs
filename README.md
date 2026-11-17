@@ -38,6 +38,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/plugins`                      | `PluginSlot` draws what running plugins put in a slot, each part behind react-error-boundary so one that throws is left out alone; `use_plugin_shortcuts` and `plugin_menu_items` for their commands; `PluginSettings`, the settings page's "Plugins" group with a row per plugin showing its version, state, why it waits or failed and its on switch, then its fields as controls, its heading left out with `heading={null}` inside a section that names it; `use_plugins`. |
 | `electron/bridge`                        | `define_bridge`: one method table for the preload, the main process, and a web page's calls to its server; `handle` takes a `trusted` guard on the sender frame and answers in `envelopes`, which the client unwraps into Errors with the message alone, and a plain client strips Electron's remote-method prefix; `to_envelope`; `with_cloneable_arguments` flattens what structured clone refuses, such as a Proxy. |
 | `electron/events`                        | `define_events`: messages the main process pushes to its pages, such as progress, on one channel and subscribed to by name. |
+| `electron/log`, `log_protocol`, `web/page_log` | One log for an Electron app: `create_main_log({ setting, file })` writes `log` records to the terminal, warnings and worse to stderr, and adds them to a file when given one, a file that cannot be written leaving the app running; its `methods` (`PageLogMethods`, named by `page_log_method_names`) are the bridge's calls, `write_log` taking the page's records under `page.<scope>`, checked by `read_page_record`, and `get_log_levels` handing the page the setting; `create_page_log(client)` gives the page `logger(scope)`, whose records follow those levels once `start()` has fetched them, Errors sent with their stack, and reports uncaught errors and rejections until `stop()`. |
 | `electron/app`                           | `hold_single_instance`, `bring_to_front`, and `first_argument` for a link handed over on the command line. |
 | `electron/window`                        | `create_window`: links and other sites open in the browser, and links in the other apps' schemes the app names (`external_schemes`, such as `stremio:`) open in those apps, the background is Halon's root surface and follows the system theme (`halon_background` reads it from the app's installed `@x-tech-laboratories/halon` sheet, falling back to `HALON_BACKGROUND`, and `background` overrides it), and the size and place are remembered, through the app's write guard if it has one; timers can keep running while hidden; Electron's default File/Edit/View menu bar is dropped unless `menu_bar` keeps it. |
 | `electron/fetch`                         | `create_main_fetch` and `create_page_fetch`: the page's requests sent from the main process past cross-origin rules, to an allow-list of hosts, with headers such as `Origin` pinned; `create_main_stream_fetch` and `create_page_stream_fetch` carry the body chunk by chunk over an events channel into a `ReadableStream` body, for a player that reads as it lands, cancelled by the request's signal. |
@@ -359,6 +360,21 @@ certificate_bridge.handle(ipcMain, trust.methods);
 const sync = create_sync_client({ ...options, fetch: trusting_fetch(session, trust) });
 // web page
 <SyncCertificatePrompt device={window.x_sync} certificates={window.x_certificates} />
+```
+
+The page's log lines join the main process's, so one terminal or file shows both in order, at the levels one setting
+gives, such as `X_NOTES_LOG=warn,page:debug`.
+
+```ts
+// shared
+export const log_bridge = define_bridge<PageLogMethods>("x_log", page_log_method_names);
+// main
+const main_log = create_main_log({ setting: process.env.X_NOTES_LOG, file: process.env.X_NOTES_LOG_FILE });
+log_bridge.handle(ipcMain, main_log.methods);
+// web page
+const page_log = create_page_log(window.x_log);
+await page_log.start();
+const log = page_log.logger("editor");
 ```
 
 `create_window` keeps the app's own pages in the window: a link or a navigation to another site opens in the browser,
