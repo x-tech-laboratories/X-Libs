@@ -48,12 +48,20 @@ export function format_age(seconds: number): string {
   return seconds < 0 ? "never" : `${format_duration(seconds)} ago`;
 }
 
-// A playing time as a clock, such as "3:07", or "1:02:03" from an hour.
-export function format_clock(milliseconds: number | null | undefined, empty = "0:00"): string {
+export interface ClockOptions {
+  // Written for no time at all, such as "—".
+  empty?: string;
+  // "always" writes hours under an hour too, such as "0:03:07", so times in a column line up.
+  hours?: "auto" | "always";
+}
+
+// A playing time as a clock, such as "3:07", or "1:02:03" from an hour; a string option is the empty text alone.
+export function format_clock(milliseconds: number | null | undefined, options: string | ClockOptions = {}): string {
+  const { empty = "0:00", hours: show_hours = "auto" } = typeof options === "string" ? { empty: options } : options;
   if (milliseconds === null || milliseconds === undefined || !Number.isFinite(milliseconds)) return empty;
   const total = Math.max(0, Math.round(milliseconds / 1000));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = String(total % 60).padStart(2, "0");
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
+  return hours > 0 || show_hours === "always" ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
