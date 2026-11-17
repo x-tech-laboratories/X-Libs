@@ -1,6 +1,7 @@
-// Pictures with words beside them: avatars, and tiles for videos, albums or playlists laid out in a grid or as rows.
+// Pictures with words beside them: avatars, covers, and tiles for videos, albums or playlists laid out in a grid or as rows.
 
-import type { MouseEvent, ReactNode } from "react";
+import { useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import type { Resource } from "./states.tsx";
 
 // ── Avatars ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,43 @@ export function Avatar({ src, name, size = "medium" }: AvatarProps) {
   if (src) return <img className={avatar_class} src={src} alt="" loading="lazy" />;
   const first_letter = [...name.trim()][0]?.toLocaleUpperCase() ?? "?";
   return <span className={`${avatar_class} avatar-initial`} aria-hidden="true">{first_letter}</span>;
+}
+
+// ── Covers ───────────────────────────────────────────────────────────────────
+
+interface CoverProps {
+  // The picture, null when there is none, or undefined while it is still being found.
+  src: string | null | undefined;
+  // Words for screen readers, left empty for a cover beside the title that already names it.
+  alt?: string;
+  // Width over height, square unless given; the cover fills the width it is given.
+  aspect?: string;
+  // What shows when there is no picture or it fails to load, such as a music note icon.
+  placeholder?: ReactNode;
+}
+
+// An album's or film's picture, holding its place while it loads and showing the placeholder when there is none.
+export function Cover({ src, alt = "", aspect = "1", placeholder }: CoverProps) {
+  const [broken, set_broken] = useState<string | null>(null);
+  const loading = src === undefined;
+  const shown = typeof src === "string" && src !== "" && src !== broken;
+  const named_blank = !shown && alt !== "";
+  return (
+    <span
+      className="media-picture cover" style={{ "--media-aspect": aspect } as CSSProperties} aria-busy={loading || undefined}
+      role={named_blank ? "img" : undefined} aria-label={named_blank ? alt : undefined}
+    >
+      {shown
+        ? <img src={src} alt={alt} loading="lazy" onError={() => set_broken(src)} />
+        : <span className="media-blank" style={{ display: "grid", placeItems: "center" }} aria-hidden="true">{!loading && placeholder}</span>}
+    </span>
+  );
+}
+
+// A cover's src from the resource that finds it, so a slower earlier answer never replaces a newer one: undefined while it first loads, null when there is none or finding it failed.
+export function cover_source(resource: Resource<string | null>): string | null | undefined {
+  if (resource.status === "loading") return undefined;
+  return resource.status === "loaded" ? resource.data : null;
 }
 
 // ── Tiles ────────────────────────────────────────────────────────────────────
