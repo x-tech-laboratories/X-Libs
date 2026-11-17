@@ -15,7 +15,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 ## Candidates for the next X-Libs and Halon round
 
 - Move X-Tasks' sidebar `SyncButton` (`src/web/Sidebar.tsx`) onto `web/react/sync_settings`' `SyncButton`, which was taken from it, and add it to X-Budget's sidebar.
-- From X-Music: Cover, and the page-view tabs clipped under the header on first open.
+- From X-Music: the page-view tabs clipped under the header on first open.
 - From CODEX: Electron autostart, tray and sidecar; reducer/effects store; NumberField; caption heading; the data-empty pattern; force_graph wrapper; StepLog; a scrollIntoView stub; adopt use_shortcuts; a yes/no-with-note dialog.
 - From X-Stream: metadata cache with TTL, refresher, image-to-data-URI, parseViewCount and parseRelativeAge, loading overlay, sidebar entity list, threaded comments.
 - Move X-Backups' map (`src/web/views/map.tsx`) onto `web/react/flow_map`, whose drawing, ordering and pan and zoom it was taken from, and drop its own `.flow-map` and `map-*` rules from `src/web/app.css` for Halon's.
