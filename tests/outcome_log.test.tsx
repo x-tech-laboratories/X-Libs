@@ -86,6 +86,14 @@ describe("outcome log", () => {
     expect(follow.disabled).toBe(true);
   });
 
+  it("keeps each entry one line high, the full item and detail in their hover text", () => {
+    render(log([{ path: "/music/a very long folder name/a.flac", outcome: "failed", detail: "not audio" }], { active: true }));
+
+    expect(screen.getByRole("table").parentElement!.className).toBe("table-wrap virtual single-line fit following-output");
+    expect(screen.getByText("/music/a very long folder name/a.flac").getAttribute("title")).toBe("/music/a very long folder name/a.flac");
+    expect(screen.getByText("not audio").getAttribute("title")).toBe("not audio");
+  });
+
   it("says so when there is nothing yet", () => {
     render(log([]));
 

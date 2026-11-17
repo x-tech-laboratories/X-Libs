@@ -1,6 +1,7 @@
 // An outcome log: what happened to each item of a run, such as each file of a scan or each row of an import, filtered by outcome and following the newest as they arrive.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { cx } from "../dom.ts";
 import { StateBadge, type Tone } from "./badges.tsx";
 import { Segmented } from "./controls.tsx";
 import { FollowToggle, at_bottom } from "./following.tsx";
@@ -50,6 +51,8 @@ interface Line<Entry> {
 }
 
 const ALL = "all";
+// The outcome column's width in pixels, room for a badge such as "Unchanged".
+const OUTCOME_WIDTH = 128;
 const choice_of = (outcome: string) => `outcome ${outcome}`;
 
 // ── Log ──────────────────────────────────────────────────────────────────────
@@ -110,7 +113,7 @@ export function OutcomeLog<Entry, Outcome extends string>({
 
   const columns: TableColumn<Line<Entry>>[] = [
     {
-      id: "outcome", label: labels.outcome, sortable: false, groupable: false, filterable: false,
+      id: "outcome", label: labels.outcome, sortable: false, groupable: false, filterable: false, width: OUTCOME_WIDTH,
       cell: (line) => <StateBadge labels={outcomes} state={outcome_of(line.entry)} />,
       text: (line) => outcomes[outcome_of(line.entry)][0],
     },
@@ -123,7 +126,7 @@ export function OutcomeLog<Entry, Outcome extends string>({
   if (detail_of) {
     columns.push({
       id: "detail", label: labels.detail, sortable: false, groupable: false,
-      cell: (line) => <span className="muted">{detail_of(line.entry) ?? ""}</span>,
+      cell: (line) => <span className="muted" title={detail_of(line.entry) ?? undefined}>{detail_of(line.entry) ?? ""}</span>,
       text: (line) => detail_of(line.entry) ?? "",
     });
   }
@@ -137,8 +140,8 @@ export function OutcomeLog<Entry, Outcome extends string>({
         <FollowToggle following={following} on_change={set_following} disabled={!active} />
       </div>
       <DataTable
-        caption={label} columns={columns} rows={lines} row_key={(line) => line.index} virtual={{ row_height }} wrap_class={wrap_class}
-        column_hiding={false} fill_last_column
+        caption={label} columns={columns} rows={lines} row_key={(line) => line.index} virtual={{ row_height }} wrap_class={cx("fit", wrap_class)}
+        single_line column_hiding={false} fill_last_column
       />
     </div>
   );

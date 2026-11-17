@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ListPicker, type PickableList } from "../src/web/react/list_picker.tsx";
-import { Avatar, MediaGrid, MediaTile } from "../src/web/react/media.tsx";
+import { Avatar, Cover, MediaGrid, MediaTile } from "../src/web/react/media.tsx";
 import { MenuButton } from "../src/web/react/menu_button.tsx";
 import { ContextMenus } from "../src/web/react/menus.tsx";
 
@@ -26,6 +26,30 @@ describe("avatar", () => {
     render(<Avatar name=" élan" />);
 
     expect(screen.getByText("É").className).toBe("avatar avatar-medium avatar-initial");
+  });
+});
+
+// ============================================================================
+// Covers
+// ============================================================================
+
+describe("cover", () => {
+  it("fills the width it is given unless a size is asked for", () => {
+    const { container } = render(<><Cover src="https://example.com/a.jpg" /><Cover src={null} size="small" /><Cover src={null} size="large" aspect="2 / 3" /></>);
+
+    const covers = [...container.querySelectorAll<HTMLElement>(".cover")];
+    expect(covers.map((cover) => cover.className)).toEqual(["media-picture cover", "media-picture cover cover-small", "media-picture cover cover-large"]);
+    expect(covers[0]!.getAttribute("style")).toBeNull();
+    expect(covers[2]!.style.getPropertyValue("--media-aspect")).toBe("2 / 3");
+  });
+
+  it("shows the placeholder in Halon's blank when there is no picture, named for screen readers when alt is given", () => {
+    render(<Cover src={null} alt="Blue Train" placeholder="♪" />);
+
+    const cover = screen.getByRole("img", { name: "Blue Train" });
+    const blank = cover.querySelector<HTMLElement>(".media-blank")!;
+    expect(blank.textContent).toBe("♪");
+    expect(blank.getAttribute("style")).toBeNull();
   });
 });
 
