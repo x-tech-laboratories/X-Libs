@@ -567,6 +567,21 @@ describe("table virtual rows", () => {
     expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
   });
 
+  it("measures a drawn row when the app gives no row height", () => {
+    const measure = vi.spyOn(HTMLTableRowElement.prototype, "getBoundingClientRect").mockReturnValue({ top: 0, height: 50, bottom: 50, left: 0, right: 200, width: 200, x: 0, y: 0, toJSON: () => ({}) });
+    try {
+      render(<DataTable columns={columns} rows={many} row_key={(task) => task.id} manual_sorting virtual={{ overscan: 2 }} on_row_key_down={() => {}} />);
+      const wrap = scroller(5000);
+
+      fireEvent.scroll(wrap);
+
+      expect(drawn_keys()).toEqual(Array.from({ length: 12 }, (_, index) => `r${98 + index}`));
+      expect(spacers()).toEqual(["4900px", `${(1000 - 110) * 50}px`]);
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
   it("draws every row as a card on phones unless a card height is given", () => {
     const before = window.matchMedia;
     window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;

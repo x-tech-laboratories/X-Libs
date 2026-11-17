@@ -57,11 +57,11 @@ export interface RowGroup<Row> {
 
 // Draws only the rows in view; the table's .table-wrap scrolls, so the app gives it a height.
 export interface TableVirtual {
-  // Every row's height in pixels, group headings included.
-  row_height: number;
+  // Every row's height in pixels, group headings included; measured from a drawn row when not given.
+  row_height?: number;
   // How many rows past each edge of the view are drawn too.
   overscan?: number;
-  // A phone card's height in pixels; phones draw every row when it is left out.
+  // A phone card's height in pixels; measured like the rows when neither height is given, and otherwise phones draw every row when it is left out.
   card_height?: number;
 }
 
@@ -299,6 +299,9 @@ function use_phone(): boolean {
 }
 
 // ── Table ────────────────────────────────────────────────────────────────────
+
+// A virtual row's height until a drawn one is measured.
+const FIRST_ROW_HEIGHT = 32;
 
 export function DataTable<Row>(props: DataTableProps<Row>) {
   const { columns, row_key, caption, get_children, row_passes, groups, allow_inside_drop = true, fill_last_column: fill_last = false } = props;
@@ -764,8 +767,19 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // ── Virtual rows ──
 
   const phone = use_phone();
-  const line_height = props.virtual ? (phone ? props.virtual.card_height : props.virtual.row_height) : undefined;
+  const measures = props.virtual !== undefined && props.virtual.row_height === undefined;
+  const [measured_height, set_measured_height] = useState(FIRST_ROW_HEIGHT);
+  const given_height = props.virtual && (phone ? props.virtual.card_height : props.virtual.row_height);
+  const line_height = props.virtual ? given_height ?? (measures ? measured_height : undefined) : undefined;
   const wrap = useRef<HTMLDivElement>(null);
+
+  // Rows the app gives no height are spaced by a drawn one's, which the density, font and width decide.
+  useLayoutEffect(() => {
+    if (!measures || given_height !== undefined) return;
+    const drawn_row = wrap.current?.querySelector("tbody > tr:not(.virtual-spacer, .group-row, .row-extra)");
+    const height = drawn_row?.getBoundingClientRect().height ?? 0;
+    if (height > 0 && Math.abs(height - measured_height) > 0.25) set_measured_height(height);
+  });
   const head = useRef<HTMLTableSectionElement>(null);
   const [view, set_view] = useState({ top: 0, height: 0 });
   const rows_focused = useRef(false);
