@@ -3,7 +3,7 @@
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { FilterNode, LeafNode } from "../src/filter.ts";
+import type { FilterNode, LeafNode, SortKey } from "../src/filter.ts";
 import { select_ids } from "../src/filter.ts";
 import { compile_filter, query_rows } from "../src/filter_sql.ts";
 import { catalogue, FIXED_NOW, FORMATS, GENRES, LISTS, open_corpus, PEOPLE, SHELVES, TAGS, type Corpus } from "./filter_corpus.ts";
@@ -70,6 +70,15 @@ const filter_arbitrary: fc.Arbitrary<FilterNode> = fc.letrec<{ node: FilterNode 
   ),
 })).node;
 
+// Every field the records hold a value for, set and related fields with a `where` and a `prefer` among them.
+const sort_arbitrary: fc.Arbitrary<SortKey[]> = fc.array(
+  fc.record({
+    field: fc.constantFrom("title", "year", "rating", "done", "added", "last_seen", "shelf", "comment", "format", "size", "genre", "person", "tag"),
+    descending: fc.boolean(),
+  }),
+  { minLength: 1, maxLength: 2 },
+);
+
 // ── Agreement ────────────────────────────────────────────────────────────────
 
 describe("filter: SQL and memory agree", () => {
@@ -91,6 +100,19 @@ describe("filter: SQL and memory agree", () => {
         expect(in_memory).toEqual(by_sql);
       }),
       { numRuns: 600 },
+    );
+  }, 30_000);
+
+  it("sorts the ids it picks in the same order", () => {
+    fc.assert(
+      fc.property(filter_arbitrary, sort_arbitrary, (filter, sort) => {
+        const query = compile_filter(catalogue, filter, { now: FIXED_NOW, resolve, sort });
+        const by_sql = query_rows<{ id: string }>(corpus.database, query).map((row) => row.id);
+        const in_memory = select_ids(catalogue, filter, corpus.records, { now: FIXED_NOW, resolve, sort }).map(String);
+
+        expect(in_memory).toEqual(by_sql);
+      }),
+      { numRuns: 300 },
     );
   }, 30_000);
 

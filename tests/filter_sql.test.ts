@@ -121,6 +121,48 @@ describe("filter_sql", () => {
     expect(compile_filter(catalogue, and(), { sort: [{ field: "random" }] }).sql).toContain("ORDER BY RANDOM(), t.\"id\"");
   });
 
+  it("sorts by a set field picked out by a where, either way, missing values last", () => {
+    for (const field of ["genre", "person"]) {
+      for (const descending of [false, true]) {
+        const query = compile_filter(catalogue, leaf("year", ">", 1900), { now: FIXED_NOW, sort: [{ field, descending }] });
+        const sorted = query_rows<{ id: string }>(corpus.database, query).map((row) => row.id);
+
+        const first_value = (id: string): string | null => (corpus.records.find((record) => record.id === id)!.values[field] as string[])[0] ?? null;
+        const expected = [...sorted].sort((left, right) => {
+          const left_value = first_value(left);
+          const right_value = first_value(right);
+          if (left_value === null || right_value === null) return (left_value === null ? 1 : 0) - (right_value === null ? 1 : 0) || (left < right ? -1 : 1);
+          const order = left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
+          return (descending ? -order : order) || (left < right ? -1 : 1);
+        });
+        expect(sorted).toEqual(expected);
+        expect(first_value(sorted.at(-1)!)).toBeNull();
+      }
+    }
+  });
+
+  it("binds a parameter for every placeholder, whatever it sorts or groups by", () => {
+    const placeholders = (sql: string): number => sql.match(/\?/g)?.length ?? 0;
+    const filter = and(leaf("genre", "any", ["Jazz"]), leaf("year", ">", 1900));
+
+    for (const field of Object.keys(catalogue.fields)) {
+      for (const descending of [false, true]) {
+        const query = compile_filter(catalogue, filter, { now: FIXED_NOW, sort: [{ field, descending }, { field: "year" }], limit: 10 });
+        expect(placeholders(query.sql), field).toBe(query.params.length);
+      }
+      const grouped = compile_group_by(catalogue, filter, field, { now: FIXED_NOW, sums: { total_rating: "rating" } });
+      expect(placeholders(grouped.sql), field).toBe(grouped.params.length);
+    }
+  });
+
+  it("groups a related field under the filter it is given", () => {
+    const rows = query_rows<GroupRow>(corpus.database, compile_group_by(catalogue, leaf("genre", "any", ["Jazz"]), "format", { now: FIXED_NOW }));
+    const jazz = ids(leaf("genre", "any", ["Jazz"]));
+
+    expect(rows.reduce((total, row) => total + row.count, 0)).toBe(jazz.length);
+    expect(rows.at(-1)!.label).toBeNull();
+  });
+
   it("pages with a limit and an offset", () => {
     const all = ids(and());
     const page = query_rows<{ id: string }>(corpus.database, compile_filter(catalogue, and(), { sort: [{ field: "title" }], limit: 5, offset: 5 }));
