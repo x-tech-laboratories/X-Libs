@@ -31,7 +31,7 @@ export interface SyncSettingsProps {
 }
 
 const tones = { off: "none", idle: "good", syncing: "info", offline: "warn", needs_setup: "warn", failed: "bad" } as const;
-const state_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing", offline: "Offline", needs_setup: "Needs a choice", failed: "Failed" } as const;
+const state_text = { off: "Sync not set up", idle: "Synced", syncing: "Syncing", offline: "Offline", needs_setup: "Needs a choice", failed: "Failed" } as const;
 
 export function SyncSettings({ device, subscribe, data_name, placeholder = "https://sync.example.org/", confirm_text, extra, certificates }: SyncSettingsProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
@@ -142,7 +142,7 @@ export interface SyncButtonProps {
   on_open_settings: () => void;
 }
 
-const button_text = { off: "Not syncing", idle: "Synced", syncing: "Syncing…", offline: "Offline", needs_setup: "Sync needs setup", failed: "Sync failed" } as const;
+const button_text = { off: "Sync not set up", idle: "Synced", syncing: "Syncing…", offline: "Offline", needs_setup: "Sync needs setup", failed: "Sync failed" } as const;
 
 // Today's syncs show only the time; older ones show the day too.
 function synced_at_text(iso_time: string): string {
@@ -164,7 +164,7 @@ function SyncIcon({ spinning }: { spinning: boolean }) {
 }
 
 // A sidebar row showing whether this device is synced and how many changes wait to go out; a click syncs now, or opens
-// the settings when sync needs the user. A device that does not sync shows nothing.
+// the settings when sync needs the user or is not set up yet.
 export function SyncButton({ device, subscribe, on_open_settings }: SyncButtonProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
   // Set while a sync asked for here runs, so the button spins before the next status arrives.
@@ -181,9 +181,9 @@ export function SyncButton({ device, subscribe, on_open_settings }: SyncButtonPr
     };
   }, [device, subscribe]);
 
-  if (!status || status.state === "off") return null;
+  if (!status) return null;
   const state = syncing ? "syncing" : status.state;
-  const needs_user = state === "failed" || state === "needs_setup";
+  const needs_user = state === "off" || state === "failed" || state === "needs_setup";
 
   function click(): void {
     if (needs_user) return on_open_settings();
@@ -192,7 +192,7 @@ export function SyncButton({ device, subscribe, on_open_settings }: SyncButtonPr
   }
 
   return (
-    <button type="button" className={needs_user ? "tree-row tone-bad" : "tree-row"} title={[synced_at_text(status.last_synced_at), status.error || `with ${status.server_url}`].join("\n")} disabled={state === "syncing"} onClick={click}>
+    <button type="button" className={needs_user ? "tree-row tone-bad" : "tree-row"} title={state === "off" ? "Open the sync settings" : [synced_at_text(status.last_synced_at), status.error || `with ${status.server_url}`].join("\n")} disabled={state === "syncing"} onClick={click}>
       <span className="tree-label">
         <SyncIcon spinning={state === "syncing"} />
         <span>{button_text[state]}</span>
