@@ -15,6 +15,8 @@ import {
   is_scalar_field,
   plain_value,
   random_field,
+  shuffle_modulus,
+  shuffle_seed,
   type ColumnName,
   type FilterCatalogue,
   type FilterField,
@@ -283,13 +285,24 @@ class Compiler {
     }
   }
 
+  // The row's place in a seeded shuffle, hashing its id's characters exactly as `shuffle_position` does in memory.
+  shuffle_position(seed: number): string {
+    const id_text = `CAST(${this.id_of(row_alias)} AS TEXT)`;
+    const modulus = String(shuffle_modulus);
+    const steps = `SELECT 0, seed_value, seed_value FROM (SELECT CAST(${this.param(shuffle_seed(seed))} AS INTEGER) AS seed_value) UNION ALL SELECT position + 1, (hash * 31 + unicode(substr(${id_text}, position + 1, 1))) % ${modulus}, seed FROM shuffle WHERE position < length(${id_text})`;
+    const last = `SELECT (hash * hash + seed) % ${modulus} AS mixed, seed FROM shuffle ORDER BY position DESC LIMIT 1`;
+    return `(WITH RECURSIVE shuffle(position, hash, seed) AS (${steps}) SELECT (mixed * mixed + seed) % ${modulus} FROM (${last}))`;
+  }
+
   order_by(sort: readonly SortKey[] | undefined): string {
     if (!sort?.length) return "";
     const keys = sort.map((key) => {
-      if (key.field === random_field && !this.catalogue.fields[random_field]) return "RANDOM()";
-      const value = this.order_value(key.field);
-      // Missing values go last whichever way the list runs.
-      return `${value} IS NULL, ${value} ${key.descending ? "DESC" : "ASC"}`;
+      if (key.field === random_field && !this.catalogue.fields[random_field]) {
+        return key.seed === undefined ? "RANDOM()" : `${this.shuffle_position(key.seed)} ${key.descending ? "DESC" : "ASC"}`;
+      }
+      // Missing values go last whichever way the list runs; each copy of the value adds its own parameters.
+      const missing = `${this.order_value(key.field)} IS NULL`;
+      return `${missing}, ${this.order_value(key.field)} ${key.descending ? "DESC" : "ASC"}`;
     });
     return ` ORDER BY ${keys.join(", ")}, ${this.id_of(row_alias)}`;
   }
@@ -297,6 +310,19 @@ class Compiler {
   sums(sums: Readonly<Record<string, string>> | undefined): string {
     return Object.entries(sums ?? {})
       .map(([alias, name]) => `, SUM(COALESCE(${this.scalar(name, row_alias)}, 0)) AS ${quote_name(alias)}`)
+      .join("");
+  }
+
+  // Each value a sum adds up, named by its alias, for a query that totals them a level up.
+  sum_inputs(sums: Readonly<Record<string, string>> | undefined): string {
+    return Object.entries(sums ?? {})
+      .map(([alias, name]) => `, ${this.scalar(name, row_alias)} AS ${quote_name(alias)}`)
+      .join("");
+  }
+
+  sums_of(alias: string, sums: Readonly<Record<string, string>> | undefined): string {
+    return Object.keys(sums ?? {})
+      .map((name) => `, SUM(COALESCE(${alias}.${quote_name(name)}, 0)) AS ${quote_name(name)}`)
       .join("");
   }
 }
@@ -319,10 +345,10 @@ export function compile_filter(catalogue: FilterCatalogue, node: FilterNode, opt
 export function compile_group_by(catalogue: FilterCatalogue, node: FilterNode, field_name: string, options: GroupQueryOptions = {}): CompiledQuery {
   const compiler = new Compiler(catalogue, options.now ?? Date.now(), options.resolve);
   const field = field_of(catalogue, field_name);
-  const sums = compiler.sums(options.sums);
   const from = table_as(catalogue.table, row_alias);
 
   if (field.kind === "set") {
+    const sums = compiler.sums(options.sums);
     const join_link = `JOIN ${table_as(field.table, "link")} ON ${column_of("link", field.row_column)} = ${compiler.id_of(row_alias)}${compiler.where_of("link", field.where)}`;
     const values = field.values;
     const group_id = values ? column_of("value_row", values.id_column) : column_of("link", field.value_column);
@@ -336,10 +362,13 @@ export function compile_group_by(catalogue: FilterCatalogue, node: FilterNode, f
     };
   }
 
+  // The value is worked out once per row below, so its parameters are bound once and in the order they appear.
   const value = compiler.order_value(field_name);
+  const sum_inputs = compiler.sum_inputs(options.sums);
   const where = compiler.node(node);
+  const rows = `SELECT ${value} AS group_id${sum_inputs} FROM ${from} WHERE ${where}`;
   return {
-    sql: `SELECT ${value} AS group_id, ${value} AS label, COUNT(*) AS "count"${sums} FROM ${from} WHERE ${where} GROUP BY ${value} ORDER BY ${value} IS NULL, ${value}`,
+    sql: `SELECT grouped.group_id AS group_id, grouped.group_id AS label, COUNT(*) AS "count"${compiler.sums_of("grouped", options.sums)} FROM (${rows}) grouped GROUP BY grouped.group_id ORDER BY grouped.group_id IS NULL, grouped.group_id`,
     params: compiler.params,
   };
 }

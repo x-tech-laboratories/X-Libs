@@ -66,9 +66,29 @@ export interface SortKey {
   // A field of the catalogue, or "random" for a shuffled order.
   field: string;
   descending?: boolean;
+  // A whole number that makes a random order the same each time it is asked for, such as across pages.
+  seed?: number;
 }
 
 export const random_field = "random";
+
+// The prime a seeded shuffle's hash stays under, so SQLite's whole numbers never overflow.
+export const shuffle_modulus = 2_147_483_647;
+
+export function shuffle_seed(seed: number): number {
+  if (!Number.isInteger(seed)) throw new Error("a random sort's seed must be a whole number");
+  return ((seed % shuffle_modulus) + shuffle_modulus) % shuffle_modulus;
+}
+
+// Where a record falls in the shuffle a seed makes, the same number `filter_sql` works out for its row.
+export function shuffle_position(seed: number, id: RecordId): number {
+  const modulus = BigInt(shuffle_modulus);
+  const start = BigInt(shuffle_seed(seed));
+  let hash = start;
+  for (const character of String(id)) hash = (hash * 31n + BigInt(character.codePointAt(0)!)) % modulus;
+  const mixed = (hash * hash + start) % modulus;
+  return Number((mixed * mixed + start) % modulus);
+}
 
 export const is_group = (node: FilterNode): node is GroupNode => (node as GroupNode).children !== undefined;
 
@@ -216,7 +236,7 @@ export function field_of(catalogue: FilterCatalogue, name: string): FilterField 
 export type FilterScalar = string | number | null;
 export type RecordId = string | number;
 
-// One row as held in memory: a column or expression field's value, a set field's values, or a related field's value in each related row.
+// One row as held in memory: a column or expression field's value, a set field's values in their order, or a related field's value in each related row, best first.
 export interface FilterRecord {
   id: RecordId;
   values: Readonly<Record<string, FilterScalar | readonly FilterScalar[] | undefined>>;
@@ -463,15 +483,69 @@ export function ranked_sets(
   return into;
 }
 
-// The ids of the records that match, in their order.
+// The ids of the records that match, in their order or sorted as the SQL sorts them.
 export function select_ids(
   catalogue: FilterCatalogue,
   node: FilterNode,
   records: readonly FilterRecord[],
-  options: { now: number; resolve?: (id: string) => FilterNode | undefined },
+  options: { now: number; resolve?: (id: string) => FilterNode | undefined; sort?: readonly SortKey[] },
 ): RecordId[] {
-  const context: EvaluateContext = { ...options, ranked: ranked_sets(node, records, options.resolve) };
-  return records.filter((record) => evaluate(catalogue, node, record, context)).map((record) => record.id);
+  const context: EvaluateContext = { now: options.now, resolve: options.resolve, ranked: ranked_sets(node, records, options.resolve) };
+  const matching = records.filter((record) => evaluate(catalogue, node, record, context));
+  return (options.sort?.length ? sort_records(catalogue, matching, options.sort) : matching).map((record) => record.id);
+}
+
+// ── Sorting in memory ────────────────────────────────────────────────────────
+
+// SQLite's order of two values: numbers before text, and text by code point as its UTF-8 bytes sort.
+export function compare_sql_values(left: FilterScalar | RecordId, right: FilterScalar | RecordId): number {
+  if (left === null || right === null) return (left === null ? 0 : 1) - (right === null ? 0 : 1);
+  if (typeof left === "number" || typeof right === "number") {
+    if (typeof left !== "number") return 1;
+    if (typeof right !== "number") return -1;
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  const left_points = [...left];
+  const right_points = [...right];
+  for (let index = 0; index < Math.min(left_points.length, right_points.length); index++) {
+    const difference = left_points[index]!.codePointAt(0)! - right_points[index]!.codePointAt(0)!;
+    if (difference !== 0) return Math.sign(difference);
+  }
+  return Math.sign(left_points.length - right_points.length);
+}
+
+// The one value a record sorts by: a related field's first value, so the record lists them best first as `prefer`
+// orders them, and a set's first value, or its smallest when the set has no `order_column`.
+function sort_value(catalogue: FilterCatalogue, record: FilterRecord, name: string): FilterScalar {
+  const field = field_of(catalogue, name);
+  if (field.kind !== "set" || field.order_column) return scalar_of(record, name);
+  const present = list_of(record, name).filter((value) => value !== null);
+  return present.length ? present.reduce((smallest, value) => (compare_sql_values(value, smallest) < 0 ? value : smallest)) : null;
+}
+
+const random_value = (key: SortKey, id: RecordId): number => (key.seed === undefined ? Math.random() : shuffle_position(key.seed, id));
+
+// The records in the order `compile_filter` gives their rows: missing values last either way, ties by id.
+export function sort_records(catalogue: FilterCatalogue, records: readonly FilterRecord[], sort: readonly SortKey[]): FilterRecord[] {
+  const keyed = records.map((record) => ({
+    record,
+    keys: sort.map((key) => (key.field === random_field && !catalogue.fields[random_field] ? random_value(key, record.id) : sort_value(catalogue, record, key.field))),
+  }));
+
+  keyed.sort((left, right) => {
+    for (const [index, key] of sort.entries()) {
+      const left_value = left.keys[index]!;
+      const right_value = right.keys[index]!;
+      if (left_value === null || right_value === null) {
+        if (left_value !== right_value) return left_value === null ? 1 : -1;
+        continue;
+      }
+      const order = compare_sql_values(left_value, right_value);
+      if (order !== 0) return key.descending ? -order : order;
+    }
+    return compare_sql_values(left.record.id, right.record.id);
+  });
+  return keyed.map((entry) => entry.record);
 }
 
 // ── A stack of filters ───────────────────────────────────────────────────────

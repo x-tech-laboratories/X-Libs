@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { and, define_catalogue, leaf, not, or, type FilterNode } from "../src/filter.ts";
+import { and, define_catalogue, leaf, not, or, shuffle_position, type FilterNode, type SortKey } from "../src/filter.ts";
 import { compile_filter, compile_group_by, query_rows, quote_name, regexp_matches, type GroupRow } from "../src/filter_sql.ts";
 import { catalogue, FIXED_NOW, open_corpus, type Corpus } from "./filter_corpus.ts";
 
@@ -119,6 +119,66 @@ describe("filter_sql", () => {
       expect(() => query_rows(corpus.database, compile_filter(catalogue, and(), { sort: [{ field }] }))).not.toThrow();
     }
     expect(compile_filter(catalogue, and(), { sort: [{ field: "random" }] }).sql).toContain("ORDER BY RANDOM(), t.\"id\"");
+  });
+
+  it("sorts by a set field picked out by a where, either way, missing values last", () => {
+    for (const field of ["genre", "person"]) {
+      for (const descending of [false, true]) {
+        const query = compile_filter(catalogue, leaf("year", ">", 1900), { now: FIXED_NOW, sort: [{ field, descending }] });
+        const sorted = query_rows<{ id: string }>(corpus.database, query).map((row) => row.id);
+
+        const first_value = (id: string): string | null => (corpus.records.find((record) => record.id === id)!.values[field] as string[])[0] ?? null;
+        const expected = [...sorted].sort((left, right) => {
+          const left_value = first_value(left);
+          const right_value = first_value(right);
+          if (left_value === null || right_value === null) return (left_value === null ? 1 : 0) - (right_value === null ? 1 : 0) || (left < right ? -1 : 1);
+          const order = left_value < right_value ? -1 : left_value > right_value ? 1 : 0;
+          return (descending ? -order : order) || (left < right ? -1 : 1);
+        });
+        expect(sorted).toEqual(expected);
+        expect(first_value(sorted.at(-1)!)).toBeNull();
+      }
+    }
+  });
+
+  it("binds a parameter for every placeholder, whatever it sorts or groups by", () => {
+    const placeholders = (sql: string): number => sql.match(/\?/g)?.length ?? 0;
+    const filter = and(leaf("genre", "any", ["Jazz"]), leaf("year", ">", 1900));
+
+    for (const field of Object.keys(catalogue.fields)) {
+      for (const descending of [false, true]) {
+        const query = compile_filter(catalogue, filter, { now: FIXED_NOW, sort: [{ field, descending }, { field: "year" }], limit: 10 });
+        expect(placeholders(query.sql), field).toBe(query.params.length);
+      }
+      const grouped = compile_group_by(catalogue, filter, field, { now: FIXED_NOW, sums: { total_rating: "rating" } });
+      expect(placeholders(grouped.sql), field).toBe(grouped.params.length);
+    }
+  });
+
+  it("groups a related field under the filter it is given", () => {
+    const rows = query_rows<GroupRow>(corpus.database, compile_group_by(catalogue, leaf("genre", "any", ["Jazz"]), "format", { now: FIXED_NOW }));
+    const jazz = ids(leaf("genre", "any", ["Jazz"]));
+
+    expect(rows.reduce((total, row) => total + row.count, 0)).toBe(jazz.length);
+    expect(rows.at(-1)!.label).toBeNull();
+  });
+
+  it("shuffles the same way each time for a seed, page after page", () => {
+    const shuffled = (sort: SortKey[], limit?: number, offset?: number): string[] =>
+      query_rows<{ id: string }>(corpus.database, compile_filter(catalogue, and(), { sort, limit, offset })).map((row) => row.id);
+    const by_id = ids(and()).sort();
+
+    const first = shuffled([{ field: "random", seed: 42 }]);
+    const pages = [0, 100, 200].flatMap((offset) => shuffled([{ field: "random", seed: 42 }], 100, offset));
+
+    expect(first).toEqual(shuffled([{ field: "random", seed: 42 }]));
+    expect(pages).toEqual(first);
+    expect(first).toEqual([...by_id].sort((left, right) => shuffle_position(42, left) - shuffle_position(42, right) || (left < right ? -1 : 1)));
+    expect(first).not.toEqual(by_id);
+    expect(first).not.toEqual(shuffled([{ field: "random", seed: 43 }]));
+    expect(shuffled([{ field: "random", seed: 42, descending: true }])).toEqual([...first].reverse());
+    expect(compile_filter(catalogue, and(), { sort: [{ field: "random" }] }).params).toEqual([]);
+    expect(() => compile_filter(catalogue, and(), { sort: [{ field: "random", seed: 1.5 }] })).toThrow(/whole number/);
   });
 
   it("pages with a limit and an offset", () => {

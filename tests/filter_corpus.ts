@@ -155,6 +155,8 @@ export function open_corpus(count: number, seed: number): Corpus {
       size: maybe(1000 + Math.floor(random() * 9000), 0.1),
       quality: Math.floor(random() * 5),
     }));
+    // Best first, as the related fields' `prefer` orders them.
+    item_files.sort((left, right) => right.quality - left.quality || (left.id < right.id ? -1 : 1));
     for (const file of item_files) database.prepare("INSERT INTO files VALUES (?, ?, ?, ?, ?)").run(file.id, id, file.format, file.size, file.quality);
 
     const genres = some(GENRES, 2);
