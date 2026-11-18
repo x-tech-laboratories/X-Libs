@@ -12,6 +12,7 @@ import { read_local_mcp_settings } from "../../src/local_mcp_protocol.ts";
 const api: Record<string, MethodSpec> = {
   list_notes: { description: "Lists the notes.", params: [] },
   add_note: { description: "Adds a note.", params: [{ name: "text", schema: { type: "string", minLength: 1 } }] },
+  clear_notes: { description: "Removes every note.", params: [], destructive: true },
 };
 
 const protocol_version = "2025-06-18";
@@ -79,6 +80,10 @@ describe("local mcp", () => {
     const status = await local.methods.get_local_mcp_status();
     expect(status.state).toBe("running");
     expect(status.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+
+    const listed = await rpc(status.url, "tools/list", {});
+    const tools = (listed.body!.result as { tools: { name: string; annotations: Record<string, boolean> }[] }).tools;
+    expect(tools.find((tool) => tool.name === "clear_notes")!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true });
 
     const added = await rpc(status.url, "tools/call", { name: "add_note", arguments: { text: "eggs" } });
     expect(added.body).toMatchObject({ result: { content: [{ type: "text", text: "done" }] } });

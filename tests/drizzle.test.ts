@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { asc, eq, getTableConfig, migrate_drizzle, open_drizzle, primaryKey, real, sqliteTable, synced_tables, text, type AnySQLiteColumn, type DrizzleMigration } from "../src/drizzle.ts";
+import { asc, drizzle_of, eq, getTableConfig, migrate_drizzle, open_drizzle, primaryKey, real, sqliteTable, synced_tables, text, type AnySQLiteColumn, type DrizzleMigration } from "../src/drizzle.ts";
 import { bundle_migrations, read_migrations } from "../src/drizzle_migrations.ts";
 import { migrate, type SqlDatabase } from "../src/sql.ts";
 import { create_sync_engine } from "../src/sync_engine.ts";
@@ -77,6 +77,20 @@ describe("drizzle", () => {
 
     open_drizzle(database).insert(metrics).values({ id: "waist", name: "Waist" }).run();
     expect(engine.collect_unpushed_changes(database).changes.map((change) => change.column).sort()).toEqual(["_exists", "id", "name"]);
+  });
+
+  it("gives the same typed queries for a connection each time, and its own to each connection", () => {
+    const first = new DatabaseSync(":memory:");
+    const second = new DatabaseSync(":memory:");
+    migrate_drizzle(first, "body", [start_migration]);
+    migrate_drizzle(second, "body", [start_migration]);
+
+    drizzle_of(first).insert(metrics).values({ id: "weight", name: "Weight" }).run();
+
+    expect(drizzle_of(first)).toBe(drizzle_of(first));
+    expect(drizzle_of(second)).not.toBe(drizzle_of(first));
+    expect(drizzle_of(first).select().from(metrics).all()).toEqual([{ id: "weight", name: "Weight" }]);
+    expect(drizzle_of(second).select().from(metrics).all()).toEqual([]);
   });
 
   it("reads each table's sync key from its primary key and refuses a table without one", () => {

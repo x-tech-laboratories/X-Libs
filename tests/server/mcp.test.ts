@@ -12,6 +12,7 @@ afterEach(async () => {
 const api: Record<string, MethodSpec> = {
   list_notes: { description: "Lists the notes.", params: [] },
   add_note: { description: "Adds a note.", params: [{ name: "text", schema: { type: "string", minLength: 1 } }, { name: "pinned", schema: { type: "boolean" }, optional: true }] },
+  remove_note: { description: "Removes a note.", params: [{ name: "text", schema: { type: "string" } }], destructive: true },
 };
 
 // The protocol version the stateless fallback serves, which every MCP client still speaks.
@@ -66,8 +67,12 @@ describe("mcp route", () => {
     expect(hello.result).toMatchObject({ serverInfo: { name: "notes", version: "1.0.0" }, instructions: "Notes are plain text." });
 
     const listed = await rpc("tools/list");
-    const tools = listed.result!.tools as { name: string; annotations: { readOnlyHint: boolean }; inputSchema: { required: string[] } }[];
-    expect(tools.map((tool) => [tool.name, tool.annotations.readOnlyHint])).toEqual([["list_notes", true], ["add_note", false]]);
+    const tools = listed.result!.tools as { name: string; annotations: { readOnlyHint: boolean; destructiveHint?: boolean }; inputSchema: { required: string[] } }[];
+    expect(tools.map((tool) => [tool.name, tool.annotations])).toEqual([
+      ["list_notes", { readOnlyHint: true }],
+      ["add_note", { readOnlyHint: false }],
+      ["remove_note", { readOnlyHint: false, destructiveHint: true }],
+    ]);
     expect(tools[1]!.inputSchema.required).toEqual(["text"]);
   });
 

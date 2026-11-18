@@ -81,7 +81,7 @@ that do not yet:
 - X-Backups: no Settings page in `src/`; Users is a page and a sidebar row (`src/web/main.tsx`, `src/web/views/users.tsx`). History is left out in its README (items come from config); no sync (server, agent and web only).
 - X-Budget: Users sits at the foot of Your account (`src/web/App.tsx`); move it to `users_settings`.
 - X-Fitness: Users is a page with a row in the sidebar foot (`src/web/App.tsx`, `src/web/Sidebar.tsx`); move it to `users_settings`.
-- X-Music: no History page (README: playlists are not edited yet); no sync (Electron only, no server).
+- X-Music: no sync (Electron only, no server).
 - X-Nix: Users is a page and a sidebar row (`src/web/main.tsx`); History is left out in its README (a log; items from config); no sync.
 - X-Stream: Settings does not use `SettingsPage` (`src/pages/Settings/Settings.tsx`); its playlist versions have no History page of their own (`/history` is watch history); no X-Libs sync.
 - X-Tasks: Users is a `#/users` page and a sections entry (`src/web/SignedIn.tsx`); move it to `users_settings`.
