@@ -1,0 +1,147 @@
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  call_daemon, daemon_log_path, daemon_socket_path, DaemonRunningError, follow_daemon_events, is_answering, listen_on_socket, parse_event, start_daemon,
+} from "../src/local_daemon.ts";
+
+let folder: string;
+const servers: Server[] = [];
+
+beforeEach(() => {
+  folder = mkdtempSync(join(tmpdir(), "local-daemon-"));
+});
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+  rmSync(folder, { recursive: true, force: true });
+});
+
+function serve(handler: Parameters<typeof createServer>[1]): { server: Server; listen: (path: string) => Promise<void> } {
+  const server = createServer(handler);
+  servers.push(server);
+  return { server, listen: (path) => new Promise((resolve) => server.listen(path, resolve)) };
+}
+
+function wait_for(check: () => boolean): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (check()) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - started > 5000) {
+        clearInterval(timer);
+        reject(new Error("timed out"));
+      }
+    }, 10);
+  });
+}
+
+describe("daemon_socket_path", () => {
+  it("names the user's own socket daemon.sock and gives any other data file one of its own", () => {
+    expect(daemon_socket_path({ app: "x-tasks", runtime_dir: "/run/user/1000" })).toBe("/run/user/1000/x-tasks/daemon.sock");
+    const test_socket = daemon_socket_path({ app: "x-tasks", data_file: "/tmp/test.db", runtime_dir: "/run/user/1000" });
+    expect(test_socket).toMatch(/^\/run\/user\/1000\/x-tasks\/daemon-[0-9a-f]{12}\.sock$/);
+    expect(daemon_socket_path({ app: "x-tasks", data_file: "/tmp/other.db", runtime_dir: "/run/user/1000" })).not.toBe(test_socket);
+  });
+
+  it("keeps the log under the state folder", () => {
+    expect(daemon_log_path("x-tasks", "/home/someone/.local/state")).toBe("/home/someone/.local/state/x-tasks/daemon.log");
+  });
+});
+
+describe("listen_on_socket", () => {
+  it("makes the folder and socket for this user alone", async () => {
+    const socket = join(folder, "app", "daemon.sock");
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen);
+    expect(statSync(join(folder, "app")).mode & 0o777).toBe(0o700);
+    expect(statSync(socket).mode & 0o777).toBe(0o600);
+    expect(await is_answering(socket)).toBe(true);
+  });
+
+  it("refuses while another daemon answers, and replaces a socket left by one that died", async () => {
+    const socket = join(folder, "daemon.sock");
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen);
+    await expect(listen_on_socket(socket, serve((_, response) => response.end()).listen)).rejects.toBeInstanceOf(DaemonRunningError);
+
+    await new Promise((resolve) => servers.shift()!.close(resolve));
+    writeFileSync(socket, "");
+    expect(await is_answering(socket)).toBe(false);
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen);
+    expect(await is_answering(socket)).toBe(true);
+  });
+});
+
+describe("call_daemon", () => {
+  it("posts the arguments as a JSON array and answers with the reply", async () => {
+    const socket = join(folder, "daemon.sock");
+    await listen_on_socket(socket, serve((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        if (request.url === "/api/add") return response.end(JSON.stringify((JSON.parse(body) as number[]).reduce((a, b) => a + b)));
+        if (request.url === "/api/nothing") return response.writeHead(204).end();
+        response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ message: "no call named that" }));
+      });
+    }).listen);
+
+    expect(await call_daemon(socket, "/api/add", [2, 3])).toBe(5);
+    expect(await call_daemon(socket, "/api/nothing")).toBeUndefined();
+    await expect(call_daemon(socket, "/api/missing")).rejects.toThrow("no call named that");
+  });
+});
+
+describe("follow_daemon_events", () => {
+  it("hands over each event and reconnects when the daemon comes back", async () => {
+    const socket = join(folder, "daemon.sock");
+    const streams: import("node:http").ServerResponse[] = [];
+    const handler: Parameters<typeof createServer>[1] = (_, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(": hi\n\nevent: hello\ndata: client-1\n\n");
+      streams.push(response);
+    };
+    await listen_on_socket(socket, serve(handler).listen);
+
+    const events: string[] = [];
+    let connects = 0;
+    const stop = follow_daemon_events(socket, "/api/events", (event, data) => events.push(`${event}:${data}`), { retry_ms: 20, on_connect: () => connects++ });
+    await wait_for(() => events.length === 1);
+    streams[0]!.write("event: changed\ndata: \n\n");
+    await wait_for(() => events.length === 2);
+    expect(events).toEqual(["hello:client-1", "changed:"]);
+
+    streams[0]!.end();
+    await new Promise((resolve) => servers.shift()!.close(resolve));
+    await listen_on_socket(socket, serve(handler).listen);
+    await wait_for(() => connects === 2 && events.length === 3);
+    stop();
+  });
+
+  it("reads names, joined data lines and comments", () => {
+    expect(parse_event("event: changed\ndata: a\ndata: b")).toEqual({ event: "changed", data: "a\nb" });
+    expect(parse_event("data: plain")).toEqual({ event: "message", data: "plain" });
+    expect(parse_event(": keep open")).toBeNull();
+  });
+});
+
+describe("start_daemon", () => {
+  it("starts the script apart from this process and waits until it answers", async () => {
+    const socket = join(folder, "daemon.sock");
+    const script = join(folder, "daemon.mjs");
+    writeFileSync(script, `import { createServer } from "node:http";\nconst server = createServer((_, r) => r.end("ok")).listen(process.env.SOCKET);\nprocess.on("SIGTERM", () => server.close(() => process.exit(0)));\nsetTimeout(() => process.exit(0), 10000);\n`);
+    const log_file = join(folder, "logs", "daemon.log");
+
+    expect(await start_daemon({ socket_path: socket, script, env: { SOCKET: socket }, log_file })).toBe("started");
+    expect(await start_daemon({ socket_path: socket, script, env: { SOCKET: socket }, log_file })).toBe("running");
+  });
+
+  it("says why when the daemon dies before answering", async () => {
+    const script = join(folder, "broken.mjs");
+    writeFileSync(script, `console.error("no database given");\nprocess.exit(3);\n`);
+    await expect(start_daemon({ socket_path: join(folder, "daemon.sock"), script, log_file: join(folder, "daemon.log") })).rejects.toThrow("exited with 3: no database given");
+  });
+});
