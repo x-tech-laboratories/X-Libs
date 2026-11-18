@@ -70,12 +70,15 @@ const filter_arbitrary: fc.Arbitrary<FilterNode> = fc.letrec<{ node: FilterNode 
   ),
 })).node;
 
-// Every field the records hold a value for, set and related fields with a `where` and a `prefer` among them.
+// Every field the records hold a value for, set and related fields with a `where` and a `prefer` among them, and a seeded shuffle.
 const sort_arbitrary: fc.Arbitrary<SortKey[]> = fc.array(
-  fc.record({
-    field: fc.constantFrom("title", "year", "rating", "done", "added", "last_seen", "shelf", "comment", "format", "size", "genre", "person", "tag"),
-    descending: fc.boolean(),
-  }),
+  fc.oneof(
+    fc.record({
+      field: fc.constantFrom("title", "year", "rating", "done", "added", "last_seen", "shelf", "comment", "format", "size", "genre", "person", "tag"),
+      descending: fc.boolean(),
+    }),
+    fc.record({ field: fc.constant("random"), descending: fc.boolean(), seed: fc.oneof(fc.integer(), fc.maxSafeInteger(), fc.maxSafeNat()) }),
+  ),
   { minLength: 1, maxLength: 2 },
 );
 

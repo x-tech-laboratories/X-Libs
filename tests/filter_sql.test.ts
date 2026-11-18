@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { and, define_catalogue, leaf, not, or, type FilterNode } from "../src/filter.ts";
+import { and, define_catalogue, leaf, not, or, shuffle_position, type FilterNode, type SortKey } from "../src/filter.ts";
 import { compile_filter, compile_group_by, query_rows, quote_name, regexp_matches, type GroupRow } from "../src/filter_sql.ts";
 import { catalogue, FIXED_NOW, open_corpus, type Corpus } from "./filter_corpus.ts";
 
@@ -161,6 +161,24 @@ describe("filter_sql", () => {
 
     expect(rows.reduce((total, row) => total + row.count, 0)).toBe(jazz.length);
     expect(rows.at(-1)!.label).toBeNull();
+  });
+
+  it("shuffles the same way each time for a seed, page after page", () => {
+    const shuffled = (sort: SortKey[], limit?: number, offset?: number): string[] =>
+      query_rows<{ id: string }>(corpus.database, compile_filter(catalogue, and(), { sort, limit, offset })).map((row) => row.id);
+    const by_id = ids(and()).sort();
+
+    const first = shuffled([{ field: "random", seed: 42 }]);
+    const pages = [0, 100, 200].flatMap((offset) => shuffled([{ field: "random", seed: 42 }], 100, offset));
+
+    expect(first).toEqual(shuffled([{ field: "random", seed: 42 }]));
+    expect(pages).toEqual(first);
+    expect(first).toEqual([...by_id].sort((left, right) => shuffle_position(42, left) - shuffle_position(42, right) || (left < right ? -1 : 1)));
+    expect(first).not.toEqual(by_id);
+    expect(first).not.toEqual(shuffled([{ field: "random", seed: 43 }]));
+    expect(shuffled([{ field: "random", seed: 42, descending: true }])).toEqual([...first].reverse());
+    expect(compile_filter(catalogue, and(), { sort: [{ field: "random" }] }).params).toEqual([]);
+    expect(() => compile_filter(catalogue, and(), { sort: [{ field: "random", seed: 1.5 }] })).toThrow(/whole number/);
   });
 
   it("pages with a limit and an offset", () => {

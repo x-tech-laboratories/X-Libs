@@ -14,6 +14,8 @@ import {
   ranked_sets,
   referenced_fields,
   select_ids,
+  shuffle_position,
+  sort_records,
   type FilterNode,
   type FilterRecord,
 } from "../src/filter.ts";
@@ -114,6 +116,24 @@ describe("evaluating in memory", () => {
     expect(() => matching(leaf("colour", "is", "red"))).toThrow(/unknown field: colour/);
     expect(() => matching(leaf("label", "contains", "x"))).toThrow(/not valid on set field label/);
     expect(() => matching(leaf("attachment", "top", 1))).toThrow(/not valid on field attachment/);
+  });
+});
+
+describe("sorting in memory", () => {
+  it("sorts missing values last either way, ties by id", () => {
+    expect(select_ids(catalogue, and(), tasks, { now, sort: [{ field: "points" }] })).toEqual(["b", "a", "d", "c"]);
+    expect(select_ids(catalogue, and(), tasks, { now, sort: [{ field: "points", descending: true }] })).toEqual(["a", "d", "b", "c"]);
+    expect(sort_records(catalogue, tasks, [{ field: "label" }]).map((task) => task.id)).toEqual(["b", "d", "a", "c"]);
+  });
+
+  it("shuffles the same way each time for a seed", () => {
+    const shuffled = (seed: number): string[] => sort_records(catalogue, tasks, [{ field: "random", seed }]).map((task) => String(task.id));
+
+    expect(shuffled(7)).toEqual(shuffled(7));
+    expect(shuffled(7).sort()).toEqual(["a", "b", "c", "d"]);
+    expect(shuffle_position(7, "a")).toBe(shuffle_position(7 + 2_147_483_647, "a"));
+    expect(shuffle_position(7, "a")).not.toBe(shuffle_position(8, "a"));
+    expect(() => shuffle_position(0.5, "a")).toThrow(/whole number/);
   });
 });
 

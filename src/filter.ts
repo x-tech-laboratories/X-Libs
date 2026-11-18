@@ -66,9 +66,29 @@ export interface SortKey {
   // A field of the catalogue, or "random" for a shuffled order.
   field: string;
   descending?: boolean;
+  // A whole number that makes a random order the same each time it is asked for, such as across pages.
+  seed?: number;
 }
 
 export const random_field = "random";
+
+// The prime a seeded shuffle's hash stays under, so SQLite's whole numbers never overflow.
+export const shuffle_modulus = 2_147_483_647;
+
+export function shuffle_seed(seed: number): number {
+  if (!Number.isInteger(seed)) throw new Error("a random sort's seed must be a whole number");
+  return ((seed % shuffle_modulus) + shuffle_modulus) % shuffle_modulus;
+}
+
+// Where a record falls in the shuffle a seed makes, the same number `filter_sql` works out for its row.
+export function shuffle_position(seed: number, id: RecordId): number {
+  const modulus = BigInt(shuffle_modulus);
+  const start = BigInt(shuffle_seed(seed));
+  let hash = start;
+  for (const character of String(id)) hash = (hash * 31n + BigInt(character.codePointAt(0)!)) % modulus;
+  const mixed = (hash * hash + start) % modulus;
+  return Number((mixed * mixed + start) % modulus);
+}
 
 export const is_group = (node: FilterNode): node is GroupNode => (node as GroupNode).children !== undefined;
 
@@ -503,11 +523,13 @@ function sort_value(catalogue: FilterCatalogue, record: FilterRecord, name: stri
   return present.length ? present.reduce((smallest, value) => (compare_sql_values(value, smallest) < 0 ? value : smallest)) : null;
 }
 
+const random_value = (key: SortKey, id: RecordId): number => (key.seed === undefined ? Math.random() : shuffle_position(key.seed, id));
+
 // The records in the order `compile_filter` gives their rows: missing values last either way, ties by id.
 export function sort_records(catalogue: FilterCatalogue, records: readonly FilterRecord[], sort: readonly SortKey[]): FilterRecord[] {
   const keyed = records.map((record) => ({
     record,
-    keys: sort.map((key) => (key.field === random_field && !catalogue.fields[random_field] ? Math.random() : sort_value(catalogue, record, key.field))),
+    keys: sort.map((key) => (key.field === random_field && !catalogue.fields[random_field] ? random_value(key, record.id) : sort_value(catalogue, record, key.field))),
   }));
 
   keyed.sort((left, right) => {

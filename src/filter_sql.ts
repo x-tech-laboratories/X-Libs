@@ -15,6 +15,8 @@ import {
   is_scalar_field,
   plain_value,
   random_field,
+  shuffle_modulus,
+  shuffle_seed,
   type ColumnName,
   type FilterCatalogue,
   type FilterField,
@@ -283,10 +285,21 @@ class Compiler {
     }
   }
 
+  // The row's place in a seeded shuffle, hashing its id's characters exactly as `shuffle_position` does in memory.
+  shuffle_position(seed: number): string {
+    const id_text = `CAST(${this.id_of(row_alias)} AS TEXT)`;
+    const modulus = String(shuffle_modulus);
+    const steps = `SELECT 0, seed_value, seed_value FROM (SELECT CAST(${this.param(shuffle_seed(seed))} AS INTEGER) AS seed_value) UNION ALL SELECT position + 1, (hash * 31 + unicode(substr(${id_text}, position + 1, 1))) % ${modulus}, seed FROM shuffle WHERE position < length(${id_text})`;
+    const last = `SELECT (hash * hash + seed) % ${modulus} AS mixed, seed FROM shuffle ORDER BY position DESC LIMIT 1`;
+    return `(WITH RECURSIVE shuffle(position, hash, seed) AS (${steps}) SELECT (mixed * mixed + seed) % ${modulus} FROM (${last}))`;
+  }
+
   order_by(sort: readonly SortKey[] | undefined): string {
     if (!sort?.length) return "";
     const keys = sort.map((key) => {
-      if (key.field === random_field && !this.catalogue.fields[random_field]) return "RANDOM()";
+      if (key.field === random_field && !this.catalogue.fields[random_field]) {
+        return key.seed === undefined ? "RANDOM()" : `${this.shuffle_position(key.seed)} ${key.descending ? "DESC" : "ASC"}`;
+      }
       // Missing values go last whichever way the list runs; each copy of the value adds its own parameters.
       const missing = `${this.order_value(key.field)} IS NULL`;
       return `${missing}, ${this.order_value(key.field)} ${key.descending ? "DESC" : "ASC"}`;
