@@ -75,6 +75,15 @@ export function open_drizzle(database: SqlDatabase): Drizzle {
   return new SQLiteAsyncDatabase("sync", dialect, session as unknown as ConstructorParameters<typeof SQLiteAsyncDatabase>[2], {}) as unknown as Drizzle;
 }
 
+const drizzles = new WeakMap<SqlDatabase, Drizzle>();
+
+// The typed queries on the connection given, made on its first use and kept for as long as the connection is.
+export function drizzle_of(database: SqlDatabase): Drizzle {
+  let drizzle = drizzles.get(database);
+  if (!drizzle) drizzles.set(database, (drizzle = open_drizzle(database)));
+  return drizzle;
+}
+
 // ── Sync ─────────────────────────────────────────────────────────────────────
 
 export interface SyncOptions {
