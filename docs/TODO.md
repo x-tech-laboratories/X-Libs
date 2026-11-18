@@ -15,6 +15,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 ## Candidates for the next X-Libs and Halon round
 
 - From X-Music: the page-view tabs clipped under the header on first open.
+- From X-Tasks: notices handed to a phone ahead of time through Capacitor's local notifications, set again after every change, with a tap opening the item (`src/web/android/phone_notices.ts`), as a `phone_notices` module beside `phone_certificates`; and the daemon's due-reminder, break and Pomodoro checks (`src/daemon/notices.ts`) as a scheduled-notices helper on `agent/desktop_notify`.
 - From CODEX: Electron tray and sidecar (autostart and starting the daemon are in `autostart` and `local_daemon`; CODEX can move onto them); reducer/effects store; NumberField; caption heading; the data-empty pattern; force_graph wrapper; StepLog; a scrollIntoView stub; adopt use_shortcuts; a yes/no-with-note dialog.
 - From X-Stream: metadata cache with TTL, refresher, image-to-data-URI, parseViewCount and parseRelativeAge, loading overlay, sidebar entity list, threaded comments.
 - Move X-Backups' map (`src/web/views/map.tsx`) onto `web/react/flow_map`, whose drawing, ordering and pan and zoom it was taken from, and drop its own `.flow-map` and `map-*` rules from `src/web/app.css` for Halon's.
