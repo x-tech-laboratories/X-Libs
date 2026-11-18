@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { input_schema, openapi_document, positional_args, type MethodSpec } from "../src/api_spec.ts";
+import { check_known_ids, input_schema, keep_known_ids, openapi_document, positional_args, unknown_ids, type MethodSpec } from "../src/api_spec.ts";
 
 const add_set: MethodSpec = {
   description: "Adds a set to an exercise.",
@@ -41,5 +41,25 @@ describe("api specs", () => {
     expect(Object.keys(paths)).toEqual(["/api/call/add_set", "/api/call/list_sets"]);
     expect(paths["/api/call/add_set"]!.post).toMatchObject({ operationId: "add_set", tags: ["change"], requestBody: { required: true } });
     expect(paths["/api/call/list_sets"]!.post).toMatchObject({ tags: ["read"], requestBody: { required: false } });
+  });
+});
+
+describe("known ids", () => {
+  const tracks = new Set(["a1", "b2", "c3"]);
+
+  it("names the ids that do not exist, each once, in the order given", () => {
+    expect(unknown_ids(["x9", "a1", "y8", "x9"], tracks)).toEqual(["x9", "y8"]);
+    expect(unknown_ids(["a1", "c3"], new Map([["a1", 1], ["c3", 3]]))).toEqual([]);
+    expect(unknown_ids(["a1", "zz"], (id) => id.length === 2 && id !== "zz")).toEqual(["zz"]);
+  });
+
+  it("refuses a call naming an id that does not exist, before it acts", () => {
+    expect(() => check_known_ids(["a1", "b2"], tracks, "track")).not.toThrow();
+    expect(() => check_known_ids(["a1", "gone", "lost"], tracks, "track")).toThrow("no such track gone, lost");
+  });
+
+  it("cuts a remembered list down to the ids that still exist", () => {
+    expect(keep_known_ids(["c3", "deleted", "a1", "c3", 7, null], tracks)).toEqual(["c3", "a1"]);
+    for (const wrong_shape of [null, "a1", 42, { a1: true }]) expect(keep_known_ids(wrong_shape, tracks)).toEqual([]);
   });
 });
