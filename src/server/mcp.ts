@@ -56,10 +56,11 @@ function as_text(result: unknown): string {
 export function create_mcp_server(options: McpRouteOptions): McpServer {
   const server = new McpServer({ name: options.name, version: options.version }, options.instructions ? { instructions: options.instructions } : {});
   for (const [method, spec] of Object.entries(options.api)) {
+    const read_only = options.is_read_only(method);
     const config = {
       description: spec.description,
       inputSchema: fromJsonSchema<Record<string, unknown>>(input_schema(spec)),
-      annotations: { readOnlyHint: options.is_read_only(method) },
+      annotations: { readOnlyHint: read_only, ...(!read_only && spec.destructive !== undefined ? { destructiveHint: spec.destructive } : {}) },
     };
     server.registerTool(method, config, async (named) => {
       try {

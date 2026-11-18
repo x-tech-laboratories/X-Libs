@@ -18,6 +18,8 @@ export interface MethodSpec {
   description: string;
   // The arguments in the order the method takes them.
   params: ParamSpec[];
+  // Marks a call that deletes or overwrites data, so an MCP client asks before running it.
+  destructive?: boolean;
 }
 
 // A spec for every method of a table, so a method added without one fails to compile.
