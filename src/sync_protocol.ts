@@ -50,6 +50,8 @@ export interface SyncPaths {
   // Where a device signs in for a token of its own, and gives it back.
   login: string;
   logout: string;
+  // Where files a synced column names are sent and fetched, by name under this path.
+  files: string;
 }
 
 // Relative to the server's address, so a server under a folder keeps it.
@@ -60,6 +62,7 @@ export const default_sync_paths: SyncPaths = {
   events: "api/events",
   login: "api/login",
   logout: "api/logout",
+  files: "api/sync/files",
 };
 
 // ── Device storage ───────────────────────────────────────────────────────────

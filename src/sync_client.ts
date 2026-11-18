@@ -6,6 +6,7 @@
 
 import type { SqlDatabase } from "./sql.ts";
 import type { SyncEngine } from "./sync_engine.ts";
+import { hash_bytes, is_file_name, type SyncFilesMissingResponse, type SyncFilesOptions } from "./sync_files.ts";
 export { asks_for_code } from "./sync_protocol.ts";
 
 import {
@@ -31,7 +32,9 @@ export interface SyncClientOptions {
   engine: SyncEngine;
   database: () => SqlDatabase;
   storage: SyncStorage;
-  // Runs whenever changes from elsewhere land in the database.
+  // Files the rows name, such as covers, sent and fetched after each exchange of changes.
+  files?: SyncFilesOptions<SqlDatabase>;
+  // Runs whenever changes from elsewhere land in the database, or files they name arrive.
   on_remote_change?: () => void;
   // Runs whenever the status changes, for a page that shows it.
   on_status?: (status: SyncStatus) => void;
@@ -99,6 +102,8 @@ export function create_sync_client(options: SyncClientOptions) {
   let timers: ReturnType<typeof setTimeout>[] = [];
   let event_stream: AbortController | null = null;
   let last_failure_at = 0;
+  // Files known to be both here and on the server, so each round only looks at new ones.
+  let settled_files = new Set<string>();
 
   // ── Requests ─────────────────────────────────────────────────────────────
 
@@ -157,8 +162,68 @@ export function create_sync_client(options: SyncClientOptions) {
 
     const applied = engine.apply_changes(database, response.changes);
     engine.write_state(database, { pushed_seq: outgoing.up_to_seq, pulled_seq: response.cursor });
-    set_status({ state: "idle", last_synced_at: new Date().toISOString(), error: "" });
     if (applied > 0) options.on_remote_change?.();
+    if (await move_files(config)) options.on_remote_change?.();
+    set_status({ state: "idle", last_synced_at: new Date().toISOString(), error: "" });
+  }
+
+  // ── Files ────────────────────────────────────────────────────────────────
+
+  const files_in_flight = 4;
+
+  async function request_file(config: SyncConfig, name: string, init: RequestInit = {}): Promise<Response> {
+    const response = await do_fetch(new URL(`${paths.files}/${name}`, config.server_url), {
+      ...init,
+      headers: { authorization: `Bearer ${config.token}`, [client_id_header]: event_client_id, ...init.headers },
+    });
+    if (response.status === 401) throw new SyncHttpError(401, "the server no longer accepts this device; sign in again");
+    return response;
+  }
+
+  // Runs the work for each item, a few at a time.
+  async function each_few<Item>(items: Item[], work: (item: Item) => Promise<void>): Promise<void> {
+    const queue = [...items];
+    const worker = async (): Promise<void> => {
+      for (let item = queue.shift(); item !== undefined; item = queue.shift()) await work(item);
+    };
+    await Promise.all(Array.from({ length: files_in_flight }, worker));
+  }
+
+  // Sends the server the named files it lacks and fetches those this device lacks; true when any arrived here.
+  // A file the server does not have yet is tried again next round, once the device that made it has sent it.
+  async function move_files(config: SyncConfig): Promise<boolean> {
+    const files = options.files;
+    if (!files) return false;
+    const names = [...new Set(files.referenced(options.database()))].filter((name) => is_file_name(name) && !settled_files.has(name));
+    if (names.length === 0) return false;
+
+    const here: string[] = [];
+    const absent: string[] = [];
+    for (const name of names) ((await files.store.has(name)) ? here : absent).push(name);
+
+    if (here.length > 0) {
+      const { missing } = await request_server<SyncFilesMissingResponse>(config, `${paths.files}/missing`, { names: here });
+      await each_few(missing.filter((name) => here.includes(name)), async (name) => {
+        const bytes = await files.store.read(name);
+        if (!bytes) return;
+        const response = await request_file(config, name, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: bytes as Uint8Array<ArrayBuffer> });
+        if (!response.ok) throw new SyncHttpError(response.status, `the server answered ${response.status} to a file: ${await response.text()}`);
+      });
+      for (const name of here) settled_files.add(name);
+    }
+
+    let arrived = false;
+    await each_few(absent, async (name) => {
+      const response = await request_file(config, name);
+      if (response.status === 404) return;
+      if (!response.ok) throw new SyncHttpError(response.status, `the server answered ${response.status} to a file: ${await response.text()}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if ((await hash_bytes(bytes)) !== name) return;
+      await files.store.write(name, bytes);
+      settled_files.add(name);
+      arrived = true;
+    });
+    return arrived;
   }
 
   // Sends this device's new changes and takes everyone else's in one round trip; calls made while one runs wait for it.
@@ -203,6 +268,7 @@ export function create_sync_client(options: SyncClientOptions) {
     if (saved !== null && saved.token !== config.token) sign_out(saved);
 
     stop_background_sync();
+    settled_files = new Set();
     const database = options.database();
     set_status({ state: "syncing", server_url: config.server_url, user: config.user ?? "", error: "" });
 
@@ -228,6 +294,8 @@ export function create_sync_client(options: SyncClientOptions) {
     set_status({ state: "idle", last_synced_at: new Date().toISOString(), error: "" });
     if (direction === "download") options.on_remote_change?.();
     start_background_sync();
+    // The files follow in the background, so the user is not kept waiting on a large first sync.
+    if (options.files) void sync_now();
     return get_status();
   }
 
