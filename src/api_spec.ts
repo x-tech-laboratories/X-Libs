@@ -55,6 +55,30 @@ export function positional_args(spec: MethodSpec, named: Record<string, unknown>
   return args;
 }
 
+// ── Known ids ────────────────────────────────────────────────────────────────
+
+// What exists now, as a set, a map by id, or a check.
+export type KnownIds = ReadonlySet<string> | ReadonlyMap<string, unknown> | ((id: string) => boolean);
+
+const is_known = (known: KnownIds, id: string): boolean => (typeof known === "function" ? known(id) : known.has(id));
+
+// The ids that do not exist, each once, in the order given.
+export function unknown_ids(ids: readonly string[], known: KnownIds): string[] {
+  return [...new Set(ids)].filter((id) => !is_known(known, id));
+}
+
+// Refuses a call before it acts on anything when one of its ids does not exist, such as "no such track a1, b2".
+export function check_known_ids(ids: readonly string[], known: KnownIds, noun: string): void {
+  const unknown = unknown_ids(ids, known);
+  if (unknown.length > 0) throw new Error(`no such ${noun} ${unknown.join(", ")}`);
+}
+
+// A remembered list of ids, such as picked columns, cut down to the ones that still exist, each once; anything not a list reads as empty.
+export function keep_known_ids(value: unknown, known: KnownIds): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && is_known(known, id)))];
+}
+
 // ── OpenAPI ──────────────────────────────────────────────────────────────────
 
 // An OpenAPI 3.1 document with one POST per call, taking its arguments as a JSON object.
