@@ -8,7 +8,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
 import { homedir, tmpdir, userInfo } from "node:os";
@@ -106,8 +106,10 @@ export async function start_daemon(options: StartDaemonOptions): Promise<"runnin
   // Electron's binary runs the script as plain Node with this set.
   if (process.versions.electron) child_env.ELECTRON_RUN_AS_NODE = "1";
   else delete child_env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(process.execPath, [script, ...args], { env: child_env, detached: true, stdio: ["ignore", log, log] });
+  const nothing = openSync("/dev/null", "r");
+  const child = spawn(process.execPath, [script, ...args], { env: child_env, detached: true, stdio: ["ignore", log, log, ...covered_descriptors(nothing)] });
   closeSync(log);
+  closeSync(nothing);
   let exit_code: number | null = null;
   child.once("exit", (code) => (exit_code = code ?? -1));
   child.unref();
@@ -120,6 +122,19 @@ export async function start_daemon(options: StartDaemonOptions): Promise<"runnin
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
   throw new Error(`the daemon did not answer on ${socket_path} within ${timeout_ms / 1000} seconds: ${last_line(log_file)}`);
+}
+
+// Electron leaves many of its own descriptors open across a launch, such as its DevTools port, its single-instance socket
+// and shared memory, which the daemon would otherwise hold for as long as it runs. Each slot up to this process's highest
+// descriptor is given /dev/null in the child instead, which closes what was there. Where /proc is missing, none are.
+export function covered_descriptors(nothing: number, fd_folder = "/proc/self/fd"): number[] {
+  let highest = 2;
+  try {
+    for (const name of readdirSync(fd_folder)) highest = Math.max(highest, Number(name) || 0);
+  } catch {
+    return [];
+  }
+  return Array.from({ length: highest - 2 }, () => nothing);
 }
 
 function last_line(file: string): string {

@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  call_daemon, daemon_log_path, daemon_socket_path, DaemonRunningError, follow_daemon_events, is_answering, listen_on_socket, parse_event, start_daemon,
+  call_daemon, covered_descriptors, daemon_log_path, daemon_socket_path, DaemonRunningError, follow_daemon_events, is_answering, listen_on_socket, parse_event, start_daemon,
 } from "../src/local_daemon.ts";
 
 let folder: string;
@@ -137,6 +137,23 @@ describe("start_daemon", () => {
 
     expect(await start_daemon({ socket_path: socket, script, env: { SOCKET: socket }, log_file })).toBe("started");
     expect(await start_daemon({ socket_path: socket, script, env: { SOCKET: socket }, log_file })).toBe("running");
+  });
+
+  it("hands the daemon nothing but its output beyond the first three descriptors", async () => {
+    const socket = join(folder, "daemon.sock");
+    const script = join(folder, "daemon.mjs");
+    const report = join(folder, "fds.json");
+    writeFileSync(script, `import { readdirSync, readlinkSync, writeFileSync } from "node:fs";\nimport { createServer } from "node:http";\nconst fds = readdirSync("/proc/self/fd").filter((fd) => Number(fd) >= 3 && Number(fd) <= 5).map((fd) => { try { return readlinkSync("/proc/self/fd/" + fd); } catch { return ""; } });\nwriteFileSync(process.env.REPORT, JSON.stringify(fds));\nconst server = createServer((_, r) => r.end()).listen(process.env.SOCKET);\nsetTimeout(() => process.exit(0), 3000);\n`);
+    await start_daemon({ socket_path: socket, script, env: { SOCKET: socket, REPORT: report }, log_file: join(folder, "daemon.log") });
+    expect((JSON.parse(readFileSync(report, "utf8")) as string[]).every((target) => target === "/dev/null" || !target.startsWith("socket:"))).toBe(true);
+  });
+
+  it("covers every descriptor slot above the first three", () => {
+    const fd_folder = join(folder, "fd");
+    mkdirSync(fd_folder);
+    for (const name of ["0", "1", "2", "3", "7"]) writeFileSync(join(fd_folder, name), "");
+    expect(covered_descriptors(9, fd_folder)).toEqual([9, 9, 9, 9, 9]);
+    expect(covered_descriptors(9, join(folder, "missing"))).toEqual([]);
   });
 
   it("says why when the daemon dies before answering", async () => {
