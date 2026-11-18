@@ -15,8 +15,8 @@ export interface FileStore {
   write: (name: string, bytes: Uint8Array) => Promise<void>;
 }
 
-// One object store of files in the named IndexedDB database.
-export function indexed_db_files(database_name: string): FileStore {
+// One object store of files in the named IndexedDB database; with `has`, it also serves as a `SyncFileStore`.
+export function indexed_db_files(database_name: string): FileStore & { has: (name: string) => Promise<boolean> } {
   const store_name = "files";
   const open = (): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
@@ -42,6 +42,14 @@ export function indexed_db_files(database_name: string): FileStore {
         transaction.objectStore(store_name).put(bytes, name);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
+      });
+    },
+    has: async (name) => {
+      const store = await open();
+      return new Promise((resolve, reject) => {
+        const request = store.transaction(store_name).objectStore(store_name).getKey(name);
+        request.onsuccess = () => resolve(request.result !== undefined);
+        request.onerror = () => reject(request.error);
       });
     },
   };

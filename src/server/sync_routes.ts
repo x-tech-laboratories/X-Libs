@@ -1,5 +1,6 @@
 // The server's side of sync: it holds the copy every device syncs with, takes each device's changes and hands back
-// everyone else's, gives a new device the whole data, and lets a device replace it, starting a new generation.
+// everyone else's, gives a new device the whole data, and lets a device replace it, starting a new generation. Given a
+// file store, it also keeps the files the rows name, such as covers, which devices send and fetch by name.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -7,6 +8,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import type { SqlDatabase } from "../sql.ts";
 import type { SyncEngine } from "../sync_engine.ts";
+import { hash_bytes, is_file_name, type SyncFileStore, type SyncFilesMissingResponse } from "../sync_files.ts";
 import { is_change_list, type SyncExchangeRequest, type SyncExchangeResponse, type SyncReplaceResponse, type SyncSnapshot } from "../sync_protocol.ts";
 import { send_text } from "./replies.ts";
 
@@ -23,6 +25,10 @@ export interface SyncRoutesOptions {
   prefix?: string;
   // A device sending its whole database needs room; 256 MiB unless set.
   body_limit?: number;
+  // Where the files the rows name are kept; without it the server keeps no files.
+  files?: SyncFileStore;
+  // The largest file a device may send; 64 MiB unless set.
+  file_limit?: number;
 }
 
 export class GenerationMismatch extends Error {}
@@ -81,5 +87,42 @@ export function register_sync_routes(app: FastifyInstance, options: SyncRoutesOp
     options.on_change?.(request);
     const answer: SyncReplaceResponse = { generation, cursor: engine.read_state(database).last_seq };
     return answer;
+  });
+
+  if (options.files) register_file_routes(app, prefix, options.files, options.file_limit ?? 64 * 1024 * 1024);
+}
+
+// A file is fetched and sent by its name, which must be the sha256 of its bytes; the page may show it from the GET route.
+function register_file_routes(app: FastifyInstance, prefix: string, files: SyncFileStore, file_limit: number): void {
+  if (!app.hasContentTypeParser("application/octet-stream")) {
+    app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: file_limit }, (_request, body, done) => done(null, body));
+  }
+
+  app.post(`${prefix}/files/missing`, async (request, reply) => {
+    const names = (request.body as { names?: unknown } | undefined)?.names;
+    if (!Array.isArray(names) || !names.every(is_file_name)) return send_text(reply, 400, "send the names of files as sha256 hex");
+    const missing: string[] = [];
+    for (const name of names) if (!(await files.has(name))) missing.push(name);
+    const answer: SyncFilesMissingResponse = { missing };
+    return answer;
+  });
+
+  app.get<{ Params: { name: string } }>(`${prefix}/files/:name`, async (request, reply) => {
+    const { name } = request.params;
+    if (!is_file_name(name)) return send_text(reply, 400, "a file's name is the sha256 of its bytes");
+    const bytes = await files.read(name);
+    if (!bytes) return send_text(reply, 404, "no such file");
+    // The name is the bytes' hash, so a file never changes and may be kept for good.
+    return reply.header("content-type", "application/octet-stream").header("cache-control", "private, max-age=31536000, immutable").send(Buffer.from(bytes));
+  });
+
+  app.put<{ Params: { name: string } }>(`${prefix}/files/:name`, { bodyLimit: file_limit }, async (request, reply) => {
+    const { name } = request.params;
+    if (!is_file_name(name)) return send_text(reply, 400, "a file's name is the sha256 of its bytes");
+    if (!Buffer.isBuffer(request.body)) return send_text(reply, 400, "send the file's bytes as application/octet-stream");
+    const bytes = new Uint8Array(request.body);
+    if ((await hash_bytes(bytes)) !== name) return send_text(reply, 400, "the bytes do not match the name");
+    if (!(await files.has(name))) await files.write(name, bytes);
+    return reply.code(204).send();
   });
 }
