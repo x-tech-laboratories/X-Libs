@@ -6,6 +6,7 @@ import { current_route, type Route } from "../router.ts";
 import { store_sizes, stored_sizes } from "../split.ts";
 import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
 import { Dialogs } from "./dialog.tsx";
+import { Icon, type IconGlyph } from "./icons.tsx";
 import { ContextMenus } from "./menus.tsx";
 import { ResizeHandle } from "./split.tsx";
 import { Toasts } from "./toasts.tsx";
@@ -124,7 +125,7 @@ function CogIcon() {
 }
 
 // A sidebar row that links somewhere, raised while you are there.
-function FootLink({ href, current, icon, label, on_open }: { href: string; current: boolean; icon: ReactNode; label: string; on_open?: () => void }) {
+function RowLink({ href, current, icon, label, on_open }: { href: string; current: boolean; icon: ReactNode; label: string; on_open?: () => void }) {
   return (
     <a
       href={href}
@@ -155,6 +156,14 @@ export interface ShellSection {
   href: string;
 }
 
+// One of the app's views, a row at the top of the sidebar with its icon, raised while `active` names its id.
+export interface ShellView {
+  id: string;
+  label: string;
+  href: string;
+  icon?: IconGlyph;
+}
+
 // The Settings link, last in the sidebar's foot; on_open takes the click from the link, for an app that opens Settings
 // itself.
 export interface ShellSettings {
@@ -181,11 +190,14 @@ interface ShellProps {
   brand_icon?: string;
   // The brand's full logo, as an image URL, already holding its name, drawn in place of the icon and the name.
   brand_logo?: string;
-  // The sidebar's links, unless `sidebar` gives its whole content.
+  // The sidebar's links, unless `views` or `sidebar` are given.
   sections?: ShellSection[];
-  // The section to light up, such as the route's first part.
+  // The app's views as rows with icons at the top of the sidebar, its navigation, above any `sidebar` content.
+  views?: ShellView[];
+  // The section or view to light up, such as the route's first part.
   active?: string;
-  // The sidebar's own content, such as views and tags, in place of the section links, held in a .sidebar-content box.
+  // The sidebar's own content, such as tags or a player, in place of the section links, held in a .sidebar-content box
+  // below any `views`.
   sidebar?: ReactNode;
   // Makes the sidebar's edge draggable on wide screens.
   sidebar_width?: SidebarWidth;
@@ -237,7 +249,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, brand_icon, brand_logo, sections = [], active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
+  brand, brand_icon, brand_logo, sections = [], views, active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -245,6 +257,9 @@ export function Shell({
   const main = useRef<HTMLElement>(null);
   const menu_button = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const has_content = sidebar_content !== undefined && sidebar_content !== null;
+  // With views the sidebar holds more than navigation, so it is an aside and only the views are the navigation.
+  const Sidebar = views ? "aside" : "nav";
   const first_view = useRef(true);
   const logged_out = held_logged_out ?? user === null;
   const user_name = typeof user === "string" && user !== "" ? user : undefined;
@@ -308,9 +323,20 @@ export function Shell({
         {!logged_out && tools}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
-        <nav ref={sidebar} id="sidebar" className="sidebar" aria-label={labels.main_navigation}>
+        <Sidebar ref={sidebar} id="sidebar" className="sidebar" aria-label={views ? undefined : labels.main_navigation}>
           {brand_in_sidebar && <a href={brand_href} className="sidebar-brand"><BrandMark brand={brand} icon={brand_icon} logo={brand_logo} /></a>}
-          {sidebar_content !== undefined && sidebar_content !== null ? <div className="sidebar-content">{sidebar_content}</div> : (
+          {views || has_content ? (
+            <div className="sidebar-content">
+              {views && (
+                <nav className="sidebar-nav" aria-label={labels.main_navigation}>
+                  {views.map((view) => (
+                    <RowLink key={view.id} href={view.href} current={view.id === active} icon={view.icon && <Icon icon={view.icon} />} label={view.label} />
+                  ))}
+                </nav>
+              )}
+              {sidebar_content}
+            </div>
+          ) : (
             <div className="sidebar-links">
               {sections.map((section) => (
                 <a key={section.id} href={section.href} data-section={section.id} className={section.id === active ? "active" : undefined} aria-current={section.id === active ? "page" : undefined}>
@@ -325,12 +351,12 @@ export function Shell({
             {user_name !== undefined && (
               <div className="sidebar-account">
                 {user_href
-                  ? <FootLink href={user_href} current={location.hash === user_href} icon={<PersonIcon />} label={user_name} />
+                  ? <RowLink href={user_href} current={location.hash === user_href} icon={<PersonIcon />} label={user_name} />
                   : <span className="tree-row"><span className="tree-label"><PersonIcon /><span className="user-name">{user_name}</span></span></span>}
                 {on_logout && <button className="tree-row" onClick={on_logout}>{labels.sign_out}</button>}
               </div>
             )}
-            {settings && <FootLink href={settings.href} current={settings.active ?? active === "settings"} icon={<CogIcon />} label={labels.settings} on_open={settings.on_open} />}
+            {settings && <RowLink href={settings.href} current={settings.active ?? active === "settings"} icon={<CogIcon />} label={labels.settings} on_open={settings.on_open} />}
           </div>
           {sidebar_width && width !== undefined && (
             <ResizeHandle
@@ -345,7 +371,7 @@ export function Shell({
               class_name="sidebar-resize"
             />
           )}
-        </nav>
+        </Sidebar>
         <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
         <main ref={main} id="main" className={main_class} tabIndex={-1}>{children}</main>
       </div>

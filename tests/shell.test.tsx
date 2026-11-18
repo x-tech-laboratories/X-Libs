@@ -4,6 +4,7 @@ import "../src/web/react/test_stubs.ts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { FolderIcon, HistoryIcon } from "../src/web/react/icons.tsx";
 import { Shell } from "../src/web/react/shell.tsx";
 import { theme_choice } from "../src/web/theme.ts";
 
@@ -49,6 +50,35 @@ describe("shell sidebar", () => {
 
     expect(screen.queryByRole("link", { name: "Runs" })).toBeNull();
     expect(screen.getByRole("navigation", { name: "Main" }).textContent).toContain("My Day");
+  });
+
+  it("puts the app's views with their icons above its own sidebar, in the one navigation landmark", () => {
+    const views = [{ id: "folders", label: "Folders", href: "#/folders", icon: FolderIcon }, { id: "history", label: "History", href: "#/history", icon: HistoryIcon }];
+    render(<Shell brand="X-Test" views={views} active="history" sidebar={<p>Now playing</p>} settings={{ href: "#/settings" }} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    const navigation = screen.getByRole("navigation", { name: "Main" });
+    expect(screen.getAllByRole("navigation")).toHaveLength(1);
+    expect(navigation.className).toBe("sidebar-nav");
+    expect([...navigation.querySelectorAll("a")].map((link) => link.textContent)).toEqual(["Folders", "History"]);
+    expect(navigation.textContent).not.toContain("Now playing");
+    expect(screen.getByRole("link", { name: "History" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "History" }).className).toBe("tree-row active");
+    expect(screen.getByRole("link", { name: "Folders" }).getAttribute("aria-current")).toBeNull();
+    expect(navigation.querySelectorAll("svg.line-icon[aria-hidden='true']")).toHaveLength(2);
+
+    const sidebar = screen.getByRole("complementary");
+    expect(sidebar.id).toBe("sidebar");
+    const content = sidebar.querySelector(".sidebar-content")!;
+    expect(content.firstElementChild).toBe(navigation);
+    expect(screen.getByText("Now playing").parentElement).toBe(content);
+    expect(sidebar.querySelector(".sidebar-foot")!.textContent).toContain("Settings");
+  });
+
+  it("draws the views alone when the app has no sidebar of its own", () => {
+    render(<Shell brand="X-Test" views={[{ id: "runs", label: "Runs", href: "#/runs" }]} active="runs" theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    expect(screen.getByRole("navigation", { name: "Main" }).parentElement!.className).toBe("sidebar-content");
+    expect(screen.getByRole("link", { name: "Runs" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("moves focus into the sidebar when the phone menu opens and back on Escape", () => {
