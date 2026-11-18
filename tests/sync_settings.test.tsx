@@ -95,7 +95,7 @@ test("offers to trust a server's self-signed certificate when connecting fails o
   await waitFor(() => screen.getByText("Signed in as ada"));
 });
 
-test("the sidebar button hides while off, shows what is waiting, syncs on a click and opens the settings when sync fails", async () => {
+test("the sidebar button says sync is not set up while off and opens the settings, shows what is waiting, syncs on a click and opens the settings when sync fails", async () => {
   let status: SyncStatus = off;
   let syncs = 0;
   let opened = 0;
@@ -106,8 +106,10 @@ test("the sidebar button hides while off, shows what is waiting, syncs on a clic
     sync_now: async () => ((syncs++, status = { ...status, pending_changes: 0 }), status),
   };
   let listener = () => {};
-  const { container } = render(<SyncButton device={device} subscribe={(next) => ((listener = next), () => {})} on_open_settings={() => opened++} />);
-  await waitFor(() => expect(container.innerHTML).toBe(""));
+  render(<SyncButton device={device} subscribe={(next) => ((listener = next), () => {})} on_open_settings={() => opened++} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Sync not set up/ }));
+  expect(opened).toBe(1);
+  expect(syncs).toBe(0);
 
   status = { ...off, state: "idle", server_url: "https://fit.example.org/", pending_changes: 3 };
   listener();
@@ -119,6 +121,6 @@ test("the sidebar button hides while off, shows what is waiting, syncs on a clic
   status = { ...status, state: "failed", error: "Wrong password" };
   listener();
   fireEvent.click(await screen.findByRole("button", { name: /Sync failed/ }));
-  expect(opened).toBe(1);
+  expect(opened).toBe(2);
   expect(syncs).toBe(1);
 });
