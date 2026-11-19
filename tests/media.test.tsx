@@ -5,7 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ListPicker, type PickableList } from "../src/web/react/list_picker.tsx";
-import { Avatar, Cover, MediaGrid, MediaTile } from "../src/web/react/media.tsx";
+import { group_items } from "../src/grouping.ts";
+import { Avatar, Cover, GroupedMediaGrid, MediaGrid, MediaTile } from "../src/web/react/media.tsx";
 import { MenuButton } from "../src/web/react/menu_button.tsx";
 import { ContextMenus } from "../src/web/react/menus.tsx";
 
@@ -95,6 +96,20 @@ describe("media tile", () => {
     expect(fireEvent.click(title, { ctrlKey: true })).toBe(true);
     expect(on_open).toHaveBeenCalledTimes(2);
     expect(title.getAttribute("href")).toBe("#/exercises/squat");
+  });
+
+  it("shows groups under headings with their counts, each its own list named by the group", () => {
+    const albums = [{ name: "Blue Train", genre: "Jazz" }, { name: "Kind of Blue", genre: "Jazz" }, { name: "Untitled", genre: "" }];
+    render(
+      <GroupedMediaGrid groups={group_items(albums, (album) => album.genre)} name_of={(key) => key ?? "No genre"} level={3}>
+        {(album) => <MediaTile key={album.name} title={album.name} href={`#/album/${album.name}`} />}
+      </GroupedMediaGrid>,
+    );
+
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Jazz 2", "No genre 1"]);
+    expect(screen.getByRole("heading", { name: "Jazz 2" }).querySelector(".group-count")!.textContent).toBe("2");
+    expect(screen.getByRole("list", { name: "Jazz" }).querySelectorAll("[role=listitem]")).toHaveLength(2);
+    expect(screen.getByRole("list", { name: "No genre" }).textContent).toContain("Untitled");
   });
 });
 

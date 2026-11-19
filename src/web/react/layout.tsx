@@ -1,9 +1,10 @@
-// The pieces a page is laid out with: the page heading, panels, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings pages and rows, and list row buttons.
+// The pieces a page is laid out with: the page heading, panels and groups of them, facts, tiles, cards, tabs, breadcrumbs, toolbars, steppers, settings pages and rows, and list row buttons.
 
 import { Fragment, useState, type MouseEvent, type ReactNode } from "react";
 import type { Tone } from "./badges.tsx";
 import { format_count } from "../format.ts";
 import { Outline } from "./outline.tsx";
+import type { ItemGroup } from "../../grouping.ts";
 
 export { moved } from "../tables.ts";
 
@@ -70,6 +71,27 @@ export function Section({ title, tools, class_name, on_context_menu, level = 2, 
       {children}
     </section>
   );
+}
+
+interface GroupSectionsProps<Item> {
+  groups: ItemGroup<Item>[];
+  // A group's heading from its key, null being the items with none.
+  name_of: (key: string | null) => string;
+  level?: 2 | 3 | 4;
+  // What shows under a group's heading, such as its items as tiles or a table.
+  children: (items: Item[], name: string) => ReactNode;
+}
+
+// A section per group from `group_items`, headed by its name and how many items it holds.
+export function GroupSections<Item>({ groups, name_of, level, children }: GroupSectionsProps<Item>) {
+  return groups.map((group) => {
+    const name = name_of(group.key);
+    return (
+      <Section key={group.key ?? "\u0000none"} level={level} title={<>{name} <span className="group-count">{format_count(group.items.length)}</span></>}>
+        {children(group.items, name)}
+      </Section>
+    );
+  });
 }
 
 // A part of a form or page folded under a line that opens it, such as "More options": Halon's .form-group.
