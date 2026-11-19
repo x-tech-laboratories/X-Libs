@@ -1,7 +1,10 @@
-// Pictures with words beside them: avatars, covers, and tiles for videos, albums or playlists laid out in a grid or as rows.
+// Pictures with words beside them: avatars, covers, and tiles for videos, albums or playlists laid out in a grid or as rows,
+// optionally in groups under headings.
 
 import { useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { Resource } from "./states.tsx";
+import { GroupSections } from "./layout.tsx";
+import type { ItemGroup } from "../../grouping.ts";
 
 // ── Avatars ──────────────────────────────────────────────────────────────────
 
@@ -115,4 +118,23 @@ export function MediaTile({ title, href, image, corner, lines = [], dimmed = fal
 // Tiles side by side filling the width, or one under another as rows with the picture on the left.
 export function MediaGrid({ label, rows = false, children }: { label?: string; rows?: boolean; children: ReactNode }) {
   return <div role="list" aria-label={label} className={rows ? "media-grid media-rows" : "media-grid"}>{children}</div>;
+}
+
+interface GroupedMediaGridProps<Item> {
+  groups: ItemGroup<Item>[];
+  // A group's heading from its key, null being the items with none.
+  name_of: (key: string | null) => string;
+  rows?: boolean;
+  level?: 2 | 3 | 4;
+  // One item's tile, with its key.
+  children: (item: Item) => ReactNode;
+}
+
+// The groups from `group_items` each under a heading with its count, their tiles in a grid or as rows of their own.
+export function GroupedMediaGrid<Item>({ groups, name_of, rows, level, children }: GroupedMediaGridProps<Item>) {
+  return (
+    <GroupSections groups={groups} name_of={name_of} level={level}>
+      {(items, name) => <MediaGrid label={name} rows={rows}>{items.map(children)}</MediaGrid>}
+    </GroupSections>
+  );
 }
