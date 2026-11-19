@@ -85,6 +85,14 @@ describe("media tile", () => {
     expect(tile.querySelector(".media-blank")).not.toBeNull();
     expect(screen.getByRole("list").className).toBe("media-grid media-rows");
   });
+
+  it("takes Halon's small or large tiles, leaving medium as the plain grid", () => {
+    render(<><MediaGrid label="Small" size="small">{null}</MediaGrid><MediaGrid label="Medium" size="medium">{null}</MediaGrid><MediaGrid label="Large" rows size="large">{null}</MediaGrid></>);
+
+    expect(screen.getByRole("list", { name: "Small" }).className).toBe("media-grid media-small");
+    expect(screen.getByRole("list", { name: "Medium" }).className).toBe("media-grid");
+    expect(screen.getByRole("list", { name: "Large" }).className).toBe("media-grid media-rows media-large");
+  });
   it("opens in place on a plain click of its title or picture, leaving other clicks to the link", () => {
     const on_open = vi.fn();
     render(<MediaTile title="Squat" href="#/exercises/squat" on_open={on_open} />);
