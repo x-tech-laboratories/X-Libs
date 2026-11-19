@@ -115,9 +115,22 @@ export function MediaTile({ title, href, image, corner, lines = [], dimmed = fal
   );
 }
 
+// How wide a grid's tiles are: Halon's 160, 240 or 320 pixels, as many to a row as fit.
+export type MediaGridSize = "small" | "medium" | "large";
+
+export const media_grid_sizes: readonly MediaGridSize[] = ["small", "medium", "large"];
+
+interface MediaGridProps {
+  label?: string;
+  rows?: boolean;
+  size?: MediaGridSize;
+  children: ReactNode;
+}
+
 // Tiles side by side filling the width, or one under another as rows with the picture on the left.
-export function MediaGrid({ label, rows = false, children }: { label?: string; rows?: boolean; children: ReactNode }) {
-  return <div role="list" aria-label={label} className={rows ? "media-grid media-rows" : "media-grid"}>{children}</div>;
+export function MediaGrid({ label, rows = false, size = "medium", children }: MediaGridProps) {
+  const classes = ["media-grid", rows && "media-rows", size !== "medium" && `media-${size}`].filter(Boolean).join(" ");
+  return <div role="list" aria-label={label} className={classes}>{children}</div>;
 }
 
 interface GroupedMediaGridProps<Item> {
@@ -125,16 +138,17 @@ interface GroupedMediaGridProps<Item> {
   // A group's heading from its key, null being the items with none.
   name_of: (key: string | null) => string;
   rows?: boolean;
+  size?: MediaGridSize;
   level?: 2 | 3 | 4;
   // One item's tile, with its key.
   children: (item: Item) => ReactNode;
 }
 
 // The groups from `group_items` each under a heading with its count, their tiles in a grid or as rows of their own.
-export function GroupedMediaGrid<Item>({ groups, name_of, rows, level, children }: GroupedMediaGridProps<Item>) {
+export function GroupedMediaGrid<Item>({ groups, name_of, rows, size, level, children }: GroupedMediaGridProps<Item>) {
   return (
     <GroupSections groups={groups} name_of={name_of} level={level}>
-      {(items, name) => <MediaGrid label={name} rows={rows}>{items.map(children)}</MediaGrid>}
+      {(items, name) => <MediaGrid label={name} rows={rows} size={size}>{items.map(children)}</MediaGrid>}
     </GroupSections>
   );
 }
