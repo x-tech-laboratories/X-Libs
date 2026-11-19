@@ -474,8 +474,11 @@ nix-shell        # Node 24 and ssh-keygen, which the key tests use
 npm install
 npm run build    # compiles src/ into dist/
 npm test
+npm run coverage # raises the coverage floor in vitest.config.ts; commit it
 npm run lint
 ```
+
+The coverage floor in `vitest.config.ts` only rises: CI fails when coverage drops below it or a raised floor is not committed.
 
 `npm pack` and `npm publish` build first.
 
