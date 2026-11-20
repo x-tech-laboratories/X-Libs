@@ -4,7 +4,9 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -87,6 +89,20 @@ export function read_secret_file(path: string): string {
   }
   if (secret.trim() === "") throw new Error(`The secret at ${path} is empty`);
   return secret.trim();
+}
+
+// A new random secret, such as a webhook's, written to a file only its owner may read, replacing any before it; the
+// caller gives it out only when asked, through read_secret_file.
+export function create_secret_file(path: string, bytes = 32): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${randomBytes(bytes).toString("hex")}\n`, { mode: 0o600 });
+  // A file that was there before keeps its old mode through writeFileSync, so it is tightened too.
+  chmodSync(path, 0o600);
+}
+
+// Whether the file holds a secret, without reading it out.
+export function has_secret_file(path: string): boolean {
+  return existsSync(path) && readFileSync(path, "utf8").trim() !== "";
 }
 
 // ── Reading ──────────────────────────────────────────────────────────────────
