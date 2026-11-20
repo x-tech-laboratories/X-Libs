@@ -1,6 +1,7 @@
 // A device's side of sync: it keeps its own SQLite copy, sends its changes within seconds, takes everyone else's in the same
 // round trip, follows the server's event stream to hear of changes at once, and works on offline until the server answers.
-// It runs wherever fetch does: a desktop app's main process, a server, or a phone's page.
+// It runs wherever fetch does: a desktop app's main process, a server, or a phone's page. On a host that also serves sync,
+// the changes it sends include those its own devices sent it, so a chain of hosts passes every change both ways.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 

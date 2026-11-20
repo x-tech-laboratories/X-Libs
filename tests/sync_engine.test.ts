@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { migrate, type SqlDatabase } from "../src/sql.ts";
-import { create_sync_engine } from "../src/sync_engine.ts";
+import { create_sync_engine, from_server, sync_schema_sql } from "../src/sync_engine.ts";
 
 const engine = create_sync_engine({
   tables: [
@@ -115,5 +115,47 @@ describe("sync engine", () => {
     phone.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
     push(phone, desktop);
     expect(engine.has_unpushed_changes(desktop)).toBe(false);
+  });
+
+  it("passes on what a device sent here to its own server, and never back to that device", () => {
+    const phone = open_device();
+    const daemon = open_device();
+    phone.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
+    const phone_site = engine.read_state(phone).site;
+
+    engine.apply_changes(daemon, engine.collect_unpushed_changes(phone).changes, phone_site);
+
+    expect(engine.collect_unpushed_changes(daemon).changes.map((change) => change.key)).toEqual(["l1", "l1", "l1"]);
+    expect(engine.collect_changes_since(daemon, 0, phone_site).changes).toEqual([]);
+    expect(engine.collect_changes_since(daemon, 0, "another device").changes).toHaveLength(3);
+  });
+
+  it("sends a value that came from the server once this device edits it", () => {
+    const server = open_device();
+    const phone = open_device();
+    server.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
+    push(server, phone);
+    expect(engine.has_unpushed_changes(phone)).toBe(false);
+
+    phone.exec("UPDATE lists SET name = 'Leg day' WHERE id = 'l1'");
+
+    expect(engine.collect_unpushed_changes(phone).changes).toMatchObject([{ key: "l1", column: "name", value: "Leg day" }]);
+    expect(rows(phone, "SELECT column_name, via FROM sync_cells ORDER BY column_name")).toEqual([
+      { column_name: "_exists", via: from_server },
+      { column_name: "id", via: from_server },
+      { column_name: "name", via: "" },
+    ]);
+  });
+
+  it("adds where each version came from to a database made before it was kept, keeping every cell", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec("CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE items (id TEXT PRIMARY KEY, list_id TEXT, title TEXT, done INTEGER, seen_here INTEGER); CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)");
+    database.exec(sync_schema_sql);
+    database.exec("INSERT INTO lists VALUES ('l1', 'Legs'); INSERT INTO sync_cells VALUES ('lists', 'l1', 'name', 5, 'old device', 3)");
+
+    engine.install(database);
+    engine.install(database);
+
+    expect(rows(database, "SELECT ts, site, seq, via FROM sync_cells WHERE column_name = 'name'")).toEqual([{ ts: 5, site: "old device", seq: 3, via: "" }]);
   });
 });

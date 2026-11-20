@@ -1,6 +1,7 @@
 // The server's side of sync: it holds the copy every device syncs with, takes each device's changes and hands back
 // everyone else's, gives a new device the whole data, and lets a device replace it, starting a new generation. Given a
-// file store, it also keeps the files the rows name, such as covers, which devices send and fetch by name.
+// file store, it also keeps the files the rows name, such as covers, which devices send and fetch by name. A host that
+// also syncs with a server of its own, such as a daemon a phone syncs with, passes each device's changes on to it.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -35,11 +36,11 @@ export class GenerationMismatch extends Error {}
 
 // ── Calls ────────────────────────────────────────────────────────────────────
 
-// Takes a device's changes, then gives back everyone else's since its cursor, and whether anything here changed.
+// Takes a device's changes, noted as its so they never go back to it, then gives back everyone else's since its cursor, and whether anything here changed.
 export function exchange_changes(engine: SyncEngine, database: SqlDatabase, request: SyncExchangeRequest): [SyncExchangeResponse, boolean] {
   const { generation } = engine.read_state(database);
   if (request.generation !== generation) throw new GenerationMismatch(`the server's data is now generation ${generation}`);
-  const applied = engine.apply_changes(database, request.changes);
+  const applied = engine.apply_changes(database, request.changes, request.site);
   const outgoing = engine.collect_changes_since(database, request.cursor, request.site);
   return [{ generation, cursor: outgoing.up_to_seq, changes: outgoing.changes }, applied > 0];
 }
