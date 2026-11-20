@@ -1,7 +1,8 @@
 // Keeps an app's SQLite tables alike on every device. Every value sync tracks is a cell, one column of one row, holding the
 // time it was last written and the device that wrote it; the newest write of each cell wins on every device, and a row's
 // presence is a cell of its own. Triggers stamp the app's own writes, whatever code makes them, so the app's store code
-// needs no changes to sync.
+// needs no changes to sync. Each cell also notes which side its version came in from, so a host between a device and the
+// server passes changes on both ways without sending one back to where it came from.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export interface SyncStateRow {
   // The server data this device follows, or empty when it follows none.
   server_generation: string;
   last_seq: number;
-  // This device's own changes up to here have reached the server.
+  // The changes made here, and those devices sent here, up to here have reached the server.
   pushed_seq: number;
   // The server's changes up to here have reached this device.
   pulled_seq: number;
@@ -53,6 +54,9 @@ export type SyncEngine = ReturnType<typeof create_sync_engine>;
 const exists_column = "_exists";
 const now_ms = `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 const trigger_events = ["insert", "update", "delete"] as const;
+
+// The via of a cell whose version came from the server this database follows; '' is a write made here, and a device's site one it sent.
+export const from_server = "^server";
 
 // Safe to run on every start; a new database gets fresh device and data ids.
 export const sync_schema_sql = `
@@ -77,6 +81,14 @@ export const sync_schema_sql = `
     PRIMARY KEY (table_name, row_key, column_name)
   ) WITHOUT ROWID;
   CREATE INDEX IF NOT EXISTS sync_cells_by_seq ON sync_cells (seq);`;
+
+// Adds to a database made by sync_schema_sql, each step run once, in order, on every start.
+export const sync_schema_upgrades: { is_done: (database: SqlDatabase) => boolean; sql: string }[] = [
+  {
+    is_done: (database) => (database.prepare("PRAGMA table_info(sync_cells)").all() as { name: string }[]).some((column) => column.name === "via"),
+    sql: "ALTER TABLE sync_cells ADD COLUMN via TEXT NOT NULL DEFAULT ''",
+  },
+];
 
 interface CellRow {
   table_name: string;
@@ -118,12 +130,12 @@ export function create_sync_engine(options: SyncEngineOptions) {
   function stamp_cell_sql(table: Table, row_key: string, column: string, condition = "1"): string {
     const cell = `table_name = '${table.name}' AND row_key = ${row_key} AND column_name = '${column}'`;
     return `UPDATE sync_state SET last_seq = last_seq + 1 WHERE ${condition};
-      INSERT INTO sync_cells (table_name, row_key, column_name, ts, site, seq)
+      INSERT INTO sync_cells (table_name, row_key, column_name, ts, site, seq, via)
         SELECT '${table.name}', ${row_key}, '${column}',
           max(${now_ms}, coalesce((SELECT ts + 1 FROM sync_cells WHERE ${cell}), 0)),
-          (SELECT site FROM sync_state), (SELECT last_seq FROM sync_state)
+          (SELECT site FROM sync_state), (SELECT last_seq FROM sync_state), ''
         WHERE ${condition}
-      ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq;`;
+      ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq, via = '';`;
   }
 
   function drop_triggers(database: SqlDatabase): void {
@@ -133,6 +145,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
   // Run after every schema change, since the triggers name each column.
   function install(database: SqlDatabase): void {
     database.exec(sync_schema_sql);
+    for (const upgrade of sync_schema_upgrades) if (!upgrade.is_done(database)) database.exec(upgrade.sql);
     drop_triggers(database);
     const is_local = "(SELECT is_applying FROM sync_state) = 0";
 
@@ -176,7 +189,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
   function stamp_existing_rows(database: SqlDatabase, table_name: string): void {
     database.exec("UPDATE sync_state SET last_seq = last_seq + 1");
     database
-      .prepare(`UPDATE sync_cells SET ts = ${now_ms}, site = (SELECT site FROM sync_state), seq = (SELECT last_seq FROM sync_state) WHERE table_name = ? AND site = ''`)
+      .prepare(`UPDATE sync_cells SET ts = ${now_ms}, site = (SELECT site FROM sync_state), seq = (SELECT last_seq FROM sync_state), via = '' WHERE table_name = ? AND site = ''`)
       .run(table_name);
   }
 
@@ -190,14 +203,15 @@ export function create_sync_engine(options: SyncEngineOptions) {
     for (const [column, value] of Object.entries(changes)) database.prepare(`UPDATE sync_state SET "${column}" = ?`).run(value as string | number);
   }
 
+  // Changes the server has not had are those made here or sent here by a device, never those that came from the server.
   function has_unpushed_changes(database: SqlDatabase): boolean {
-    const { site, pushed_seq } = read_state(database);
-    return database.prepare("SELECT 1 FROM sync_cells WHERE seq > ? AND site = ? LIMIT 1").get(pushed_seq, site) !== undefined;
+    const { pushed_seq } = read_state(database);
+    return database.prepare("SELECT 1 FROM sync_cells WHERE seq > ? AND via != ? LIMIT 1").get(pushed_seq, from_server) !== undefined;
   }
 
   function count_unpushed_rows(database: SqlDatabase): number {
-    const { site, pushed_seq } = read_state(database);
-    const row = database.prepare("SELECT count(DISTINCT table_name || char(0) || row_key) AS count FROM sync_cells WHERE seq > ? AND site = ?").get(pushed_seq, site);
+    const { pushed_seq } = read_state(database);
+    const row = database.prepare("SELECT count(DISTINCT table_name || char(0) || row_key) AS count FROM sync_cells WHERE seq > ? AND via != ?").get(pushed_seq, from_server);
     return (row as { count: number }).count;
   }
 
@@ -233,21 +247,21 @@ export function create_sync_engine(options: SyncEngineOptions) {
     return changes;
   }
 
-  // This device's own changes the server has not had yet, and the counter they were read at.
+  // The changes made here or sent here by devices that the server has not had yet, and the counter they were read at.
   function collect_unpushed_changes(database: SqlDatabase): CollectedChanges {
-    const { site, pushed_seq, last_seq } = read_state(database);
+    const { pushed_seq, last_seq } = read_state(database);
     const cells = database
-      .prepare("SELECT table_name, row_key, column_name, ts, site FROM sync_cells WHERE seq > ? AND seq <= ? AND site = ? ORDER BY seq")
-      .all(pushed_seq, last_seq, site) as CellRow[];
+      .prepare("SELECT table_name, row_key, column_name, ts, site FROM sync_cells WHERE seq > ? AND seq <= ? AND via != ? ORDER BY seq")
+      .all(pushed_seq, last_seq, from_server) as CellRow[];
     return { changes: cells_to_changes(database, cells), up_to_seq: last_seq };
   }
 
-  // Every change after the cursor that another device should hear about, leaving out the ones it made itself.
+  // Every change after the cursor that another device should hear about, leaving out the ones it made or sent here itself.
   function collect_changes_since(database: SqlDatabase, cursor: number, except_site: string): CollectedChanges {
     const { last_seq } = read_state(database);
     const cells = database
-      .prepare("SELECT table_name, row_key, column_name, ts, site FROM sync_cells WHERE seq > ? AND seq <= ? AND site != ? ORDER BY seq")
-      .all(cursor, last_seq, except_site) as CellRow[];
+      .prepare("SELECT table_name, row_key, column_name, ts, site FROM sync_cells WHERE seq > ? AND seq <= ? AND site != ? AND via != ? ORDER BY seq")
+      .all(cursor, last_seq, except_site, except_site) as CellRow[];
     return { changes: cells_to_changes(database, cells), up_to_seq: last_seq };
   }
 
@@ -274,18 +288,18 @@ export function create_sync_engine(options: SyncEngineOptions) {
     return !current || change.ts > current.ts || (change.ts === current.ts && change.site > current.site);
   }
 
-  function record_cell(database: SqlDatabase, change: SyncChange): void {
+  function record_cell(database: SqlDatabase, change: SyncChange, via: string): void {
     database.exec("UPDATE sync_state SET last_seq = last_seq + 1");
     database
       .prepare(
-        `INSERT INTO sync_cells (table_name, row_key, column_name, ts, site, seq) VALUES (?, ?, ?, ?, ?, (SELECT last_seq FROM sync_state))
-         ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq`,
+        `INSERT INTO sync_cells (table_name, row_key, column_name, ts, site, seq, via) VALUES (?, ?, ?, ?, ?, (SELECT last_seq FROM sync_state), ?)
+         ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq, via = excluded.via`,
       )
-      .run(change.table, change.key, change.column, change.ts, change.site);
+      .run(change.table, change.key, change.column, change.ts, change.site, via);
   }
 
   // Changes from another device for one row: whether it should exist, then each value newer than this device's.
-  function apply_row_changes(database: SqlDatabase, table: Table, known_columns: string[], row_key: string, changes: SyncChange[]): number {
+  function apply_row_changes(database: SqlDatabase, table: Table, known_columns: string[], row_key: string, changes: SyncChange[], via: string): number {
     const current_cells = new Map(
       (database.prepare("SELECT column_name, ts, site FROM sync_cells WHERE table_name = ? AND row_key = ?").all(table.name, row_key) as CellRow[]).map(
         (cell) => [cell.column_name, cell],
@@ -297,7 +311,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
 
     const exists_change = changes.find((change) => change.column === exists_column);
     if (exists_change && is_newer(exists_change, current_cells.get(exists_column))) {
-      record_cell(database, exists_change);
+      record_cell(database, exists_change, via);
       applied += 1;
       if (exists_change.value === 1 && !exists) {
         const values = changes.filter((change) => change.column !== exists_column && known_columns.includes(change.column));
@@ -314,7 +328,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
 
     for (const change of changes) {
       if (change.column === exists_column || !known_columns.includes(change.column) || !is_newer(change, current_cells.get(change.column))) continue;
-      record_cell(database, change);
+      record_cell(database, change, via);
       applied += 1;
       if (exists) {
         database
@@ -351,7 +365,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
     }
   }
 
-  function apply_each_row(database: SqlDatabase, changes: SyncChange[]): number {
+  function apply_each_row(database: SqlDatabase, changes: SyncChange[], via: string): number {
     const rows = new Map<string, { table: Table; key: string; changes: SyncChange[] }>();
     for (const change of changes) {
       const table = tables_by_name.get(change.table);
@@ -365,23 +379,23 @@ export function create_sync_engine(options: SyncEngineOptions) {
     const ordered_rows = [...rows.values()].sort((first, second) => tables.indexOf(first.table) - tables.indexOf(second.table));
     const known_columns = new Map(tables.map((table) => [table, synced_columns(database, table)]));
     let applied = 0;
-    for (const row of ordered_rows) applied += apply_row_changes(database, row.table, known_columns.get(row.table)!, row.key, row.changes);
+    for (const row of ordered_rows) applied += apply_row_changes(database, row.table, known_columns.get(row.table)!, row.key, row.changes, via);
     return applied;
   }
 
-  // Applies changes from another device as one transaction, and returns how many were newer than what this device had.
-  function apply_changes(database: SqlDatabase, changes: SyncChange[]): number {
-    return in_sync_transaction(database, () => apply_each_row(database, changes));
+  // Applies changes from the server, or from the device via names, as one transaction; returns how many were newer than what was here.
+  function apply_changes(database: SqlDatabase, changes: SyncChange[], via: string = from_server): number {
+    return in_sync_transaction(database, () => apply_each_row(database, changes, via));
   }
 
   // Swaps every synced row for another copy's data in one transaction; rows kept to this device stay.
-  function replace_with_snapshot(database: SqlDatabase, changes: SyncChange[]): void {
+  function replace_with_snapshot(database: SqlDatabase, changes: SyncChange[], via: string = from_server): void {
     in_sync_transaction(database, () => {
       for (const table of [...tables].reverse()) {
         database.exec(`DELETE FROM "${table.name}" WHERE rowid IN (SELECT rowid FROM "${table.name}" AS row WHERE ${filter_sql(table, "row")})`);
       }
       database.exec("DELETE FROM sync_cells");
-      apply_each_row(database, changes);
+      apply_each_row(database, changes, via);
     });
   }
 

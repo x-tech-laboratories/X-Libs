@@ -112,7 +112,7 @@ export interface SyncStatus {
   user: string;
   // When the last exchange with the server finished, as an ISO time; empty if never.
   last_synced_at: string;
-  // How many rows this device changed that the server has not had yet.
+  // How many rows changed here, or sent here by devices syncing with this one, that the server has not had yet.
   pending_changes: number;
   error: string;
 }
