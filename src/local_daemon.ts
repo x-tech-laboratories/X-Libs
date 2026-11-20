@@ -166,7 +166,11 @@ export function socket_request(socket_path: string, method: string, path: string
 // Posts one call with its arguments as a JSON array, the way a server's bridge route takes them, and answers with what
 // it returned: undefined for 204, the parsed JSON otherwise. A refusal throws with the daemon's own message.
 export async function call_daemon(socket_path: string, path: string, args: unknown[] = [], headers: Record<string, string> = {}): Promise<unknown> {
-  const reply = await socket_request(socket_path, "POST", path, JSON.stringify(args), headers);
+  return daemon_answer(await socket_request(socket_path, "POST", path, JSON.stringify(args), headers));
+}
+
+// What a call's reply holds, read the same way whether it came over the socket or from a daemon on another host.
+export function daemon_answer(reply: SocketReply): unknown {
   if (reply.status >= 400) throw new Error(daemon_error(reply));
   if (reply.status === 204 || reply.text === "") return undefined;
   return JSON.parse(reply.text);
