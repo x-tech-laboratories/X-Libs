@@ -112,7 +112,7 @@ function parse_or_null(text: string | null): Manifest | null {
   }
 }
 
-// The whole change since the base, as the change checks take it.
+// The whole change since the base, as the change checks take it, with the base resolved to its commit.
 export async function read_change(folder: string, base: string, options: ReadChangeOptions = {}): Promise<Change> {
   const working_tree = options.working_tree ?? false;
   const after = (path: string) => (working_tree ? Promise.resolve(file_on_disk(folder, path)) : file_at(folder, "HEAD", path));
@@ -121,6 +121,7 @@ export async function read_change(folder: string, base: string, options: ReadCha
   const repository = options.repository ?? repository_of_remote(await git(["remote", "get-url", "origin"], folder).catch(() => ""));
   return {
     repository,
+    base: (await git(["rev-parse", "--verify", `${base}^{commit}`], folder)).trim(),
     files: await read_changed_files(folder, base, working_tree),
     commits: await read_commits(folder, base),
     package_json,

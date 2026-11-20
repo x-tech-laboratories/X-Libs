@@ -77,6 +77,7 @@ describe("reading a change from git", () => {
     expect(change.vitest_config).toEqual({ before: "thresholds: { lines: 80 }", after: "thresholds: { lines: 80 }" });
     expect(change.package_json.before).toBe(JSON.stringify({ dependencies: {} }));
     expect((await read_change(folder, base, { repository: "someone/else", working_tree: true })).repository).toBe("someone/else");
+    expect((await read_change(folder, "HEAD~1")).base).toBe(base);
     writeFileSync(join(folder, "node_modules", "bare", "package.json"), "{}");
     expect(installed_licence(folder, "bare")).toBeNull();
   });
@@ -150,6 +151,32 @@ describe("x-libs-check", () => {
     const code = await run_check_command(["--base", base, "firmware"], { cwd: folder, env: {}, out, err: capture(), registry });
     expect(code).toBe(0);
     expect(out.text()).toBe("! firmware: warning\n    the build is large\n");
+  });
+
+  it("runs an app's own default checks under its own name, handing them the base it worked out", async () => {
+    const { folder, base, git } = make_repository();
+    git("update-ref", "refs/remotes/origin/main", base);
+    writeFileSync(join(folder, "d.ts"), "const d = 4;\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "feat: d");
+    const registry = create_check_registry();
+    const seen: (string | undefined)[] = [];
+    registry.add("size", (change) => {
+      seen.push(change.base);
+      return { gate: "size", outcome: "passed", findings: [] };
+    });
+    const context = { cwd: folder, env: {}, err: capture(), registry, default_checks: ["size"], command_name: "x-dev-check" };
+    const out = capture();
+
+    expect(await run_check_command([], { ...context, out })).toBe(0);
+    expect(seen).toEqual([base]);
+    expect(out.text()).toBe("✓ size: passed\n");
+    const help = capture();
+    await run_check_command(["--help"], { ...context, out: help });
+    expect(help.text()).toContain("Usage: x-dev-check");
+    expect(help.text()).toContain("it runs: size.");
+    await run_check_command(["vibes"], { ...context, out: capture() });
+    expect(context.err.text()).toMatch(/^x-dev-check: no check called vibes/);
   });
 
   it("keeps only known settings of the right kind", () => {

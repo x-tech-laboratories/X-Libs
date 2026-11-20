@@ -23,13 +23,17 @@ export interface CheckCommandContext {
   err: { write(text: string): void };
   registry?: CheckRegistry;
   options?: Partial<ChangeCheckOptions>;
+  // The checks run when none are named, the built-in ones unless given.
+  default_checks?: readonly string[];
+  // The command's name in its usage and errors, x-libs-check unless given.
+  command_name?: string;
 }
 
-function usage(names: string[]): string {
-  return `Usage: x-libs-check [--base <ref>] [--repository <owner/name>] [--working-tree] [check...]
+function usage(command_name: string, defaults: readonly string[], names: string[]): string {
+  return `Usage: ${command_name} [--base <ref>] [--repository <owner/name>] [--working-tree] [check...]
 
 Runs the change checks on what changed since the base (the branch point from origin/main unless given) and fails
-when any check fails. With no checks named it runs: ${default_checks.join(", ")}.
+when any check fails. With no checks named it runs: ${defaults.join(", ")}.
 Checks: ${names.join(", ")}.
 Settings come from the "x-libs-check" key of package.json as it was at the base, so a change cannot loosen its own checks.`;
 }
@@ -70,21 +74,24 @@ async function git(args: string[], cwd: string): Promise<string> {
 // Runs the command with its arguments, answering the exit code: 0 when nothing failed, 1 when a check failed, 2 when misused.
 export async function run_check_command(args: string[], context: CheckCommandContext): Promise<number> {
   const registry = context.registry ?? create_check_registry();
+  const command_name = context.command_name ?? "x-libs-check";
+  const defaults = context.default_checks ?? default_checks;
+  const help = () => usage(command_name, defaults, registry.names());
   let parsed;
   try {
     parsed = parseArgs({ args, allowPositionals: true, options: { base: { type: "string" }, repository: { type: "string" }, "working-tree": { type: "boolean" }, help: { type: "boolean", short: "h" } } });
   } catch (error) {
-    context.err.write(`x-libs-check: ${error instanceof Error ? error.message : String(error)}\n\n${usage(registry.names())}\n`);
+    context.err.write(`${command_name}: ${error instanceof Error ? error.message : String(error)}\n\n${help()}\n`);
     return 2;
   }
   const { values, positionals } = parsed;
   if (values.help) {
-    context.out.write(`${usage(registry.names())}\n`);
+    context.out.write(`${help()}\n`);
     return 0;
   }
   const unknown = positionals.filter((name) => !registry.has(name));
   if (unknown.length) {
-    context.err.write(`x-libs-check: no check called ${unknown.join(", ")}\n\n${usage(registry.names())}\n`);
+    context.err.write(`${command_name}: no check called ${unknown.join(", ")}\n\n${help()}\n`);
     return 2;
   }
   try {
@@ -92,11 +99,11 @@ export async function run_check_command(args: string[], context: CheckCommandCon
     const repository = values.repository ?? context.env.GITHUB_REPOSITORY;
     const change = await read_change(context.cwd, base, { working_tree: values["working-tree"] ?? false, ...(repository ? { repository } : {}) });
     const manifest_options = options_from_manifest(change.package_json.before ?? change.package_json.after);
-    const results = await registry.run(positionals.length ? positionals : default_checks, change, { ...manifest_options, ...context.options });
+    const results = await registry.run(positionals.length ? positionals : defaults, change, { ...manifest_options, ...context.options });
     context.out.write(`${format_results(results)}\n`);
     return results.some((result) => result.outcome === "failed") ? 1 : 0;
   } catch (error) {
-    context.err.write(`x-libs-check: ${error instanceof Error ? error.message : String(error)}\n`);
+    context.err.write(`${command_name}: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
 }

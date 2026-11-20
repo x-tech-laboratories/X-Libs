@@ -42,6 +42,8 @@ export interface BeforeAndAfter {
 export interface Change {
   // The repository as owner/name, such as "x-tech-laboratories/X-Libs", or "" when it is not known.
   repository: string;
+  // The commit the change is measured from, as read_change resolved it.
+  base?: string;
   files: ChangedFile[];
   commits: Commit[];
   package_json: BeforeAndAfter;
@@ -73,7 +75,7 @@ export const x_tech_options: ChangeCheckOptions = {
   commit_trailer: "Assisted-by",
   trailer_organisations: ["x-tech-laboratories"],
   ai_mention: /\b(claude|anthropic|co-authored-by|generated with|ai[- ]generated|chatgpt|copilot)\b/i,
-  wrapped_libraries: ["drizzle-orm", "@tanstack/react-table", "lucide-react", "marked", "dompurify", "@tiptap/", "fflate", "rrule", "frimousse", "squarify", "react-error-boundary", "es-module-lexer", "hookable", "parse-duration", "pretty-bytes"],
+  wrapped_libraries: ["drizzle-orm", "@tanstack/react-table", "lucide-react", "marked", "dompurify", "@tiptap/", "fflate", "rrule", "frimousse", "squarify", "react-error-boundary", "es-module-lexer", "hookable", "parse-duration", "pretty-bytes", "emojibase", "emojibase-data", "@sqlite.org/sqlite-wasm", "@modelcontextprotocol/server", "@fastify/session", "nodemailer", "sshpk"],
   wrapping_repositories: ["x-tech-laboratories/X-Libs"],
   allowed_licences: ["0BSD", "MIT", "MIT-0", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "Zlib", "Unlicense", "CC0-1.0", "CC-BY-3.0", "CC-BY-4.0", "BlueOak-1.0.0", "Python-2.0", "Artistic-2.0", "MPL-2.0", "LGPL-2.1-or-later", "LGPL-3.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later"],
 };
@@ -131,7 +133,8 @@ export function check_commits(commits: readonly Commit[], trailer_needed: boolea
   for (const commit of commits) {
     const [subject = ""] = commit.message.split("\n");
     const short = commit.sha.slice(0, 7);
-    if (!conventional.test(subject)) findings.push(`${short} "${subject}" is not a Conventional Commit`);
+    // A subject that holds a secret is left out of the finding, so the log never repeats it.
+    if (!conventional.test(subject)) findings.push(secret_kind(subject) ? `${short}'s subject is not a Conventional Commit` : `${short} "${subject}" is not a Conventional Commit`);
     if (trailer && trailer_needed && !trailer.test(commit.message)) findings.push(`${short} has no ${commit_trailer} trailer`);
     if (trailer && !trailer_needed && trailer.test(commit.message)) findings.push(`${short} has an ${commit_trailer} trailer, which only ${trailer_organisations.join(" and ")} repositories carry`);
     const without_trailer = trailer ? commit.message.replace(new RegExp(trailer.source, "gm"), "") : commit.message;
@@ -204,22 +207,33 @@ export function check_leftovers(files: readonly ChangedFile[]): GateResult {
 
 const line_comment = /^\s*(?:\/\/|#)(?!\s*[─=#-]{2,})(?!!)/;
 
+// The first and last line of a file's opening overview comment, after any #! line; last is before first when there is none.
+export function overview_lines(file: ChangedFile): { first: number; last: number } {
+  const added = new Map(file.added.map((each) => [each.line, each.text]));
+  const lines = file.text?.split("\n");
+  const line_at = (number: number) => added.get(number) ?? lines?.[number - 1] ?? "";
+  const first = line_at(1).startsWith("#!") ? 2 : 1;
+  let last = first - 1;
+  while (line_comment.test(line_at(last + 1))) last += 1;
+  return { first, last };
+}
+
 // Comments of more than one line in what a change added; each is one plain line, but for a file's opening overview.
 export function check_comments(files: readonly ChangedFile[]): GateResult {
   const findings: string[] = [];
   for (const file of files.filter((each) => code_file.test(each.path))) {
-    const first = file.added[0]?.line === 1 ? file.added[0].text : (file.text?.split("\n", 1)[0] ?? "");
-    const overview_line = first.startsWith("#!") ? 2 : 1;
+    const overview = overview_lines(file);
     let run_start: number | null = null;
     let run_length = 0;
     let last_line = -1;
     const close = () => {
-      if (run_start !== null && run_start !== overview_line && run_length > 1) findings.push(`${file.path}:${run_start} has a comment ${run_length} lines long`);
+      if (run_start !== null && run_length > 1) findings.push(`${file.path}:${run_start} has a comment ${run_length} lines long`);
       run_start = null;
       run_length = 0;
     };
     for (const added of file.added) {
-      const is_comment = line_comment.test(added.text);
+      const in_overview = added.line >= overview.first && added.line <= overview.last;
+      const is_comment = !in_overview && line_comment.test(added.text);
       if (is_comment && run_start !== null && added.line === last_line + 1) run_length += 1;
       else {
         close();
