@@ -69,6 +69,15 @@ describe("PluginSettings", () => {
     expect(host.settings("a")).toEqual({ loud: true, name: "y" });
   });
 
+  it("draws a secret field hidden", async () => {
+    const host = create_plugin_host<Api>({ app });
+    await host.add(plugin("a", { settings: [{ key: "api_key", label: "Key", type: "text", default: "abc", secret: true }] }));
+    await host.start();
+    render(<PluginSettings host={host} />);
+
+    expect((screen.getByDisplayValue("abc") as HTMLInputElement).type).toBe("password");
+  });
+
   it("leaves its heading to the settings section around it when given null", async () => {
     const host = create_plugin_host<Api>({ app });
     await host.add(plugin("a", { description: "Does things" }));

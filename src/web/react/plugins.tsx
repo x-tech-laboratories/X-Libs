@@ -118,6 +118,6 @@ function SettingControl({ field, value, on_change }: { field: SettingField; valu
           on_commit={(event) => { const next = event.currentTarget.valueAsNumber; if (Number.isFinite(next)) on_change(next); }} />
       );
     case "text":
-      return <CommitInput type="text" value={String(value)} placeholder={field.placeholder} on_commit={(event) => on_change(event.currentTarget.value)} />;
+      return <CommitInput type={field.secret ? "password" : "text"} autoComplete={field.secret ? "off" : undefined} value={String(value)} placeholder={field.placeholder} on_commit={(event) => on_change(event.currentTarget.value)} />;
   }
 }
