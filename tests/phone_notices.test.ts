@@ -12,7 +12,7 @@ const notice = (key: string, at: number, extra?: Record<string, string>): PhoneN
 
 // LocalNotifications standing in, keeping what is pending and the tap listener it is given.
 function fake_plugin(display = "granted") {
-  const state = { pending: [] as { id: number; title: string; at: Date; extra?: Record<string, string> }[], asked: 0, display, tap: undefined as ((action: { notification: { extra?: unknown } }) => void) | undefined };
+  const state = { pending: [] as { id: number; title: string; at: Date; extra?: Record<string, string> }[], shown: [] as unknown[], exact: [] as (boolean | undefined)[], asked: 0, display, tap: undefined as ((action: { notification: { extra?: unknown } }) => void) | undefined };
   const plugin: LocalNotificationsLike = {
     getPending: async () => ({ notifications: state.pending.map(({ id }) => ({ id })) }),
     cancel: async ({ notifications }) => {
@@ -24,7 +24,10 @@ function fake_plugin(display = "granted") {
       return { display: state.display };
     },
     schedule: async ({ notifications }) => {
-      state.pending.push(...notifications.map((item) => ({ id: item.id, title: item.title, at: item.schedule.at, ...(item.extra ? { extra: item.extra } : {}) })));
+      for (const item of notifications) state.exact.push(item.isExactNotification);
+      const now = notifications.filter((item) => item.schedule === undefined);
+      state.shown.push(...now);
+      state.pending.push(...notifications.filter((item) => item.schedule !== undefined).map((item) => ({ id: item.id, title: item.title, at: item.schedule!.at, ...(item.extra ? { extra: item.extra } : {}) })));
     },
     addListener: async (_event, listener) => {
       state.tap = listener;
@@ -103,5 +106,39 @@ describe("handing notices to Android", () => {
 
     expect(state.asked).toBe(1);
     expect(taps).toEqual([{ url: "x-fitness://workouts/log" }]);
+  });
+
+  test("show one at once with no alarm, so Android never asks for exact alarms", async () => {
+    const { plugin, state } = fake_plugin();
+    const notices = keep_phone_notices({ plugin, read: () => [], on_tap: () => undefined });
+
+    expect(await notices.show({ key: "run-7", title: "Run finished", body: "plan", extra: { url: "x-dev://items/7" } })).toBe(true);
+    expect(await notices.show({ key: "run-8", title: "Run failed", body: "" })).toBe(true);
+
+    expect(state.shown).toEqual([
+      { id: notice_id("run-7"), title: "Run finished", body: "plan", isExactNotification: false, extra: { url: "x-dev://items/7" } },
+      { id: notice_id("run-8"), title: "Run failed", body: "", isExactNotification: false },
+    ]);
+    expect(state.pending).toEqual([]);
+  });
+
+  test("show none at once without leave to show notifications", async () => {
+    const { plugin, state } = fake_plugin("prompt");
+    const notices = keep_phone_notices({ plugin, read: () => [], on_tap: () => undefined });
+
+    expect(await notices.show({ key: "run-7", title: "Run finished", body: "" })).toBe(false);
+    expect(state.shown).toEqual([]);
+  });
+
+  test("set notices ahead as exact alarms unless the app lets them be inexact", async () => {
+    vi.useFakeTimers({ now: start });
+    const exact = fake_plugin();
+    const inexact = fake_plugin();
+    keep_phone_notices({ plugin: exact.plugin, read: () => [notice("lunch", start + 60_000)], on_tap: () => undefined }).refresh();
+    keep_phone_notices({ plugin: inexact.plugin, read: () => [notice("lunch", start + 60_000)], on_tap: () => undefined, exact: false }).refresh();
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(exact.state.exact).toEqual([true]);
+    expect(inexact.state.exact).toEqual([false]);
   });
 });

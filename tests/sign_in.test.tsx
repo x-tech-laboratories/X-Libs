@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
+import "../src/web/react/test_stubs.ts";
+
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 
 import { create_accounts_client, type Me } from "../src/web/accounts.ts";
-import { users_settings, UsersView } from "../src/web/react/accounts.tsx";
+import { AccountView, users_settings, UsersView } from "../src/web/react/accounts.tsx";
+import { Dialogs } from "../src/web/react/dialog.tsx";
 import { SettingsPage } from "../src/web/react/layout.tsx";
 import { SignInForm, use_account } from "../src/web/react/sign_in.tsx";
 
@@ -127,4 +130,69 @@ test("the users settings give an admin Users and Tokens sections, with Add user,
   expect(screen.getByRole("button", { name: "Add user" })).toBeTruthy();
   await waitFor(() => expect(screen.getAllByText("vera").length).toBeGreaterThan(0));
   expect(users_settings({ client, me: { ...me, role: "viewer" } })).toEqual([]);
+});
+
+// The account page's server: the signed-in user, no sessions, and the tokens and scopes given.
+function account_server(tokens: unknown[], scopes: unknown[] | null, bodies: Record<string, unknown>[]): typeof fetch {
+  return server({
+    "/api/me": () => json(me),
+    "/api/account/sessions": () => json([]),
+    "/api/account/tokens": (body) => (body.name ? json({ token: "xt_new", id: 9 }, 201) : json(tokens)),
+    ...(scopes === null ? {} : { "/api/account/token_scopes": () => json(scopes) }),
+  }, bodies);
+}
+
+const scoped_token = { id: 3, name: "adder", owner: "root", read_only: true, scope: "add_items", created_epoch: 0, last_used_epoch: null };
+const reading_token = { id: 4, name: "reader", owner: "root", read_only: true, scope: null, created_epoch: 0, last_used_epoch: null };
+
+test("the token form offers the app's scopes, and the list names each token's", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const scopes = [{ id: "add_items", label: "Add items", hint: "Reads, and adds items.", calls: ["add_item"] }];
+  render(<><AccountView client={create_accounts_client({ fetch: account_server([scoped_token, reading_token], scopes, bodies) })} /><Dialogs /></>);
+
+  await waitFor(() => expect(screen.getByText("Add items")).toBeTruthy());
+  expect(screen.getByText("read only")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "phone shortcut" } });
+  await screen.findByRole("combobox", { name: "May" });
+  expect(screen.getByText("Read, and change nothing.")).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "May" }), { target: { value: "add_items" } });
+  expect(screen.getByText("Reads, and adds items.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() => expect(bodies.find((body) => body.name === "phone shortcut")).toEqual({ name: "phone shortcut", read_only: true, scope: "add_items" }));
+  expect(await screen.findByText("xt_new")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "I have saved it" }));
+});
+
+test("the token form makes a full token when Everything is picked", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const scopes = [{ id: "tidy", label: "Tidy", hint: "", calls: ["delete_item"] }];
+  render(<><AccountView client={create_accounts_client({ fetch: account_server([], scopes, bodies) })} /><Dialogs /></>);
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create token" })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "laptop" } });
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "May" })).toBeTruthy());
+  fireEvent.change(screen.getByRole("combobox", { name: "May" }), { target: { value: "tidy" } });
+  expect(screen.getByText("Read, and delete_item.")).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "May" }), { target: { value: ":full" } });
+  expect(screen.getByText("Everything you can do, except manage your account.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() => expect(bodies.find((body) => body.name === "laptop")).toEqual({ name: "laptop", read_only: false }));
+});
+
+test("the token form keeps its Read only box on a server with no scopes", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  render(<><AccountView client={create_accounts_client({ fetch: account_server([], null, bodies) })} /><Dialogs /></>);
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create token" })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  expect(screen.queryByRole("combobox", { name: "May" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "script" } });
+  fireEvent.click(screen.getByLabelText("Read only"));
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() => expect(bodies.find((body) => body.name === "script")).toEqual({ name: "script", read_only: false }));
 });
