@@ -458,6 +458,18 @@ describe("Board on a phone", () => {
     }
   }
 
+  async function as_phone_while(run: () => Promise<void>): Promise<void> {
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    try {
+      await run();
+    } finally {
+      window.matchMedia = before;
+    }
+  }
+
+  const phone_column = (name: string) => screen.getByRole("region", { name });
+
   it("lists each lane with its filled cells under their column names", () => {
     as_phone(() => {
       render(
@@ -488,12 +500,116 @@ describe("Board on a phone", () => {
       expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do2", "Late0", "Done1"]);
       const card = screen.getByText("Ship");
       expect(card.tabIndex).toBe(0);
-      expect(card.draggable).toBe(false);
+      expect(card.draggable).toBe(true);
       fireEvent.keyDown(card, { key: "Enter" });
+      fireEvent.keyDown(card, { key: "Enter", altKey: true });
       fireEvent.keyDown(card, { key: "a" });
       expect(on_open).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("moves a stacked column's card with Alt and the arrows, past columns that refuse it, and keeps it focused", () => {
+    as_phone(() => {
+      const on_move = vi.fn();
+      render(<Kanban on_move={on_move} />);
+
+      screen.getByText("Read").focus();
+      press("ArrowDown", { altKey: true });
+      expect(within(phone_column("Done")).getByText("Read")).toBe(document.activeElement);
+      press("ArrowDown", { altKey: true });
+      press("ArrowUp", { altKey: true });
+      expect(within(phone_column("To do")).getByText("Read")).toBe(document.activeElement);
+      press("ArrowRight", { altKey: true });
+      press("ArrowLeft", { altKey: true });
+      press("ArrowLeft", { altKey: true });
+      press("ArrowDown");
+
+      expect(on_move.mock.calls.map(([note, move]) => [note.id, move.from.id, move.to.id])).toEqual([
+        ["b", "open", "done"], ["b", "done", "open"], ["b", "open", "done"], ["b", "done", "open"],
+      ]);
+      expect(focused_text()).toBe("Read");
+    });
+  });
+
+  it("leaves a stacked card's keys alone when the board moves nothing", () => {
+    as_phone(() => {
+      render(<Board<Note, BoardColumn> label="Notes" columns={kanban_columns} cards={{ of: () => [notes[0]!], id: (note) => note.id, render: (note) => note.title }} />);
+
+      const card = screen.getAllByText("Write")[0]!;
+      card.focus();
+      press("ArrowDown", { altKey: true });
+      expect(card.draggable).toBe(false);
+      expect(document.activeElement).toBe(card);
+    });
+  });
+
+  it("drags a stacked column's card onto a column that takes it, showing a hidden empty one while it is dragged", () => as_phone_while(async () => {
+    const on_move = vi.fn();
+    const started = vi.fn();
+    const ended = vi.fn();
+    render(
+      <Board<Note, BoardColumn>
+        label="Notes"
+        columns={kanban_columns}
+        phone_hide_empty
+        cards={{ of: (_lane, column) => (column.id === "open" ? [notes[0]!] : []), id: (note) => note.id, render: (note) => note.title, on_drag_start: started, on_drag_end: ended }}
+        on_move={on_move}
+      />,
+    );
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do"]);
+    const card = screen.getByText("Write");
+
+    await start_drag(card);
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do", "Done"]);
+    fireEvent.dragOver(phone_column("To do"));
+    expect(phone_column("To do").className).not.toContain("drop-inside");
+    fireEvent.dragOver(phone_column("Done"));
+    expect(phone_column("Done").className).toContain("drop-inside");
+    expect(card.className).toContain("dragging");
+    fireEvent.drop(phone_column("Done"));
+    fireEvent.dragEnd(card);
+
+    expect(on_move.mock.calls.map(([note, move]) => [note.id, move.lane, move.from.id, move.to.id])).toEqual([["a", null, "open", "done"]]);
+    expect(started.mock.calls[0]![0].id).toBe("a");
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do"]);
+  }));
+
+  it("drags a lane's card onto that lane's cells the app allows, and moves it with Alt and the arrows", () => as_phone_while(async () => {
+    const on_move = vi.fn();
+    const can_move = (note: Note, move: BoardMove<BoardColumn, BoardLane>) => !(note.id === "b" && move.to.id === "done");
+    render(
+      <Board<Note, BoardColumn>
+        label="Work"
+        columns={kanban_columns}
+        lanes={[{ id: "left", label: "Left" }, { id: "right", label: "Right" }]}
+        cards={{ of: (lane, column) => notes.filter((note) => note.column === column.id && (lane!.id === "left") === (note.id !== "c")), id: (note) => note.id, render: (note) => note.title }}
+        on_move={on_move}
+        can_move={can_move}
+      />,
+    );
+    const cells_of = (lane: string) => [...phone_column(lane).querySelectorAll<HTMLElement>(".board-phone-cell")];
+    expect(cells_of("Left").map((cell) => cell.textContent)).toEqual(["To doWriteRead"]);
+
+    await start_drag(screen.getByText("Read"));
+    expect(cells_of("Left").map((cell) => cell.textContent)).toEqual(["To doWriteRead"]);
+    fireEvent.dragOver(cells_of("Right")[0]!);
+    fireEvent.drop(cells_of("Right")[0]!);
+
+    await start_drag(screen.getByText("Write"));
+    expect(cells_of("Left").map((cell) => cell.textContent)).toEqual(["To doWriteRead", "Done"]);
+    const done = cells_of("Left")[1]!;
+    fireEvent.dragOver(done);
+    expect(done.className).toContain("drop-inside");
+    fireEvent.drop(done);
+
+    screen.getByText("Write").focus();
+    press("ArrowRight", { altKey: true });
+    screen.getByText("Read").focus();
+    press("ArrowDown", { altKey: true });
+
+    expect(on_move.mock.calls.map(([note, move]) => [note.id, move.lane.id, move.from.id, move.to.id])).toEqual([["a", "left", "open", "done"], ["a", "left", "open", "done"]]);
+  }));
 
   it("leaves out a plain board's empty columns when asked, and takes the app's class", () => {
     as_phone(() => {

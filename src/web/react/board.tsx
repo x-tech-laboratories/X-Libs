@@ -1,7 +1,8 @@
 // A board: a column per step and, optionally, a lane per thing moving through them, each lane with its head and the
 // lanes grouped under headings that fold. A cell per lane and column holds the app's content or its cards; the board
 // is worked by keyboard as a grid, cards move between columns by dragging or with Alt and the arrow keys, and phones
-// get a list of lanes, each showing its cells under their column names, or the columns one under another.
+// get a list of lanes, each showing its cells under their column names, or the columns one under another, whose cards
+// move the same way.
 
 import {
   useEffect, useRef, useState,
@@ -112,7 +113,7 @@ interface BoardProps<Card, Column extends BoardColumn, Lane extends BoardLane> {
   empty?: ReactNode;
   // Leaves out a plain board's columns that hold nothing on phones; a board with lanes always leaves out its empty cells.
   phone_hide_empty?: boolean;
-  // A class for the board's box, such as Halon's fills to take the height left in a contained page.
+  // A class for the board's box, such as Halon's fills to take the height left in a contained page, or inset for a margin inside.
   class_name?: string;
   labels?: Partial<BoardLabels>;
 }
@@ -147,6 +148,9 @@ function lift_for_picture(card: HTMLElement, after: () => void): void {
     after();
   });
 }
+
+// The column a card moves by with Alt and an arrow on a phone, where the columns stack.
+const phone_steps: Record<string, number> = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 };
 
 // Content that draws nothing, which a phone leaves out.
 const is_blank = (content: ReactNode) => content === null || content === undefined || content === false || content === "";
@@ -262,6 +266,16 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
     on_move!(card, { lane, from: columns.find((column) => column.id === from_id)!, to });
   }
 
+  // Moves a card to the nearest column that takes it in the given direction and keeps focus on it.
+  function step_card(card: Card, lane: Lane | null, from: Column, step: number): void {
+    let index = columns.indexOf(from) + step;
+    while (columns[index] && !allows(card, lane, from.id, columns[index]!)) index += step;
+    const to = columns[index];
+    if (!to) return;
+    move_card(card, lane, from.id, to);
+    focus_target(card_target(lane_id(lane), to.id, cards!.id(card)));
+  }
+
   function can_drop_on(lane: Lane | null, column: Column): boolean {
     return dragged !== null && dragged.lane_id === lane_id(lane) && allows(dragged.card, lane, dragged.column_id, column);
   }
@@ -270,6 +284,33 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
     drag_under_way.current = false;
     set_dragged(null);
     set_drop_cell(null);
+  }
+
+  // What makes a cell, or a phone's column or cell, take a dragged card.
+  function drop_target(lane: Lane | null, column: Column) {
+    const drop_key = cell_target(lane_id(lane), column.id);
+    return {
+      is_lit: drop_cell === drop_key,
+      handlers: {
+        onDragOver: (event: DragEvent<HTMLElement>) => {
+          if (!can_drop_on(lane, column)) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          if (drop_cell !== drop_key) set_drop_cell(drop_key);
+        },
+        onDragLeave: (event: DragEvent<HTMLElement>) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) set_drop_cell(null);
+        },
+        onDrop: (event: DragEvent<HTMLElement>) => {
+          const was = dragged;
+          const allowed = can_drop_on(lane, column);
+          end_drag();
+          if (!was || !allowed) return;
+          event.preventDefault();
+          move_card(was.card, lane, was.column_id, column);
+        },
+      },
+    };
   }
 
   // ── Keyboard ──
@@ -301,15 +342,7 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
     last_column.current = spot.column;
 
     if (event.altKey && key.startsWith("card") && on_move && column && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-      const step = event.key === "ArrowRight" ? 1 : -1;
-      const card = cards_in(lane, column)[spot.card]!;
-      let index = spot.column + step;
-      while (columns[index] && !allows(card, lane, column.id, columns[index]!)) index += step;
-      const to = columns[index];
-      if (to) {
-        move_card(card, lane, column.id, to);
-        focus_target(card_target(lane_id(lane), to.id, cards!.id(card)));
-      }
+      step_card(cards_in(lane, column)[spot.card]!, lane, column, event.key === "ArrowRight" ? 1 : -1);
     } else if (event.altKey) {
       return;
     } else if (event.key === "ArrowDown") {
@@ -347,19 +380,25 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
           return (
             <li
               key={cards.id(card)}
-              ref={in_grid ? register(target) : undefined}
+              ref={register(target)}
               data-board-target={in_grid ? target : undefined}
               className={cx("board-card", cards.class_name?.(card), dragged?.target === target && "dragging")}
               style={cards.style?.(card)}
               tabIndex={in_grid ? (tab_stop === target ? 0 : -1) : 0}
-              draggable={in_grid && on_move ? true : undefined}
+              draggable={on_move ? true : undefined}
               onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}
               onClick={(event) => cards.on_open?.(card, event, lane, column)}
               onContextMenu={cards.on_context_menu && ((event) => cards.on_context_menu!(card, event))}
               onKeyDown={in_grid ? undefined : (event) => {
-                if (event.key !== "Enter" || event.target !== event.currentTarget) return;
-                event.preventDefault();
-                cards.on_open?.(card, event, lane, column);
+                if (event.target !== event.currentTarget) return;
+                const step = phone_steps[event.key];
+                if (event.altKey && step !== undefined && on_move) {
+                  event.preventDefault();
+                  step_card(card, lane, column, step);
+                } else if (event.key === "Enter" && !event.altKey) {
+                  event.preventDefault();
+                  cards.on_open?.(card, event, lane, column);
+                }
               }}
               onDragStart={(event) => {
                 event.dataTransfer?.setData("text/plain", cards.id(card));
@@ -395,7 +434,7 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
     const id = lane_id(lane);
     const shown = cards_in(lane, column);
     const own_target = shown.length > 0 && cards ? null : cell_target(id, column.id);
-    const drop_key = cell_target(id, column.id);
+    const drop = drop_target(lane, column);
     const is_current = lane?.current === column.id;
     return (
       <div
@@ -403,26 +442,10 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
         ref={own_target ? register(own_target) : undefined}
         role="gridcell"
         data-board-target={own_target ?? undefined}
-        className={cx("board-cell", is_current && "current", drop_cell === drop_key && "drop-inside")}
+        className={cx("board-cell", is_current && "current", drop.is_lit && "drop-inside")}
         aria-current={is_current || undefined}
         tabIndex={own_target ? (tab_stop === own_target ? 0 : -1) : undefined}
-        onDragOver={(event) => {
-          if (!can_drop_on(lane, column)) return;
-          event.preventDefault();
-          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-          if (drop_cell !== drop_key) set_drop_cell(drop_key);
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) set_drop_cell(null);
-        }}
-        onDrop={(event) => {
-          const was = dragged;
-          const allowed = can_drop_on(lane, column);
-          end_drag();
-          if (!was || !allowed) return;
-          event.preventDefault();
-          move_card(was.card, lane, was.column_id, column);
-        }}
+        {...drop.handlers}
       >
         {cards ? card_list(lane, column, shown, true) : render_cell?.(lane, column)}
       </div>
@@ -463,9 +486,10 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
       <div className={cx("board-phone", class_name)} aria-label={label} role="region">
         {columns.map((column) => {
           const content = cards ? card_list(null, column, cards_in(null, column), false) : render_cell?.(null, column);
-          if (phone_hide_empty && is_blank(content)) return null;
+          if (phone_hide_empty && is_blank(content) && !can_drop_on(null, column)) return null;
+          const drop = drop_target(null, column);
           return (
-            <section key={column.id} className="board-phone-column" aria-label={column.label}>
+            <section key={column.id} className={cx("board-phone-column", drop.is_lit && "drop-inside")} aria-label={column.label} {...drop.handlers}>
               <h3 className={cx("board-column-head", column.class_name)} title={column.title}>{column_head(column)}</h3>
               {content}
             </section>
@@ -488,9 +512,10 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
                 const is_current = lane.current === column.id;
                 const shown = cards_in(lane, column);
                 const content = cards ? card_list(lane, column, shown, false) : render_cell?.(lane, column);
-                if (is_blank(content) && !is_current) return null;
+                if (is_blank(content) && !is_current && !can_drop_on(lane, column)) return null;
+                const drop = drop_target(lane, column);
                 return (
-                  <div key={column.id} className={cx("board-phone-cell", is_current && "current")} aria-current={is_current || undefined}>
+                  <div key={column.id} className={cx("board-phone-cell", is_current && "current", drop.is_lit && "drop-inside")} aria-current={is_current || undefined} {...drop.handlers}>
                     <div className={cx("board-cell-label", column.class_name)}>{column.label}</div>
                     {content}
                   </div>
