@@ -1,5 +1,6 @@
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
+import { register_open_cors } from "../../src/server/cors.ts";
 import { EventStream } from "../../src/server/events.ts";
 
 let app: FastifyInstance;
@@ -89,5 +90,23 @@ describe("event stream", () => {
     await client.read();
     expect(await client.read()).toBe(": still here\n\n");
     client.close();
+  });
+
+  it("keeps the headers set before the stream opened, such as the open CORS origin", async () => {
+    app = fastify({ forceCloseConnections: true });
+    await register_open_cors(app);
+    app.addHook("onRequest", async (_request, reply) => {
+      reply.header("x-app", "kept");
+    });
+    const stream = new EventStream({ heartbeat_ms: 60_000, hello_event: null });
+    stream.register(app, "/api/events");
+    const address = await app.listen({ port: 0, host: "127.0.0.1" });
+    const controller = new AbortController();
+    const response = await fetch(`${address}/api/events`, { headers: { origin: "http://phone.local" }, signal: controller.signal });
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("x-app")).toBe("kept");
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    controller.abort();
   });
 });

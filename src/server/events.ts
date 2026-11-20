@@ -86,8 +86,11 @@ export class EventStream {
   // Serves the stream on the path, and ends every stream when the app closes, since one never ends by itself.
   register(app: FastifyInstance, path = "/events"): void {
     app.get(path, (request, reply) => {
+      // Headers hooks set before the hijack, such as CORS, would be lost to writeHead, so they go out with the stream's own.
+      const earlier = reply.getHeaders();
       reply.hijack();
       const response = reply.raw;
+      for (const [name, value] of Object.entries(earlier)) if (value !== undefined) response.setHeader(name, value);
       const id = randomUUID();
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
       response.write(`retry: ${this.retry_ms}\n\n`);
