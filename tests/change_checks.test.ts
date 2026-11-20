@@ -13,6 +13,7 @@ import {
   is_wrapping_repository,
   licence_allowed,
   needs_trailer,
+  overview_lines,
   new_dependencies,
   read_thresholds,
   secret_kind,
@@ -44,6 +45,12 @@ describe("the commits check", () => {
     expect(check_commits([{ sha: "b".repeat(40), message: "Added swimlanes" }], true).findings).toEqual(['bbbbbbb "Added swimlanes" is not a Conventional Commit', "bbbbbbb has no Assisted-by trailer"]);
     expect(check_commits([good], false).findings).toEqual(["aaaaaaa has an Assisted-by trailer, which only x-tech-laboratories repositories carry"]);
     expect(check_commits([{ sha: "c".repeat(40), message: "fix: lanes\n\nCo-Authored-By: Claude" }], false).findings).toEqual(["ccccccc mentions AI outside the trailer"]);
+  });
+
+  it("names a commit whose subject holds a secret by its sha alone, never repeating the subject", () => {
+    const result = check_commits([{ sha: "9".repeat(40), message: `rotated ${token}` }], false);
+    expect(result.findings).toEqual(["9999999's subject is not a Conventional Commit"]);
+    expect(result.findings.join("\n")).not.toContain(token);
   });
 
   it("takes another trailer and organisation, or no rules at all", () => {
@@ -107,6 +114,14 @@ describe("the comments check", () => {
     expect(check_comments([{ ...changed("src/cli.ts", ["// The overview,", "// at length."], "modified", 2), text: "#!/usr/bin/env node\n// The overview,\n// at length.\n" }]).outcome).toBe("passed");
   });
 
+  it("finds the opening comment in the file's text, so an edit inside a long overview passes", () => {
+    const text = "// One,\n// two,\n// three,\n// four.\n\n// Two lines\n// in a row.\nconst a = 1;\n";
+    const edited = { ...changed("src/a.ts", ["// three,", "// four.", "", "// Two lines", "// in a row."], "modified", 3), text };
+    expect(check_comments([edited]).findings).toEqual(["src/a.ts:6 has a comment 2 lines long"]);
+    expect(overview_lines(edited)).toEqual({ first: 1, last: 4 });
+    expect(overview_lines({ ...changed("src/a.ts", ["const a = 1;"]), text: "const a = 1;\n" })).toEqual({ first: 1, last: 0 });
+  });
+
   it("fails a comment of more than one line, but not banners, the file's opening comment or separate one-liners", () => {
     const file = changed("src/a.ts", ["// The file's overview,", "// which may run long.", "", "// ── Lanes ──────", "// One line.", "const a = 1;", "// Two lines", "// in a row.", "/* a block"]);
     expect(check_comments([file, changed("docs/a.md", ["# One", "# Two"])]).findings).toEqual(["src/a.ts:7 has a comment 2 lines long", "src/a.ts:9 opens a block comment"]);
@@ -118,6 +133,12 @@ describe("the comments check", () => {
 // ============================================================================
 
 describe("the x-libs check", () => {
+  it("knows the libraries X-Libs' SQLite, MCP, sign-in, mail, key and emoji modules wrap", () => {
+    const sources = ["@sqlite.org/sqlite-wasm", "@modelcontextprotocol/server", "@fastify/session", "nodemailer", "sshpk", "emojibase", "emojibase-data/en/data.json"];
+    const files = [changed("src/a.ts", sources.map((source) => `import x from "${source}";`)), changed("src/b.ts", ['import cors from "@fastify/cors";', 'import semver from "semver";'])];
+    expect(check_x_libs(files, false).findings).toHaveLength(sources.length);
+  });
+
   it("fails an app's import of a library X-Libs wraps, but not X-Libs' own", () => {
     const files = [changed("src/a.ts", ['import { eq } from "drizzle-orm";', 'import { Editor } from "@tiptap/react";', 'import { x } from "@x-tech-laboratories/x-libs/drizzle";', 'const m = await import("marked/lib");'])];
     expect(check_x_libs(files, false).findings).toEqual([
