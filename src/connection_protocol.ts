@@ -83,3 +83,16 @@ export function connection_address(typed: string): string {
   if (!parts) throw new Error(`"${text}" is not a daemon's address.`);
   return `${scheme}://${parts[1]!.toLowerCase()}${parts[2]!.replace(/\/+$/, "")}`;
 }
+
+// ── Storage in memory ────────────────────────────────────────────────────────
+
+// The daemons a device knows, kept in memory alone, such as for a test or a page that forgets them on reload.
+export function memory_connection_storage(): ConnectionStorage {
+  let saved: SavedConnections | null = null;
+  return {
+    read: () => saved,
+    write: (next) => {
+      saved = next;
+    },
+  };
+}

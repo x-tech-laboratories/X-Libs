@@ -12,6 +12,6 @@
     "composite": true
   },
   "include": ["src"],
-  "exclude": ["src/web", "src/api_spec.ts", "src/backup_protocol.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/connection_protocol.ts", "src/certificate_protocol.ts", "src/local_mcp_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts", "src/categories.ts", "src/cron.ts", "src/python_text.ts", "src/recurrence.ts", "src/site/model.ts", "src/site/ui_strings.ts", "src/i18n.ts", "src/log.ts", "src/log_protocol.ts", "src/filter.ts", "src/grouping.ts", "src/change_checks.ts"],
+  "exclude": ["src/web", "src/api_spec.ts", "src/backup_protocol.ts", "src/plugins.ts", "src/sql.ts", "src/sync_protocol.ts", "src/connection_protocol.ts", "src/certificate_protocol.ts", "src/local_mcp_protocol.ts", "src/units.ts", "src/dates.ts", "src/money.ts", "src/categories.ts", "src/cron.ts", "src/python_text.ts", "src/recurrence.ts", "src/site/model.ts", "src/site/ui_strings.ts", "src/i18n.ts", "src/log.ts", "src/log_protocol.ts", "src/filter.ts", "src/grouping.ts", "src/change_checks.ts", "src/diff_rows.ts", "src/agent_transcript.ts", "src/frontmatter.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }

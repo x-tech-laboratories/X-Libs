@@ -1,7 +1,7 @@
 // Modal dialogs on the native one: any body and buttons, one that asks before an action, and one that shows a long text.
 
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { toast } from "./toasts.tsx";
+import { CopyButton } from "./copy_button.tsx";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ export function ConfirmDialog({ options, on_close }: { options: ConfirmOptions; 
 export function TextDialog({ title, text, on_close }: { title: string; text: string; on_close: () => void }) {
   return (
     <Dialog title={title} on_close={on_close} wide buttons={<>
-      <button onClick={() => void navigator.clipboard?.writeText(text).then(() => toast("Copied."))}>Copy</button>
+      <CopyButton text={text} />
       <button className="accent solid" onClick={on_close}>Close</button>
     </>}>
       <pre className="output">{text}</pre>
