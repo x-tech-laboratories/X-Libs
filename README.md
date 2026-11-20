@@ -30,6 +30,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `sync_engine`, `sync_client`, `sync_protocol`, `server/sync_routes` | SQLite kept alike on every device: `create_sync_engine` stamps each value of the tables it is given through triggers, so the app's own writes need no change, and the newest write of each value wins; `create_sync_client` sends a device's changes within seconds, takes everyone else's in the same round trip, follows the server's event stream, works on offline, and asks which copy to keep once the server's data was replaced; it signs the device in with a name and password for a token of its own (`asks_for_code` tells when the second factor is wanted) and gives the token back when it stops syncing; `register_sync_routes` is the server's exchange, snapshot and replace, which backs up first. |
 | `sync_files`, `node_file_store`, `electron/file_protocol` | Files that sync beside the rows that name them, such as covers or photos, so a large picture never travels with every change: each is named by the sha256 of its bytes (`hash_bytes`, `put_file`, `is_file_name`) and kept in a `SyncFileStore`, a folder on Node (`folder_file_store`, written through a rename) or IndexedDB on a phone (`indexed_db_files`); given `files: { store, referenced }`, the sync client sends the server the named files it lacks and fetches those the device lacks after each exchange, a few at a time, trying a file the server does not have yet again next round, and `register_sync_routes` given `files` keeps them, refusing bytes that do not match their name; `register_file_scheme` and `serve_files` show them in a desktop page as `<scheme>://<name>`. |
 | `app_icons`                              | `x-libs-icons [app folder]`: every icon an app ships generated from its `resources/icon.svg`, as the Design Guidelines ask: `resources/icon.png` for the desktop, the Android launcher icons at each density with an adaptive icon on white when there is an `android/` project, and `icon.svg`, `icon-192.png` and `icon-512.png` in `src/web/public` when there is one. Drawn with `@resvg/resvg-js`, an optional peer the app installs as a dev dependency. |
+| `change_checks`, `change_checks_git`, `change_checks_cli` | Checks on a change that any repository's CI runs, as `x-libs-check` (see [Change checks](#change-checks)): `commits` (Conventional Commits, the `Assisted-by` trailer in the organisation's repositories and nowhere else, no AI mention outside it), `secrets` (keys and tokens in added lines, commit messages and added `.env` files, naming only the kind and place, never the value), `leftovers` (console logging, `debugger`, code commented out, a TODO without an issue), `comments` (a comment longer than one line, but for a file's overview), `coverage` (a floor lowered or code newly left out), `x-libs` (an import of a library X-Libs wraps) and `dependencies` (each new one named with its licence, failing a licence not allowed, read as SPDX by `spdx-satisfies`); each a pure function on a described `Change` giving `{ gate, outcome, findings }` with file:line, reading only the code around strings and regular expressions; `create_check_registry` for an app's own checks, `x_tech_options` the defaults, and `read_change` reading a change from git. |
 | `certificates`, `certificate_protocol`, `electron/certificates` | Servers whose https certificate the device refuses, such as a home server's self-signed one: `check_certificate` reads the certificate and what is wrong with it (self-signed, unknown authority, wrong name, expired, not yet valid), `create_certificate_trust` keeps the ones the user trusts in a JSON file, each for its own host and exact fingerprint, re-checked before it is saved, and its `methods` are the page's calls; `trust_in_session` makes Chromium accept them in a session, the window's from the next start, and `trusting_fetch` sends the main process's requests, such as the sync client's, through a Chromium session made fresh each time the list changes, so a new choice holds at once; `use_in_node` also hands them to Node's own https, which then accepts a self-signed server whose name matches. |
 | `sync_file_storage`                      | `file_sync_storage({ file, back_up_before_download })`: the sync client's server and token in a JSON file on Node, written only its owner can read (mode 0600, tightened on an existing file too), a missing file read as none, removing it twice harmless. |
 | `web/sync_storage`                       | `local_sync_storage({ key, back_up_before_download })`: the same in a phone page's own local storage. `SyncDeviceMethods` and `sync_device_methods(client)` in `sync_protocol` and `sync_client` are the calls every app's bridge answers for its page. |
@@ -475,6 +476,62 @@ export default define_site({
 `pagefind`, the optional peers the build uses, and ignores the `.x-site/` folder the build writes its entries to. A GitHub
 Actions job runs `npm ci` and `npm run build` with `fetch-depth: 0`, for the dates, and uploads `dist/` with
 `actions/upload-pages-artifact`.
+
+## Change checks
+
+`x-libs-check` runs the change checks on what changed since a base and exits 1 when any fails, printing each check's
+outcome and its findings one per line:
+
+```sh
+npx x-libs-check [--base <ref>] [--repository <owner/name>] [--working-tree] [check...]
+```
+
+With no checks named it runs `commits`, `secrets`, `leftovers`, `comments`, `coverage`, `x-libs` and `dependencies`. The
+base is the branch point from `origin/main` unless given; the repository comes from `GITHUB_REPOSITORY` or the `origin`
+remote; `--working-tree` counts uncommitted and untracked files too. `dependencies` reads licences from `node_modules`,
+so it runs after `npm ci`. The rules default to X-Tech's and change under an `"x-libs-check"` key in `package.json`,
+read as it was at the base so a change cannot loosen its own checks:
+
+```json
+"x-libs-check": {
+  "commit_trailer": "Assisted-by",
+  "trailer_organisations": ["x-tech-laboratories"],
+  "ai_mention": "\\b(claude|copilot)\\b",
+  "wrapped_libraries": ["drizzle-orm", "@tiptap/"],
+  "wrapping_repositories": ["x-tech-laboratories/X-Libs"],
+  "allowed_licences": ["MIT", "ISC", "Apache-2.0"]
+}
+```
+
+A job in an app's `.github/workflows/ci.yml`:
+
+```yaml
+  change-checks:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx x-libs-check --base origin/${{ github.base_ref }}
+```
+
+An app with checks of its own, such as a firmware build, adds them to a registry and runs the same command from its
+own script:
+
+```ts
+import { create_check_registry } from "@x-tech-laboratories/x-libs/change_checks";
+import { run_check_command } from "@x-tech-laboratories/x-libs/change_checks_cli";
+
+const registry = create_check_registry();
+registry.add("firmware", async () => ({ gate: "firmware", outcome: "passed", findings: [] }));
+process.exit(await run_check_command(process.argv.slice(2), { cwd: process.cwd(), env: process.env, out: process.stdout, err: process.stderr, registry }));
+```
 
 ## Development
 
