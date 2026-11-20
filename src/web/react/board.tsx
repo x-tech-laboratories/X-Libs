@@ -110,6 +110,10 @@ interface BoardProps<Card, Column extends BoardColumn, Lane extends BoardLane> {
   on_retry?: () => void;
   // What an empty board shows in place of the empty label.
   empty?: ReactNode;
+  // Leaves out a plain board's columns that hold nothing on phones; a board with lanes always leaves out its empty cells.
+  phone_hide_empty?: boolean;
+  // A class for the board's box, such as Halon's fills to take the height left in a contained page.
+  class_name?: string;
   labels?: Partial<BoardLabels>;
 }
 
@@ -151,7 +155,7 @@ const is_blank = (content: ReactNode) => content === null || content === undefin
 
 export function Board<Card, Column extends BoardColumn, Lane extends BoardLane = BoardLane>({
   label, columns, lanes, lane_heading, column_width, lane_width, group_order, group_label, folded_groups, on_folded_groups_change, render_cell, cards,
-  on_move, can_move, on_open, loading = false, error, on_retry, empty, labels: own_labels,
+  on_move, can_move, on_open, loading = false, error, on_retry, empty, phone_hide_empty = false, class_name, labels: own_labels,
 }: BoardProps<Card, Column, Lane>) {
   const labels = { ...DEFAULT_LABELS, ...own_labels };
   const phone = use_phone();
@@ -456,20 +460,24 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
 
   if (phone && !has_lanes) {
     return (
-      <div className="board-phone" aria-label={label} role="region">
-        {columns.map((column) => (
-          <section key={column.id} className="board-phone-column" aria-label={column.label}>
-            <h3 className={cx("board-column-head", column.class_name)} title={column.title}>{column_head(column)}</h3>
-            {cards ? card_list(null, column, cards_in(null, column), false) : render_cell?.(null, column)}
-          </section>
-        ))}
+      <div className={cx("board-phone", class_name)} aria-label={label} role="region">
+        {columns.map((column) => {
+          const content = cards ? card_list(null, column, cards_in(null, column), false) : render_cell?.(null, column);
+          if (phone_hide_empty && is_blank(content)) return null;
+          return (
+            <section key={column.id} className="board-phone-column" aria-label={column.label}>
+              <h3 className={cx("board-column-head", column.class_name)} title={column.title}>{column_head(column)}</h3>
+              {content}
+            </section>
+          );
+        })}
       </div>
     );
   }
 
   if (phone) {
     return (
-      <div className="board-phone" aria-label={label} role="region">
+      <div className={cx("board-phone", class_name)} aria-label={label} role="region">
         {rows.map((row) => {
           if (row.kind === "group") return <h3 key={`group ${row.key}`} className="board-group-head">{group_toggle(row, false)}</h3>;
           const lane = row.lane!;
@@ -498,7 +506,7 @@ export function Board<Card, Column extends BoardColumn, Lane extends BoardLane =
   // ── Grid ──
 
   return (
-    <div className="board">
+    <div className={cx("board", class_name)}>
       <div
         role="grid"
         aria-label={label}

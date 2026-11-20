@@ -495,6 +495,38 @@ describe("Board on a phone", () => {
     });
   });
 
+  it("leaves out a plain board's empty columns when asked, and takes the app's class", () => {
+    as_phone(() => {
+      const board = (phone_hide_empty: boolean) => (
+        <Board<Note, BoardColumn>
+          label="Notes"
+          columns={kanban_columns}
+          phone_hide_empty={phone_hide_empty}
+          class_name="fills"
+          cards={{ of: (_lane, column) => notes.filter((note) => note.column === column.id), id: (note) => note.id, render: (note) => note.title }}
+        />
+      );
+      const { rerender } = render(board(false));
+      expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do", "Late", "Done"]);
+      expect(screen.getByRole("region", { name: "Notes" }).className).toBe("board-phone fills");
+
+      rerender(board(true));
+      expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["To do", "Done"]);
+    });
+  });
+
+  it("puts the app's class on the grid's box off a phone", () => {
+    const { container } = render(<Board<never, BoardColumn> label="Work" columns={stage_columns} class_name="fills" render_cell={() => null} />);
+    expect(container.firstElementChild!.className).toBe("board fills");
+  });
+
+  it("leaves out empty columns drawn by render_cell too", () => {
+    as_phone(() => {
+      render(<Board<never, BoardColumn> label="Work" columns={stage_columns} phone_hide_empty render_cell={(_lane, column) => (column.id === "build" ? "Building" : "")} />);
+      expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Build"]);
+    });
+  });
+
   it("lists cards in a lane's cells", () => {
     as_phone(() => {
       render(
