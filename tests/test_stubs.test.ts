@@ -37,7 +37,7 @@ test("text and ranges have no boxes", () => {
 
   expect(range.getClientRects()).toHaveLength(0);
   expect(range.getClientRects().item(0)).toBeNull();
-  expect(text.getClientRects()).toHaveLength(0);
+  expect((text as Text & { getClientRects: () => DOMRectList }).getClientRects()).toHaveLength(0);
   expect(range.getBoundingClientRect().width).toBe(0);
 });
 
