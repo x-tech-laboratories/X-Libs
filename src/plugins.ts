@@ -16,7 +16,8 @@ interface SettingBase {
 }
 
 export type SettingField =
-  | (SettingBase & { type: "text"; default: string; placeholder?: string })
+  // A secret text field, such as an API key, is drawn hidden and left out of what hide_secrets gives.
+  | (SettingBase & { type: "text"; default: string; placeholder?: string; secret?: boolean })
   | (SettingBase & { type: "number"; default: number; min?: number; max?: number; step?: number })
   | (SettingBase & { type: "switch"; default: boolean })
   | (SettingBase & { type: "choice"; default: string; choices: { value: string; label: string }[] });
@@ -480,6 +481,35 @@ export function fits(field: SettingField, value: unknown): value is SettingValue
     case "choice":
       return typeof value === "string" && field.choices.some((choice) => choice.value === value);
   }
+}
+
+// Stands in for a secret that is set, in records handed to someone who must not read it.
+export const hidden_secret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+
+function secret_keys(manifests: PluginManifest[]): Map<string, string[]> {
+  return new Map(manifests.map((manifest) => [manifest.id, (manifest.settings ?? []).flatMap((field) => (field.type === "text" && field.secret ? [field.key] : []))]));
+}
+
+// The records with every secret that is set replaced by hidden_secret, for a page or another program to read.
+export function hide_secrets(manifests: PluginManifest[], records: PluginRecords): PluginRecords {
+  const secrets = secret_keys(manifests);
+  return Object.fromEntries(Object.entries(records).map(([id, record]) => {
+    const keys = secrets.get(id) ?? [];
+    if (!record.settings || keys.length === 0) return [id, record];
+    const settings = Object.fromEntries(Object.entries(record.settings).map(([key, value]) => [key, keys.includes(key) && value !== "" ? hidden_secret : value]));
+    return [id, { ...record, settings }];
+  }));
+}
+
+// Records written back after hide_secrets, with each secret still hidden_secret given its stored value again.
+export function keep_secrets(manifests: PluginManifest[], stored: PluginRecords, incoming: PluginRecords): PluginRecords {
+  const secrets = secret_keys(manifests);
+  return Object.fromEntries(Object.entries(incoming).map(([id, record]) => {
+    const keys = secrets.get(id) ?? [];
+    if (!record.settings || keys.length === 0) return [id, record];
+    const settings = Object.fromEntries(Object.entries(record.settings).map(([key, value]) => [key, keys.includes(key) && value === hidden_secret ? (stored[id]?.settings?.[key] ?? "") : value]));
+    return [id, { ...record, settings }];
+  }));
 }
 
 // Storage in a key of any string store, such as web/prefs' browser storage or a file the server reads and writes.

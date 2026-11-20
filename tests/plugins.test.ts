@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { create_plugin_host, define_plugin, json_plugin_storage, type Plugin, type PluginRecords } from "../src/plugins.ts";
+import { create_plugin_host, define_plugin, hidden_secret, hide_secrets, json_plugin_storage, keep_secrets, type Plugin, type PluginManifest, type PluginRecords } from "../src/plugins.ts";
 
 interface Api {
   hooks: { "task.created": (task: { title: string }) => void };
@@ -209,5 +209,26 @@ describe("plugin host", () => {
 
     expect(seen.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(host.watch.version()).toBe(seen.mock.calls.length);
+  });
+});
+
+describe("secret settings", () => {
+  const manifests: PluginManifest[] = [
+    { id: "keyed", name: "Keyed", version: "1.0.0", settings: [{ key: "api_key", label: "Key", type: "text", default: "", secret: true }, { key: "region", label: "Region", type: "text", default: "" }] },
+  ];
+
+  it("hides a secret that is set and leaves an empty one and every other value as they are", () => {
+    const records: PluginRecords = { keyed: { enabled: true, settings: { api_key: "abc", region: "eu" } }, other: { settings: { api_key: "visible" } } };
+
+    expect(hide_secrets(manifests, records)).toEqual({ keyed: { enabled: true, settings: { api_key: hidden_secret, region: "eu" } }, other: { settings: { api_key: "visible" } } });
+    expect(hide_secrets(manifests, { keyed: { settings: { api_key: "" } } })).toEqual({ keyed: { settings: { api_key: "" } } });
+  });
+
+  it("gives a secret still hidden its stored value back, and takes a new or cleared one as written", () => {
+    const stored: PluginRecords = { keyed: { settings: { api_key: "abc", region: "eu" } } };
+
+    expect(keep_secrets(manifests, stored, { keyed: { enabled: false, settings: { api_key: hidden_secret, region: "us" } } })).toEqual({ keyed: { enabled: false, settings: { api_key: "abc", region: "us" } } });
+    expect(keep_secrets(manifests, stored, { keyed: { settings: { api_key: "new" } } })).toEqual({ keyed: { settings: { api_key: "new" } } });
+    expect(keep_secrets(manifests, stored, { keyed: { settings: { api_key: "" } } })).toEqual({ keyed: { settings: { api_key: "" } } });
   });
 });

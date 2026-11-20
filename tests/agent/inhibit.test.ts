@@ -84,7 +84,8 @@ describe("the idle inhibitor", () => {
     chmodSync(script, 0o755);
     const lock = new IdleInhibitor({ who: "x-test", why: "A task is running", linger_seconds: 0, find: () => script });
     await lock.acquire();
-    await until(() => existsSync(args), "the lock to start");
+    // The shell makes the file before it writes the line, so wait for the whole line.
+    await until(() => existsSync(args) && readFileSync(args, "utf8").endsWith("\n"), "the lock to start");
     expect(readFileSync(args, "utf8").trim()).toBe("--what=idle --mode=block --who=x-test --why=A task is running cat");
     await lock.close();
   });
