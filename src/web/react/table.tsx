@@ -11,6 +11,7 @@ import { placement_at, type DropPlacement } from "../tree.ts";
 import { virtual_window } from "../virtual.ts";
 import { SearchBox } from "./controls.tsx";
 import { ContextMenu, Popover } from "./menus.tsx";
+import { use_phone } from "./phone.ts";
 import { ResizeHandle } from "./split.tsx";
 
 export type { Sorting } from "../tables.ts";
@@ -286,19 +287,6 @@ const TableRow = memo(TableRowView, same_row) as <Row>(props: TableRowProps<Row>
 // A group's heading or one of the rows, in the order drawn.
 type Line<Row> = { kind: "group"; group: RowGroup<Row> } | { kind: "row"; row: TanstackRow<Row>; key: string };
 
-// Whether the page is phone-sized, where the rows are cards.
-function use_phone(): boolean {
-  const query = "(max-width: 640px)";
-  const [phone, set_phone] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(query).matches);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const list = window.matchMedia(query);
-    const changed = () => set_phone(list.matches);
-    list.addEventListener("change", changed);
-    return () => list.removeEventListener("change", changed);
-  }, []);
-  return phone;
-}
 
 // ── Table ────────────────────────────────────────────────────────────────────
 
