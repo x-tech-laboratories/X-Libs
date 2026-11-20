@@ -12,7 +12,16 @@ export interface LocalNotificationsLike {
   checkPermissions(): Promise<{ display: string }>;
   requestPermissions(): Promise<{ display: string }>;
   schedule(options: {
-    notifications: { id: number; title: string; body: string; schedule: { at: Date; allowWhileIdle: boolean }; extra?: Record<string, string> }[];
+    notifications: {
+      id: number;
+      title: string;
+      body: string;
+      // None shows the notice at once.
+      schedule?: { at: Date; allowWhileIdle: boolean };
+      // False keeps Android from needing the exact-alarm leave, whose settings screen it opens otherwise.
+      isExactNotification?: boolean;
+      extra?: Record<string, string>;
+    }[];
   }): Promise<unknown>;
   addListener(event: "localNotificationActionPerformed", listener: (action: { notification: { extra?: unknown } }) => void): Promise<unknown>;
 }
@@ -66,13 +75,20 @@ export interface PhoneNoticeOptions {
   now?: () => number;
   // Told when the notices could not be set.
   on_error?: (error: unknown) => void;
+  // Whether notices set ahead ring at their exact moment, which on Android needs the exact-alarm leave; true unless set.
+  exact?: boolean;
 }
+
+// A notice shown at once, such as a run that just finished, so it has no moment.
+export type ImmediateNotice = Omit<PhoneNotice, "at">;
 
 export interface PhoneNotices {
   // Sets every notice again; calls close together are run once.
   refresh: () => void;
   // Asks once to show notifications, as when reminders are turned on.
   ask_permission: () => Promise<void>;
+  // Shows a notice at once, with no alarm and so no exact-alarm leave; false when notifications are not allowed.
+  show: (notice: ImmediateNotice) => Promise<boolean>;
 }
 
 export function keep_phone_notices(options: PhoneNoticeOptions): PhoneNotices {
@@ -95,6 +111,7 @@ export function keep_phone_notices(options: PhoneNoticeOptions): PhoneNotices {
         title: notice.title,
         body: notice.body,
         schedule: { at: new Date(notice.at), allowWhileIdle: true },
+        isExactNotification: options.exact ?? true,
         ...(notice.extra ? { extra: notice.extra } : {}),
       })),
     });
@@ -115,6 +132,13 @@ export function keep_phone_notices(options: PhoneNoticeOptions): PhoneNotices {
     ask_permission: async () => {
       const { display } = await plugin.checkPermissions();
       if (display !== "granted" && display !== "denied") await plugin.requestPermissions();
+    },
+    show: async (notice) => {
+      if ((await plugin.checkPermissions()).display !== "granted") return false;
+      await plugin.schedule({
+        notifications: [{ id: notice_id(notice.key), title: notice.title, body: notice.body, isExactNotification: false, ...(notice.extra ? { extra: notice.extra } : {}) }],
+      });
+      return true;
     },
   };
 }
