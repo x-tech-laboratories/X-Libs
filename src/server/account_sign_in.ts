@@ -11,7 +11,7 @@ import fastify_cookie, { type CookieSerializeOptions } from "@fastify/cookie";
 import fastify_rate_limit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { AccountError, type AccountStore, type User } from "./account_store.ts";
+import { AccountError, type AccountStore, type TokenScopeInfo, type User } from "./account_store.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
 import { path_of, register_sign_in_guard } from "./sign_in.ts";
@@ -30,6 +30,8 @@ export interface Viewer {
   credential_id: number | null;
   // The config's token the request came with, whose name is the viewer's.
   declared?: DeclaredToken;
+  // The scope of the token the request came with: read-only, plus the scope's calls.
+  scope?: TokenScopeInfo;
 }
 
 declare module "fastify" {
@@ -64,6 +66,12 @@ export interface AccountSignInOptions {
   read_only_paths?: Iterable<string>;
   // What each of the app's own API routes needs; anyone signed in unless set.
   needed?: (method: string, path: string) => Need;
+  // The call a request makes, such as "add_item" for POST /api/call/add_item, or null for a route that is no call;
+  // `calls_under` reads it from a call table's path. A read-only or scoped token is let through to a call that only
+  // reads, and a scoped token to its scope's calls; none is named unless set, so such tokens only GET.
+  call_of?: (method: string, path: string) => string | null;
+  // Whether a named call only reads; none unless set.
+  is_read_only?: (call: string) => boolean;
   oidc?: OidcClient | null;
   proxy?: ProxySignIn | null;
   // How long a session lasts with "Keep me signed in" unticked; null, the default, ends it when the browser closes.
@@ -82,11 +90,28 @@ const longest_cookie_seconds = 400 * 24 * 60 * 60;
 
 const sign_in_first = "Sign in first.";
 
+// The call named by the path's last segment under any of the prefixes, as `server/call_table` serves them.
+export function calls_under(...prefixes: string[]): (method: string, path: string) => string | null {
+  return (_method, path) => {
+    for (const prefix of prefixes) {
+      const start = prefix.endsWith("/") ? prefix : `${prefix}/`;
+      if (path.startsWith(start) && /^[\w-]+$/.test(path.slice(start.length))) return path.slice(start.length);
+    }
+    return null;
+  };
+}
+
+// What a read-only or scoped token is told when it goes further than it may.
+export function token_refusal(viewer: Pick<Viewer, "scope">, call: string | null): string {
+  if (viewer.scope === undefined) return "This token can only read.";
+  return `This token is kept to ${viewer.scope.label}${call === null ? "" : `, which does not include ${call}`}.`;
+}
+
 // ── Registration ─────────────────────────────────────────────────────────────
 
 export async function register_accounts(app: FastifyInstance, options: AccountSignInOptions): Promise<void> {
   const {
-    accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const,
+    accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const, call_of = () => null, is_read_only = () => false,
     session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes",
   } = options;
   const prefix = options.api_prefix ?? "/api";
@@ -128,7 +153,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (bearer !== undefined) {
       const token = accounts.check_token(bearer);
       const user = token === null ? null : accounts.user(token.owner);
-      if (token !== null && user !== null) return as_viewer(user, "token", token.read_only, token.id);
+      if (token !== null && user !== null) {
+        const scope = accounts.token_scope(token.scope);
+        return { ...as_viewer(user, "token", token.read_only, token.id), ...(scope === null ? {} : { scope }) };
+      }
       const declared = accounts.check_declared_token(bearer);
       if (declared !== null && declared.role !== null) {
         return { name: declared.name, role: declared.role, access: declared.limited_to, via: "token", read_only: declared.read_only, credential_id: null, declared };
@@ -173,7 +201,9 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
     if (viewer.read_only && request.method !== "GET" && path !== routes.logout && !read_only_paths.has(path)) {
-      return reply.code(403).send({ error: "This token can only read." });
+      const call = call_of(request.method, path);
+      const allowed = call !== null && (is_read_only(call) || viewer.scope?.calls.includes(call) === true);
+      if (!allowed) return reply.code(403).send({ error: token_refusal(viewer, call) });
     }
     if (typeof need === "object" && !accounts.has_role(viewer.role, need.role)) {
       return reply.code(403).send({ error: `This needs the ${need.role} role; ${viewer.name} is ${article(viewer.role)} ${viewer.role}.` });
@@ -250,6 +280,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       return {
         name: viewer.name, role: viewer.role, access: viewer.access, via: viewer.via, read_only: viewer.read_only,
         roles: accounts.roles, totp_enabled: user.totp_enabled, source: user.source, has_password: user.has_password,
+        scope: viewer.scope?.id ?? null,
       };
     });
 
@@ -323,8 +354,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
     scope.get(`${routes.account}/tokens`, async (request) => accounts.tokens(request.viewer!.name));
 
-    scope.post<{ Body: { name?: unknown; read_only?: unknown } }>(`${routes.account}/tokens`, async (request, reply) =>
-      reply.code(201).send(accounts.create_token(request.viewer!.name, { name: request.body?.name, read_only: request.body?.read_only })));
+    scope.get(`${routes.account}/token_scopes`, async () => accounts.token_scopes);
+
+    scope.post<{ Body: { name?: unknown; read_only?: unknown; scope?: unknown } }>(`${routes.account}/tokens`, async (request, reply) =>
+      reply.code(201).send(accounts.create_token(request.viewer!.name, { name: request.body?.name, read_only: request.body?.read_only, scope: request.body?.scope })));
 
     scope.delete<{ Params: { id: string } }>(`${routes.account}/tokens/:id`, async (request, reply) => {
       accounts.delete_token(Number(request.params.id), request.viewer!.name);

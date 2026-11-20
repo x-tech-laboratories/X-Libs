@@ -40,9 +40,12 @@ export interface RouteToolSpec extends MethodSpec {
 // The request each tool call arrives in, so the call can act as whoever sent it.
 const current_request = new AsyncLocalStorage<FastifyRequest>();
 
-// Whether the request came with a read-only token of server/account_sign_in, which may run only the tools that read.
-function is_read_only_token(request: FastifyRequest): boolean {
-  return (request as { viewer?: { read_only?: boolean } | null }).viewer?.read_only === true;
+// What a read-only token of server/account_sign_in may not run: any tool that changes data, except its scope's calls.
+function refusal_for(request: FastifyRequest, method: string): string | null {
+  const viewer = (request as { viewer?: { read_only?: boolean; scope?: { label: string; calls: readonly string[] } } | null }).viewer;
+  if (viewer?.read_only !== true) return null;
+  if (viewer.scope === undefined) return "This token can only read.";
+  return viewer.scope.calls.includes(method) ? null : `This token is kept to ${viewer.scope.label}, which does not include ${method}.`;
 }
 
 // ── Tools ────────────────────────────────────────────────────────────────────
@@ -65,7 +68,8 @@ export function create_mcp_server(options: McpRouteOptions): McpServer {
     server.registerTool(method, config, async (named) => {
       try {
         const request = current_request.getStore()!;
-        if (!config.annotations.readOnlyHint && is_read_only_token(request)) throw new Error("This token can only read.");
+        const refusal = config.annotations.readOnlyHint ? null : refusal_for(request, method);
+        if (refusal !== null) throw new Error(refusal);
         const result = await options.call(method, positional_args(spec, named ?? {}), request);
         return { content: [{ type: "text" as const, text: as_text(result) }] };
       } catch (error) {

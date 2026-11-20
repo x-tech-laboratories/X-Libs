@@ -5,11 +5,12 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { useState, type ComponentType, type ReactNode } from "react";
-import type { AccountSession, AccountsClient, AccountToken, AccountUser, Me } from "../accounts.ts";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import type { AccountSession, AccountsClient, AccountToken, AccountTokenScope, AccountUser, Me } from "../accounts.ts";
 import { ApiError } from "../api.ts";
 import { age, stamp } from "../format.ts";
 import { Chip } from "./badges.tsx";
+import { Select } from "./controls.tsx";
 import { confirm_dialog, Dialog, open_dialog } from "./dialog.tsx";
 import { Facts, FormRow, PageHeading, Section, type SettingsSection } from "./layout.tsx";
 import { Empty, Loaded, use_resource } from "./states.tsx";
@@ -210,23 +211,51 @@ function session_end_text(session: AccountSession): string {
 
 // ── Tokens ───────────────────────────────────────────────────────────────────
 
+// The app's token scopes; none from a server that offers none or predates them.
+function use_token_scopes(client: AccountsClient): AccountTokenScope[] {
+  const [scopes, set_scopes] = useState<AccountTokenScope[]>([]);
+  useEffect(() => {
+    let live = true;
+    client.token_scopes?.().then((found) => live && set_scopes(found), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  return scopes;
+}
+
 function OwnTokensPanel({ client }: { client: AccountsClient }) {
   const tokens = use_resource(client.own_tokens, [client]);
+  const scopes = use_token_scopes(client);
   const refresh = () => void tokens.reload(true);
   return (
     <div className="stack">
       <p className="muted small">A token acts as you for a device or script, sent as Authorization: Bearer &lt;token&gt;. Phones and desktop apps get one when they sign in.</p>
       <div><button onClick={() => token_dialog(client, refresh)}>Create token</button></div>
-      <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} revoke={(token) => client.delete_own_token(token.id)} refresh={refresh} />}</Loaded>
+      <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} scopes={scopes} revoke={(token) => client.delete_own_token(token.id)} refresh={refresh} />}</Loaded>
     </div>
   );
 }
 
-function TokensTable({ tokens, show_owner = false, revoke, refresh }: { tokens: AccountToken[]; show_owner?: boolean; revoke: (token: AccountToken) => Promise<void>; refresh: () => void }) {
+// What a token may do, as its chip says: its scope's name, read only, or nothing for a full token.
+function token_chip(token: AccountToken, scopes: AccountTokenScope[]): string | null {
+  if (token.scope) return scopes.find((scope) => scope.id === token.scope)?.label ?? token.scope;
+  return token.read_only ? "read only" : null;
+}
+
+interface TokensTableProps {
+  tokens: AccountToken[];
+  scopes: AccountTokenScope[];
+  show_owner?: boolean;
+  revoke: (token: AccountToken) => Promise<void>;
+  refresh: () => void;
+}
+
+function TokensTable({ tokens, scopes, show_owner = false, revoke, refresh }: TokensTableProps) {
   if (tokens.length === 0) return <Empty title="No tokens." />;
   return (
     <DataTable<AccountToken> rows={tokens} row_key={(token) => token.id} caption="Tokens" columns={[
-      { label: "Name", cell: (token) => <>{token.name}{token.read_only && <> <Chip>read only</Chip></>}</> },
+      { label: "Name", cell: (token) => <>{token.name}{token_chip(token, scopes) !== null && <> <Chip>{token_chip(token, scopes)}</Chip></>}</> },
       ...(show_owner ? [{ label: "Owner", cell: (token: AccountToken) => token.owner }] : []),
       { label: "Created", cell: (token) => <span title={stamp(token.created_epoch)}>{age(token.created_epoch)}</span> },
       { label: "Last used", cell: (token) => token.last_used_epoch ? <Age epoch={token.last_used_epoch} /> : <span className="muted">never</span> },
@@ -252,14 +281,23 @@ function token_dialog(client: AccountsClient, refresh: () => void): void {
   open_dialog((close) => <TokenDialog client={client} refresh={refresh} close={close} />);
 }
 
+// What the token form offers when the app has scopes: reading only, each scope, or everything.
+const read_choice = ":read";
+const full_choice = ":full";
+
 function TokenDialog({ client, refresh, close }: { client: AccountsClient; refresh: () => void; close: () => void }) {
+  const scopes = use_token_scopes(client);
   const [name, set_name] = useState("");
   const [read_only, set_read_only] = useState(true);
+  const [choice, set_choice] = useState(read_choice);
   const [message, set_message] = useState("");
+  const chosen_scope = scopes.find((scope) => scope.id === choice) ?? null;
 
   async function create(): Promise<void> {
     try {
-      const { token } = await client.create_token(name, read_only);
+      const { token } = scopes.length === 0
+        ? await client.create_token(name, read_only)
+        : await client.create_token(name, choice !== full_choice, chosen_scope?.id ?? null);
       close();
       refresh();
       show_once("Your new token", "Copy it now: the server keeps only a fingerprint of it and cannot show it again.", [token]);
@@ -277,9 +315,15 @@ function TokenDialog({ client, refresh, close }: { client: AccountsClient; refre
         <FormRow label="Name" id="token-name">
           <input id="token-name" type="text" placeholder="such as what will use it" autoFocus value={name} onChange={(event) => set_name(event.currentTarget.value)} />
         </FormRow>
-        <label className="check">
-          <input type="checkbox" checked={read_only} onChange={(event) => set_read_only(event.currentTarget.checked)} /> Read only
-        </label>
+        {scopes.length === 0 ? (
+          <label className="check">
+            <input type="checkbox" checked={read_only} onChange={(event) => set_read_only(event.currentTarget.checked)} /> Read only
+          </label>
+        ) : (
+          <FormRow label="May" id="token-scope" hint={chosen_scope ? chosen_scope.hint || `Read, and ${chosen_scope.calls.join(", ")}.` : choice === full_choice ? "Everything you can do, except manage your account." : "Read, and change nothing."}>
+            <Select<string> id="token-scope" label="May" bare options={[[read_choice, "Only read"], ...scopes.map((scope): [string, string] => [scope.id, scope.label]), [full_choice, "Everything"]]} value={choice} on_change={set_choice} />
+          </FormRow>
+        )}
         <p className="tone-bad small" role="alert">{message}</p>
       </div>
     </Dialog>
@@ -299,6 +343,7 @@ export function UsersView({ client, me, access_editor, ...words }: UsersViewProp
   const admin = me.roles[me.roles.length - 1];
   const users = use_resource(client.users, [client]);
   const tokens = use_resource(client.all_tokens, [client]);
+  const scopes = use_token_scopes(client);
   const refresh = () => {
     void users.reload(true);
     void tokens.reload(true);
@@ -315,7 +360,7 @@ export function UsersView({ client, me, access_editor, ...words }: UsersViewProp
         <Loaded resource={users} lines={4}>{(rows) => <UsersTable users={rows} editing={editing} />}</Loaded>
       </Section>
       <Section title="Tokens">
-        <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} show_owner revoke={(token) => client.delete_token(token.id)} refresh={refresh} />}</Loaded>
+        <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} scopes={scopes} show_owner revoke={(token) => client.delete_token(token.id)} refresh={refresh} />}</Loaded>
       </Section>
     </div>
   );
@@ -344,7 +389,8 @@ function UsersSettingsList({ client, me, access_editor, ...words }: UsersViewPro
 
 function TokensSettingsList({ client }: { client: AccountsClient }) {
   const tokens = use_resource(client.all_tokens, [client]);
-  return <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} show_owner revoke={(token) => client.delete_token(token.id)} refresh={() => void tokens.reload(true)} />}</Loaded>;
+  const scopes = use_token_scopes(client);
+  return <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} scopes={scopes} show_owner revoke={(token) => client.delete_token(token.id)} refresh={() => void tokens.reload(true)} />}</Loaded>;
 }
 
 interface Editing {

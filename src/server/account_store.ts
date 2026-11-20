@@ -45,8 +45,29 @@ export interface Token {
   owner: string;
   // A read-only token can only make GET requests.
   read_only: boolean;
+  // The app's token scope it is kept to, as a read-only token that may also make the scope's calls, or null for none.
+  scope: string | null;
   created_epoch: number;
   last_used_epoch: number | null;
+}
+
+// A narrower kind of token the app offers beside full and read-only ones, such as one that may only add items: it reads
+// as a read-only token does and may also make the calls named here, on the API and over MCP alike.
+export interface TokenScope {
+  // What the token form calls it, such as "Add items".
+  label: string;
+  // A line under it saying what such a token may do.
+  hint?: string;
+  // The calls it may make beyond reading, by name, such as ["add_item"].
+  calls: readonly string[];
+}
+
+// A scope as the page lists it, by its id.
+export interface TokenScopeInfo {
+  id: string;
+  label: string;
+  hint: string;
+  calls: string[];
 }
 
 export class AccountError extends Error {
@@ -75,6 +96,8 @@ export interface AccountStoreOptions {
   shortest_password?: number;
   // Tokens from the app's config, read by `read_declared_tokens`, which no page can list or revoke.
   declared_tokens?: readonly DeclaredToken[];
+  // The narrower tokens a user may make, by id, such as { add_items: { label: "Add items", calls: ["add_item"] } }.
+  token_scopes?: Record<string, TokenScope>;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -117,7 +140,7 @@ const schema = [`
     created_epoch INTEGER NOT NULL,
     last_used_epoch INTEGER
   );
-`];
+`, "ALTER TABLE account_tokens ADD COLUMN scope TEXT"];
 
 type Row = Record<string, SqlValue>;
 
@@ -132,6 +155,7 @@ export class AccountStore {
   private readonly token_prefix: string;
   private readonly shortest_password: number;
   private declared_token_list: readonly DeclaredToken[];
+  private readonly scopes: Record<string, TokenScope>;
 
   constructor(options: AccountStoreOptions) {
     this.database = options.database;
@@ -142,6 +166,7 @@ export class AccountStore {
     this.token_prefix = options.token_prefix ?? "xt";
     this.shortest_password = options.shortest_password ?? 12;
     this.declared_token_list = options.declared_tokens ?? [];
+    this.scopes = options.token_scopes ?? {};
     if (this.roles.length === 0) throw new Error("An account store needs at least one role.");
     migrate(this.database, schema, { owner: "accounts" });
   }
@@ -332,17 +357,29 @@ export class AccountStore {
 
   // ── Tokens ───────────────────────────────────────────────────────────────
 
-  // A token that acts as its owner, shown once; only its digest is kept.
-  create_token(owner: string, fields: { name: unknown; read_only: unknown }): { token: string; id: number } {
+  // A token that acts as its owner, shown once; only its digest is kept. A scoped token is read-only plus its scope's calls.
+  create_token(owner: string, fields: { name: unknown; read_only: unknown; scope?: unknown }): { token: string; id: number } {
     const label = String(fields.name ?? "").trim();
     if (!label || label.length > 64) throw new AccountError("Give the token a name of up to 64 characters, such as what will use it.");
     if (this.user(owner) === null) throw new AccountError(`No user named '${owner}'.`, 404);
+    const scope = fields.scope === undefined || fields.scope === null || fields.scope === "" ? null : String(fields.scope);
+    if (scope !== null && !Object.hasOwn(this.scopes, scope)) throw new AccountError(`No token scope named '${scope}'.`);
     const token = `${this.token_prefix}_${randomBytes(32).toString("base64url")}`;
     const id = this.run(
-      "INSERT INTO account_tokens (name, hash, owner, read_only, created_epoch) VALUES (?, ?, ?, ?, ?)",
-      label, digest(token), owner, fields.read_only === false ? 0 : 1, now_seconds(),
+      "INSERT INTO account_tokens (name, hash, owner, read_only, scope, created_epoch) VALUES (?, ?, ?, ?, ?, ?)",
+      label, digest(token), owner, scope !== null || fields.read_only !== false ? 1 : 0, scope, now_seconds(),
     );
     return { token, id };
+  }
+
+  // The narrower tokens the app offers, in the order it gave them.
+  get token_scopes(): TokenScopeInfo[] {
+    return Object.entries(this.scopes).map(([id, scope]) => ({ id, label: scope.label, hint: scope.hint ?? "", calls: [...scope.calls] }));
+  }
+
+  // The scope a token is kept to, or null for one the app no longer offers, which then only reads.
+  token_scope(id: string | null): TokenScopeInfo | null {
+    return id === null ? null : this.token_scopes.find((scope) => scope.id === id) ?? null;
   }
 
   // Every token, or only the owner's.
@@ -473,6 +510,7 @@ function token_of(row: Row): Token {
     name: String(row.name),
     owner: String(row.owner),
     read_only: Boolean(row.read_only),
+    scope: row.scope === null || row.scope === undefined ? null : String(row.scope),
     created_epoch: Number(row.created_epoch),
     last_used_epoch: row.last_used_epoch === null ? null : Number(row.last_used_epoch),
   };

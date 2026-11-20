@@ -16,6 +16,8 @@ export interface Me {
   access: unknown;
   via: "session" | "token" | "proxy";
   read_only: boolean;
+  // The scope of the token asking, by id, or null.
+  scope?: string | null;
   totp_enabled: boolean;
   source: "declared" | "page";
   has_password: boolean;
@@ -55,8 +57,18 @@ export interface AccountToken {
   name: string;
   owner: string;
   read_only: boolean;
+  // The app's token scope it is kept to, by id, or null for a full or read-only token.
+  scope?: string | null;
   created_epoch: number;
   last_used_epoch: number | null;
+}
+
+// A narrower kind of token the app offers: it reads, and may make the calls named.
+export interface AccountTokenScope {
+  id: string;
+  label: string;
+  hint: string;
+  calls: string[];
 }
 
 export interface UserFields {
@@ -132,7 +144,9 @@ export function create_accounts_client(options: AccountsClientOptions = {}) {
     close_session: (id: number) => api<void>(`${base}/account/sessions/${segment(id)}`, "DELETE"),
     close_other_sessions: () => api<void>(`${base}/account/sessions`, "DELETE"),
     own_tokens: () => api<AccountToken[]>(`${base}/account/tokens`),
-    create_token: (name: string, read_only: boolean) => api<{ token: string; id: number }>(`${base}/account/tokens`, "POST", { name, read_only }),
+    // A scope, by id, keeps the token to reading and that scope's calls.
+    create_token: (name: string, read_only: boolean, scope: string | null = null) => api<{ token: string; id: number }>(`${base}/account/tokens`, "POST", { name, read_only, ...(scope === null ? {} : { scope }) }),
+    token_scopes: () => api<AccountTokenScope[]>(`${base}/account/token_scopes`),
     delete_own_token: (id: number) => api<void>(`${base}/account/tokens/${segment(id)}`, "DELETE"),
 
     users: () => api<AccountUser[]>(`${base}/users`),
