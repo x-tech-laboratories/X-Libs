@@ -16,7 +16,8 @@ function fake_device() {
     get_local_mcp_settings: vi.fn(async () => settings),
     set_local_mcp_settings: vi.fn(async (next: Settings) => {
       settings = next;
-      status = next.enabled ? { state: "running", url: `http://127.0.0.1:${next.port}/mcp`, error: "" } : { state: "off", url: "", error: "" };
+      const running: LocalMcpStatus = { state: "running", url: `http://127.0.0.1:${next.port}/mcp`, error: "" };
+      status = !next.enabled ? { state: "off", url: "", error: "" } : next.require_token ? { ...running, token: "sesame", token_file: "/run/notes/key" } : running;
     }),
     get_local_mcp_status: vi.fn(async () => status),
   };
@@ -32,6 +33,29 @@ test("turning it on starts it and shows the command that adds it to Claude Code"
   expect(device.set_local_mcp_settings).toHaveBeenCalledWith({ enabled: true, port: 3920 });
   expect(screen.getByText("Listening on http://127.0.0.1:3920/mcp")).toBeTruthy();
   expect(screen.getByText("claude mcp add --transport http x-notes http://127.0.0.1:3920/mcp")).toBeTruthy();
+});
+
+test("requiring a token puts it in the command's header and in the client config, shown and copied on asking", async () => {
+  const device = fake_device();
+  const copied: string[] = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  render(<LocalMcpSettings device={device} name="x-notes" />);
+
+  const toggle = await screen.findByRole("switch", { name: "MCP server" });
+  await act(async () => fireEvent.click(toggle));
+  expect(screen.getByRole("button", { name: "Show" })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Require a token" })));
+
+  expect(device.set_local_mcp_settings).toHaveBeenLastCalledWith({ enabled: true, port: 3920, require_token: true });
+  expect(screen.getByText(`claude mcp add --transport http --header "Authorization: Bearer $(cat '/run/notes/key')" x-notes http://127.0.0.1:3920/mcp`)).toBeTruthy();
+  expect(screen.queryByText(/sesame/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show" }));
+  const config = { mcpServers: { "x-notes": { type: "http", url: "http://127.0.0.1:3920/mcp", headers: { Authorization: "Bearer sesame" } } } };
+  expect(screen.getByText(/Bearer sesame/).textContent).toBe(JSON.stringify(config, null, 2));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy" })));
+  expect(copied).toEqual([JSON.stringify(config, null, 2)]);
+  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  expect(screen.queryByText(/Bearer sesame/)).toBeNull();
 });
 
 test("a port that cannot be used says why", async () => {
