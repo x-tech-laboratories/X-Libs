@@ -16,6 +16,7 @@ import { Facts, FormRow, PageHeading, Section, type SettingsSection } from "./la
 import { Empty, Loaded, use_resource } from "./states.tsx";
 import { DataTable } from "./table.tsx";
 import { Age } from "./time.tsx";
+import { CopyButton } from "./copy_button.tsx";
 import { toast } from "./toasts.tsx";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -519,7 +520,7 @@ export function show_once(title: string, note: ReactNode, lines: string[]): void
   const text = lines.join("\n");
   open_dialog((close) => (
     <Dialog title={title} on_close={close} buttons={<>
-      <button onClick={() => void navigator.clipboard?.writeText(text).then(() => toast("Copied."))}>Copy</button>
+      <CopyButton text={text} />
       <button className="accent solid" onClick={close}>I have saved it</button>
     </>}>
       <div><p>{note}</p><pre className="output secret-once">{text}</pre></div>

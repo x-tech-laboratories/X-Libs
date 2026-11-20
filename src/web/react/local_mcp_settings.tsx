@@ -6,6 +6,7 @@ import { local_mcp_add_command, local_mcp_client_config, type LocalMcpClient, ty
 import { describe_error } from "../errors.ts";
 import { ButtonGroup, NumberField, Switch } from "./controls.tsx";
 import { SettingRow } from "./layout.tsx";
+import { CopyButton } from "./copy_button.tsx";
 import { toast } from "./toasts.tsx";
 
 export interface LocalMcpSettingsProps {
@@ -74,7 +75,7 @@ export function LocalMcpSettings({ device, name, data_name = "read and change th
             </>}>
               <ButtonGroup label="Client config">
                 <button onClick={() => set_config_shown(!config_shown)}>{config_shown ? "Hide" : "Show"}</button>
-                <button onClick={() => void navigator.clipboard?.writeText(config_text).then(() => toast("Copied."))}>Copy</button>
+                <CopyButton text={config_text} />
               </ButtonGroup>
             </SettingRow>
           )}

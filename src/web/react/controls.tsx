@@ -193,9 +193,10 @@ interface SelectProps<Value extends string | number> {
   // Only the select, named by label, such as inside a SettingRow that shows the label itself.
   bare?: boolean;
   id?: string;
+  disabled?: boolean;
 }
 
-export function Select<Value extends string | number>({ label, options, groups = [], value, on_change, bare = false, id }: SelectProps<Value>) {
+export function Select<Value extends string | number>({ label, options, groups = [], value, on_change, bare = false, id, disabled = false }: SelectProps<Value>) {
   const shown_groups = groups.filter((group) => group.options.length > 0);
   const change = (event: ChangeEvent<HTMLSelectElement>) => {
     const text = event.currentTarget.value;
@@ -203,7 +204,7 @@ export function Select<Value extends string | number>({ label, options, groups =
     on_change((every.find(([option]) => String(option) === text)?.[0] ?? text) as Value);
   };
   const select = (
-    <select id={id} value={value} aria-label={bare ? label : undefined} onChange={change}>
+    <select id={id} value={value} aria-label={bare ? label : undefined} disabled={disabled} onChange={change}>
       {options.map(([option, text]) => <option key={option} value={option}>{text}</option>)}
       {shown_groups.map((group) => (
         <optgroup key={group.label} label={group.label}>
@@ -372,18 +373,20 @@ interface PathInputProps {
   label: string;
   value: string;
   on_change: (value: string) => void;
-  // Opens the app's file or folder picker and gives back the path chosen, or null when the user cancelled.
-  pick: (current: string) => Promise<string | null>;
+  // Opens the app's file or folder picker and gives back the path chosen, or null when the user cancelled; without it,
+  // such as in a browser that cannot reach the daemon's files, the path is only typed.
+  pick?: (current: string) => Promise<string | null>;
   placeholder?: string;
   disabled?: boolean;
   browse_label?: string;
 }
 
-// A path typed by hand or picked through a Browse button.
+// A path typed by hand or picked through a Browse button, when the app has a picker.
 export function PathInput({ label, value, on_change, pick, placeholder, disabled = false, browse_label = "Browse…" }: PathInputProps) {
   const [picking, set_picking] = useState(false);
 
   async function browse(): Promise<void> {
+    if (!pick) return;
     set_picking(true);
     try {
       const chosen = await pick(value);
@@ -396,7 +399,7 @@ export function PathInput({ label, value, on_change, pick, placeholder, disabled
   return (
     <span className="path-row">
       <input type="text" aria-label={label} spellCheck={false} placeholder={placeholder} disabled={disabled} value={value} onChange={(event) => on_change(event.currentTarget.value)} />
-      <button type="button" disabled={disabled || picking} onClick={() => void browse()}>{browse_label}</button>
+      {pick && <button type="button" disabled={disabled || picking} onClick={() => void browse()}>{browse_label}</button>}
     </span>
   );
 }
