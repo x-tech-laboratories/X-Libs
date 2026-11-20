@@ -18,6 +18,7 @@
   ],
   "bin": {
     "x-libs-bundle-migrations": "dist/drizzle_migrations.js",
+    "x-libs-check": "dist/change_checks_cli.js",
     "x-libs-icons": "dist/app_icons.js",
     "x-libs-site": "dist/site/cli.js"
   },
@@ -176,6 +177,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/semver": "^7.8.0",
+    "@types/spdx-satisfies": "^6.0.0",
     "@types/sshpk": "^1.17.5",
     "@vitest/coverage-v8": "^5.1.1",
     "@x-tech-laboratories/halon": "^0.27.0",
@@ -225,6 +227,7 @@
     "react-error-boundary": "^6.1.6",
     "rrule": "^2.8.1",
     "semver": "^7.8.6",
+    "spdx-satisfies": "^6.0.1",
     "sshpk": "^1.18.0"
   },
   "capacitor": {
