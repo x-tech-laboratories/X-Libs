@@ -73,6 +73,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
   - `close_matches` and `similarity_ratio` (difflib's get_close_matches) and `deep_equal` (Python's == on JSON values) in `src/core/python.ts`, as more of `python_text`.
   - A strict `python_format` raising Python's KeyError, IndexError and single-brace errors in its own words, as `src/monitors/uptime.ts` has, behind an option of `python_text`'s.
   - Cache-busting reloads of plugin folders (`src/core/coordination/plugin_loader.ts`): re-import a changed plugin module under a new query string, as an option of `load_plugin_folder`.
+- Left out of token scopes (2026-11-20): a scope is always read-only plus its calls, so there is no scope that may not read; tokens declared in an app's config (`server/declared_tokens`) take a role and read-only, not a token scope; and the local MCP endpoint's token is all or nothing, with no scope of its own.
 - A widget gallery: a demo page that shows the `web/react` widgets (shell, tables, dialogs, settings panels, tiles) on Halon, with example data, so X-Libs has a screenshot for the Projects page of x-tech-laboratories.github.io (`src/content/docs/projects.mdx`) and a place to see a widget before using it. The `x-libs-site` generator could publish it as X-Libs' own Pages site.
 
 ## Settings, History and Users in Settings (Application Standard, 2026-11-13)
