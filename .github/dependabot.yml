@@ -7,3 +7,6 @@ updates:
       interval: daily
     allow:
       - dependency-name: "@x-tech-laboratories/halon"
+    # Our own releases skip the default 3-day cooldown, which X-Libs outpaces several times a day.
+    cooldown:
+      exclude: ["@x-tech-laboratories/*"]
