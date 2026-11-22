@@ -36,7 +36,6 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
   - For Halon: the layout classes `.inline-row`, `.spread-row`, `.result-list`, `.result-row` and `.close-list` of X-Fitness's `src/web/app.css`.
   - `PeriodStepper` shows "Today" twice on the current day, as its button and as its label.
   - A button that opens a `Popover` and closes it on a second click (X-Fitness `SkinfoldWhere` in `src/web/body/SkinfoldDiagram.tsx`); today the click that closes the popover opens it again unless the app guards it.
-- For X-Fitness: move its folding sidebar (`src/web/Sidebar.tsx`) onto the `Shell`'s `sections` with `children`, `active_item` and `sections_pref`, with Overview and History as sections of no children.
 - For X-Tasks: move its hand-rolled MCP endpoint (`src/main/mcp_server.ts`) onto `electron/mcp` and `LocalMcpSettings`, with its tools described as an `api_spec`.
 - For X-Tasks: move its tray (`src/main/tray.ts`, `tray_menu.ts`) onto `electron/tray` and its `register_bridge_calls` (`src/server/app.ts`) onto `server/call_table`.
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
