@@ -19,6 +19,8 @@ interface TreeProps<Item extends TreeItem> {
   name_of?: (item: Item) => string;
   // The ids of the rows folded shut.
   collapsed: ReadonlySet<string>;
+  // Whether a row has children not given yet, such as ones loaded only once it opens; it folds like a row with children.
+  has_children?: (item: Item) => boolean;
   on_collapsed_change: (collapsed: Set<string>) => void;
   selected_id?: string | null;
   // Several rows shown selected at once, beside selected_id.
@@ -51,7 +53,7 @@ function visible_nodes<Item extends TreeItem>(nodes: TreeNode<Item>[], collapsed
 }
 
 export function Tree<Item extends TreeItem>({
-  items, label, render_item, render_extra, name_of, collapsed, on_collapsed_change, selected_id = null, selected_ids, on_select, on_activate, row_class: class_of,
+  items, label, render_item, render_extra, name_of, collapsed, on_collapsed_change, has_children: has_unlisted, selected_id = null, selected_ids, on_select, on_activate, row_class: class_of,
   on_move, can_drop, allow_inside = true, new_item = null, on_context_menu, accepts_external, on_external_drop,
 }: TreeProps<Item>) {
   const [focused_id, set_focused_id] = useState<string | null>(null);
@@ -73,6 +75,8 @@ export function Tree<Item extends TreeItem>({
   }, [focused_id, items]);
 
   // ── Folding ────────────────────────────────────────────────────────────────
+
+  const folds = (node: TreeNode<Item>) => node.children.length > 0 || Boolean(has_unlisted?.(node.item));
 
   function set_collapsed(id: string, is_collapsed: boolean): void {
     if (collapsed.has(id) === is_collapsed) return;
@@ -153,7 +157,7 @@ export function Tree<Item extends TreeItem>({
     const node = shown[index];
     if (!node) return;
     const { item } = node;
-    const is_open = node.children.length > 0 && !collapsed.has(item.id);
+    const is_open = folds(node) && !collapsed.has(item.id);
 
     if (event.altKey && on_move && KEY_MOVES[event.key]) {
       const key_target = key_drop(item, KEY_MOVES[event.key]!, items);
@@ -168,8 +172,8 @@ export function Tree<Item extends TreeItem>({
     else if (event.key === "Home") focus_row(shown[0]?.item.id);
     else if (event.key === "End") focus_row(shown.at(-1)?.item.id);
     else if (event.key === "ArrowRight") {
-      if (is_open) focus_row(node.children[0]!.item.id);
-      else if (node.children.length > 0) set_collapsed(item.id, false);
+      if (is_open && node.children.length > 0) focus_row(node.children[0]!.item.id);
+      else if (!is_open && folds(node)) set_collapsed(item.id, false);
       else return;
     } else if (event.key === "ArrowLeft") {
       if (is_open) set_collapsed(item.id, true);
@@ -189,7 +193,7 @@ export function Tree<Item extends TreeItem>({
 
   function branch(node: TreeNode<Item>, depth: number): ReactNode {
     const { item, children } = node;
-    const has_children = children.length > 0;
+    const has_children = folds(node);
     const is_collapsed = collapsed.has(item.id);
     const name = name_of?.(item) ?? "row";
     const new_child = new_item_row(item.id);
@@ -245,7 +249,7 @@ export function Tree<Item extends TreeItem>({
           <span className="tree-label">{render_item(item)}</span>
           {render_extra && <span className="tree-extra">{render_extra(item)}</span>}
         </div>
-        {((has_children && !is_collapsed) || new_child) && (
+        {((children.length > 0 && !is_collapsed) || new_child) && (
           <ul role="group" className="tree-children">
             {!is_collapsed && children.map((child) => branch(child, depth + 1))}
             {new_child}

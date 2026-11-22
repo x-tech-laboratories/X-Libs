@@ -90,6 +90,29 @@ describe("folding", () => {
     expect(screen.getByText("Clients")).toBeTruthy();
   });
 
+  test("folds open a row whose children come only once it opens", () => {
+    // The app lists a row's children only while it is open, as a closure tree does.
+    function Lazy() {
+      const [collapsed, set_collapsed] = useState<Set<string>>(new Set(["a"]));
+      const shown = rows.filter((row) => row.parent_id === null || !collapsed.has(row.parent_id));
+      return <Tree items={shown} label="Lazy" render_item={(row) => row.name} name_of={(row) => row.name} collapsed={collapsed} on_collapsed_change={set_collapsed} has_children={(row) => row.id === "a"} />;
+    }
+    render(<Lazy />);
+
+    expect(screen.queryByText("Clients")).toBeNull();
+    expect(item_named("Work").getAttribute("aria-expanded")).toBe("false");
+    expect(item_named("Home").getAttribute("aria-expanded")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Work" }));
+    expect(screen.getByText("Clients")).toBeTruthy();
+    expect(item_named("Work").getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.keyDown(item_named("Work"), { key: "ArrowLeft" });
+    expect(screen.queryByText("Clients")).toBeNull();
+    fireEvent.keyDown(item_named("Work"), { key: "ArrowRight" });
+    expect(screen.getByText("Office")).toBeTruthy();
+  });
+
   test("shows the new item form among the children of its parent", () => {
     render(<Harness new_item={{ parent_id: "a", form: <input aria-label="New tag" /> }} />);
 
