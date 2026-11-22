@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.69.0",
+  "version": "0.69.1",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -49,7 +49,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@shikijs/rehype": "^4.6.0",
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",
-    "@x-tech-laboratories/halon": "^0.31.0",
+    "@x-tech-laboratories/halon": "^0.31.0 || ^0.32.0",
     "fastify": "^5.12.7",
     "mermaid": "^11.0.0",
     "nodemailer": "^10.3.1",
@@ -180,7 +180,7 @@
     "@types/spdx-satisfies": "^6.0.0",
     "@types/sshpk": "^1.17.5",
     "@vitest/coverage-v8": "^5.1.1",
-    "@x-tech-laboratories/halon": "^0.31.0",
+    "@x-tech-laboratories/halon": "^0.32.0",
     "fast-check": "^4.10.2",
     "fastify": "^5.12.7",
     "jsdom": "^31.0.0",
