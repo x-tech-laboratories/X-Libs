@@ -138,7 +138,7 @@ show) cat "$dir/$4" ;;
 stop)
   pid=$(cat "$dir/$1")
   kill -TERM -- "-$pid"
-  while kill -0 "$pid" 2> /dev/null; do sleep 0.02; done
+  for _ in $(seq 250); do kill -0 "$pid" 2> /dev/null || break; sleep 0.02; done
   ;;
 esac
 `;
@@ -158,9 +158,9 @@ describe("long runs as systemd units", () => {
         slice: "work.slice",
         properties: { OOMScoreAdjust: "500" },
         environment: { PATH: process.env.PATH ?? "", GREETING: 'say "hi" $HOME `x` \\' },
-        start_command: ["sh", script, units, "run"],
-        stop_command: ["sh", script, units, "stop"],
-        show_command: ["sh", script, units, "show"],
+        start_command: ["bash", script, units, "run"],
+        stop_command: ["bash", script, units, "stop"],
+        show_command: ["bash", script, units, "show"],
       },
     });
   });
