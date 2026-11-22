@@ -8,8 +8,10 @@ import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
 import { Dialogs } from "./dialog.tsx";
 import { Icon, type IconGlyph } from "./icons.tsx";
 import { ContextMenus } from "./menus.tsx";
+import { use_pref } from "./prefs.ts";
 import { ResizeHandle } from "./split.tsx";
 import { Toasts } from "./toasts.tsx";
+import { Tree } from "./tree.tsx";
 
 // ── Route ────────────────────────────────────────────────────────────────────
 
@@ -147,10 +149,80 @@ function BrandMark({ brand, icon, logo }: { brand: string; icon?: string; logo?:
   return <>{icon && <img className="brand-icon" src={icon} alt="" />}{brand}</>;
 }
 
+// ── Section tree ─────────────────────────────────────────────────────────────
+
+// A section's row has the id "section:<id>"; an item's row names its section as parent and has the id "<section>/<id>".
+interface SectionRow {
+  id: string;
+  parent_id: string | null;
+  position: number;
+  label: string;
+  href: string;
+}
+
+const section_row_id = (section: string) => `section:${section}`;
+
+function section_rows(sections: ShellSection[]): SectionRow[] {
+  return sections.flatMap((section, position) => [
+    { id: section_row_id(section.id), parent_id: null, position, label: section.label, href: section.href },
+    ...(section.children ?? []).map((item, item_position) => ({
+      id: `${section.id}/${item.id}`, parent_id: section_row_id(section.id), position: item_position, label: item.label, href: item.href,
+    })),
+  ]);
+}
+
+function is_id_list(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function go_to(href: string): void {
+  if (href.startsWith("#")) window.location.hash = href.slice(1);
+  else window.location.assign(href);
+}
+
+interface SectionTreeProps {
+  sections: ShellSection[];
+  active?: string;
+  active_item?: string | null;
+  pref_key: string;
+  label: string;
+}
+
+// The sections as rows folding open onto their items, the folded ones kept in a pref.
+export function SectionTree({ sections, active, active_item = null, pref_key, label }: SectionTreeProps) {
+  const [collapsed_ids, set_collapsed_ids] = use_pref(pref_key, [] as string[], is_id_list);
+  const collapsed = new Set(collapsed_ids);
+  const rows = section_rows(sections);
+  const item_id = active === undefined || active_item === null ? null : `${active}/${active_item}`;
+  const section_id = active === undefined ? null : section_row_id(active);
+  // A folded section lights up itself in place of its hidden item.
+  const shown_item = item_id !== null && section_id !== null && !collapsed.has(section_id) && rows.some((row) => row.id === item_id);
+  return (
+    <Tree
+      items={rows}
+      label={label}
+      render_item={(row) => row.label}
+      name_of={(row) => row.label}
+      collapsed={collapsed}
+      on_collapsed_change={(next) => set_collapsed_ids([...next])}
+      selected_id={shown_item ? item_id : section_id}
+      on_select={(row) => go_to(row.href)}
+    />
+  );
+}
+
 // ── Shell ────────────────────────────────────────────────────────────────────
 
 export interface ShellSection {
   // The first part of the route the section's pages live under, empty for the overview.
+  id: string;
+  label: string;
+  href: string;
+  // The section's items, such as each host, which fold open under its row.
+  children?: ShellSectionItem[];
+}
+
+export interface ShellSectionItem {
   id: string;
   label: string;
   href: string;
@@ -196,6 +268,10 @@ interface ShellProps {
   views?: ShellView[];
   // The section or view to light up, such as the route's first part.
   active?: string;
+  // The item of the active section to light up, such as a host's id; its section lights up instead while folded.
+  active_item?: string | null;
+  // Where the folded sections are kept, such as "x-nix-sidebar-collapsed", once any section has children.
+  sections_pref?: string;
   // The sidebar's own content, such as tags or a player, in place of the section links, held in a .sidebar-content box
   // below any `views`.
   sidebar?: ReactNode;
@@ -249,7 +325,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 }
 
 export function Shell({
-  brand, brand_icon, brand_logo, sections = [], views, active, sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
+  brand, brand_icon, brand_logo, sections = [], views, active, active_item = null, sections_pref = "sidebar-collapsed", sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
   menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
@@ -258,6 +334,7 @@ export function Shell({
   const menu_button = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const has_content = sidebar_content !== undefined && sidebar_content !== null;
+  const folding = sections.some((section) => section.children !== undefined);
   // With views the sidebar holds more than navigation, so it is an aside and only the views are the navigation.
   const Sidebar = views ? "aside" : "nav";
   const first_view = useRef(true);
@@ -325,7 +402,7 @@ export function Shell({
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <Sidebar ref={sidebar} id="sidebar" className="sidebar" aria-label={views ? undefined : labels.main_navigation}>
           {brand_in_sidebar && <a href={brand_href} className="sidebar-brand"><BrandMark brand={brand} icon={brand_icon} logo={brand_logo} /></a>}
-          {views || has_content ? (
+          {views || has_content || folding ? (
             <div className="sidebar-content">
               {views && (
                 <nav className="sidebar-nav" aria-label={labels.main_navigation}>
@@ -334,6 +411,7 @@ export function Shell({
                   ))}
                 </nav>
               )}
+              {folding && <SectionTree sections={sections} active={active} active_item={active_item} pref_key={sections_pref} label={labels.main_navigation} />}
               {sidebar_content}
             </div>
           ) : (
