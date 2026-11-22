@@ -3,7 +3,8 @@
 // and every API call is checked against the role it needs.
 //
 // "Keep me signed in" unticked gives a cookie that ends with the browser; ticked, one that lasts until the session is
-// revoked. Both lifetimes can be bounded.
+// revoked. Both lifetimes can be bounded. An app can require a second factor from its higher roles, which then only read
+// until they set one up.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ export interface Viewer {
   declared?: DeclaredToken;
   // The scope of the token the request came with: read-only, plus the scope's calls.
   scope?: TokenScopeInfo;
+  // Whether the user's role needs a second factor they have not set up, so they may only read and set one up.
+  second_factor_missing?: boolean;
 }
 
 declare module "fastify" {
@@ -81,6 +84,8 @@ export interface AccountSignInOptions {
   // How many tries one name gets from one address in the window before it waits; 5 in "5 minutes" unless set.
   tries_allowed?: number;
   try_window?: string;
+  // The lowest role that must sign in with a second factor; null, the default, leaves it to each user.
+  second_factor_from?: string | null;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -112,7 +117,7 @@ export function token_refusal(viewer: Pick<Viewer, "scope">, call: string | null
 export async function register_accounts(app: FastifyInstance, options: AccountSignInOptions): Promise<void> {
   const {
     accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const, call_of = () => null, is_read_only = () => false,
-    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes",
+    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null,
   } = options;
   const prefix = options.api_prefix ?? "/api";
   const oidc_cookie_name = `${cookie_name}_oidc`;
@@ -126,6 +131,11 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   const read_only_paths = new Set(options.read_only_paths ?? []);
   const open_paths = new Set([routes.info, routes.login, routes.oidc_start, routes.oidc_callback, ...(options.open_paths ?? [])]);
   const admin: Need = { role: accounts.top_role };
+  if (second_factor_from !== null && !accounts.roles.includes(second_factor_from)) throw new Error(`No role named '${second_factor_from}' to require a second factor from.`);
+  // Whether a user's role needs a second factor they have not set up.
+  const lacks_second_factor = (user: User) => second_factor_from !== null && !user.totp_enabled && accounts.has_role(user.role, second_factor_from);
+  // What such a user may still do besides reading: sign out, and set up the second factor or a new password.
+  const setup_paths = new Set([routes.logout, `${routes.account}/totp/start`, `${routes.account}/totp/confirm`, `${routes.account}/password`]);
 
   await app.register(fastify_cookie);
   await app.register(fastify_rate_limit, {
@@ -147,7 +157,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (secret) {
       const session = accounts.session(secret);
       const user = session === null ? null : accounts.user(session.name);
-      if (session !== null && user !== null) return as_viewer(user, "session", false, session.id);
+      if (session !== null && user !== null) return { ...as_viewer(user, "session", false, session.id), ...(lacks_second_factor(user) ? { second_factor_missing: true } : {}) };
     }
     const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1]?.trim();
     if (bearer !== undefined) {
@@ -200,6 +210,9 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (viewer.via === "token" && (path.startsWith(`${routes.account}/`) || typeof need === "object" && (path.startsWith(routes.users) || path.startsWith(routes.tokens)))) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
+    if (viewer.second_factor_missing && request.method !== "GET" && !setup_paths.has(path)) {
+      return reply.code(403).send({ error: "Set up a second factor on your account page before making changes." });
+    }
     if (viewer.read_only && request.method !== "GET" && path !== routes.logout && !read_only_paths.has(path)) {
       const call = call_of(request.method, path);
       const allowed = call !== null && (is_read_only(call) || viewer.scope?.calls.includes(call) === true);
@@ -248,6 +261,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       }
       // A device, such as the phone app syncing with this server, gets a token of its own in place of a cookie.
       if (typeof body.device === "string" && body.device.trim() !== "") {
+        if (lacks_second_factor(user)) return reply.code(403).send({ error: "Set up a second factor on the page before signing in a device." });
         return reply.code(201).send(accounts.create_token(user.name, { name: body.device, read_only: false }));
       }
       start_session(request, reply, user, body.remember === true);
@@ -280,7 +294,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       return {
         name: viewer.name, role: viewer.role, access: viewer.access, via: viewer.via, read_only: viewer.read_only,
         roles: accounts.roles, totp_enabled: user.totp_enabled, source: user.source, has_password: user.has_password,
-        scope: viewer.scope?.id ?? null,
+        scope: viewer.scope?.id ?? null, second_factor_needed: viewer.second_factor_missing === true, longest_token_days: accounts.longest_token_days,
       };
     });
 
@@ -356,8 +370,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
     scope.get(`${routes.account}/token_scopes`, async () => accounts.token_scopes);
 
-    scope.post<{ Body: { name?: unknown; read_only?: unknown; scope?: unknown } }>(`${routes.account}/tokens`, async (request, reply) =>
-      reply.code(201).send(accounts.create_token(request.viewer!.name, { name: request.body?.name, read_only: request.body?.read_only, scope: request.body?.scope })));
+    scope.post<{ Body: { name?: unknown; read_only?: unknown; scope?: unknown; days?: unknown } }>(`${routes.account}/tokens`, async (request, reply) => {
+      const body = request.body;
+      return reply.code(201).send(accounts.create_token(request.viewer!.name, { name: body?.name, read_only: body?.read_only, scope: body?.scope, days: body?.days }));
+    });
 
     scope.delete<{ Params: { id: string } }>(`${routes.account}/tokens/:id`, async (request, reply) => {
       accounts.delete_token(Number(request.params.id), request.viewer!.name);

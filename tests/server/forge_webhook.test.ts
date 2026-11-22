@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AddressLockout, Debouncer, event_of, is_signed, parse_payload, read_push, register_webhook_route } from "../../src/server/forge_webhook.ts";
+import { AddressLockout, Debouncer, SeenDeliveries, event_of, is_signed, parse_payload, read_push, register_webhook_route } from "../../src/server/forge_webhook.ts";
 
 const secret = "shared-secret";
 const body = Buffer.from('{"ref":"refs/heads/main"}');
@@ -123,5 +123,27 @@ describe("the route", () => {
     expect(seen[0].toString()).toBe('{ "ref" : 1 }');
     expect(other.json()).toEqual({ a: 1 });
     expect(closed).toHaveBeenCalled();
+  });
+});
+
+describe("SeenDeliveries", () => {
+  it("notices a body sent again within the window, and forgets it after", () => {
+    let now = 0;
+    const seen = new SeenDeliveries({ remember_in_milliseconds: 1000, now: () => now });
+
+    expect(seen.is_replay(body)).toBe(false);
+    expect(seen.is_replay(body)).toBe(true);
+    expect(seen.is_replay(Buffer.from("another"))).toBe(false);
+    now = 5000;
+    expect(seen.is_replay(body)).toBe(false);
+  });
+
+  it("keeps at most the given number of bodies, dropping the oldest", () => {
+    const seen = new SeenDeliveries({ most: 2 });
+
+    for (const text of ["one", "two", "three"]) seen.is_replay(Buffer.from(text));
+
+    expect(seen.is_replay(Buffer.from("three"))).toBe(true);
+    expect(seen.is_replay(Buffer.from("one"))).toBe(false);
   });
 });

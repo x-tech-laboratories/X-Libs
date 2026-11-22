@@ -74,9 +74,10 @@ function AccountPanels({ client, who, words, refresh }: { client: AccountsClient
         ? <p className="muted">Your password is in the accounts file this server is set up with; change it there with npm run hash-password.</p>
         : <PasswordForm client={client} />}
     </Section>
+    {who.second_factor_needed && <p className="tone-bad" role="alert">Your role needs a second factor. Until you set one up below, you can only look around.</p>}
     <Section title="Second factor"><TotpPanel key={String(who.totp_enabled)} client={client} enabled={who.totp_enabled} refresh={refresh} /></Section>
     <Section title="Where you are signed in"><SessionsPanel client={client} /></Section>
-    <Section title="Tokens"><OwnTokensPanel client={client} /></Section>
+    <Section title="Tokens"><OwnTokensPanel client={client} longest_days={who.longest_token_days ?? null} /></Section>
   </>;
 }
 
@@ -224,14 +225,14 @@ function use_token_scopes(client: AccountsClient): AccountTokenScope[] {
   return scopes;
 }
 
-function OwnTokensPanel({ client }: { client: AccountsClient }) {
+function OwnTokensPanel({ client, longest_days }: { client: AccountsClient; longest_days: number | null }) {
   const tokens = use_resource(client.own_tokens, [client]);
   const scopes = use_token_scopes(client);
   const refresh = () => void tokens.reload(true);
   return (
     <div className="stack">
       <p className="muted small">A token acts as you for a device or script, sent as Authorization: Bearer &lt;token&gt;. Phones and desktop apps get one when they sign in.</p>
-      <div><button onClick={() => token_dialog(client, refresh)}>Create token</button></div>
+      <div><button onClick={() => token_dialog(client, refresh, longest_days)}>Create token</button></div>
       <Loaded resource={tokens} lines={2}>{(rows) => <TokensTable tokens={rows} scopes={scopes} revoke={(token) => client.delete_own_token(token.id)} refresh={refresh} />}</Loaded>
     </div>
   );
@@ -259,6 +260,7 @@ function TokensTable({ tokens, scopes, show_owner = false, revoke, refresh }: To
       ...(show_owner ? [{ label: "Owner", cell: (token: AccountToken) => token.owner }] : []),
       { label: "Created", cell: (token) => <span title={stamp(token.created_epoch)}>{age(token.created_epoch)}</span> },
       { label: "Last used", cell: (token) => token.last_used_epoch ? <Age epoch={token.last_used_epoch} /> : <span className="muted">never</span> },
+      { label: "Expires", cell: (token) => token.expires_epoch ? <span title={stamp(token.expires_epoch)}>{token_expiry(token.expires_epoch)}</span> : <span className="muted">never</span> },
       {
         id: "actions", label: "", class: "actions-cell", cell: (token) => (
           <button className="danger" onClick={() => confirm_dialog({
@@ -277,17 +279,23 @@ function TokensTable({ tokens, scopes, show_owner = false, revoke, refresh }: To
   );
 }
 
-function token_dialog(client: AccountsClient, refresh: () => void): void {
-  open_dialog((close) => <TokenDialog client={client} refresh={refresh} close={close} />);
+// When a token stops working, in words: its date, or that it has.
+function token_expiry(epoch: number): string {
+  return epoch * 1000 <= Date.now() ? "expired" : new Date(epoch * 1000).toLocaleDateString();
+}
+
+function token_dialog(client: AccountsClient, refresh: () => void, longest_days: number | null = null): void {
+  open_dialog((close) => <TokenDialog client={client} refresh={refresh} close={close} longest_days={longest_days} />);
 }
 
 // What the token form offers when the app has scopes: reading only, each scope, or everything.
 const read_choice = ":read";
 const full_choice = ":full";
 
-function TokenDialog({ client, refresh, close }: { client: AccountsClient; refresh: () => void; close: () => void }) {
+function TokenDialog({ client, refresh, close, longest_days }: { client: AccountsClient; refresh: () => void; close: () => void; longest_days: number | null }) {
   const scopes = use_token_scopes(client);
   const [name, set_name] = useState("");
+  const [days_text, set_days_text] = useState("");
   const [read_only, set_read_only] = useState(true);
   const [choice, set_choice] = useState(read_choice);
   const [message, set_message] = useState("");
@@ -295,9 +303,10 @@ function TokenDialog({ client, refresh, close }: { client: AccountsClient; refre
 
   async function create(): Promise<void> {
     try {
+      const days = days_text.trim() === "" ? null : Number(days_text);
       const { token } = scopes.length === 0
-        ? await client.create_token(name, read_only)
-        : await client.create_token(name, choice !== full_choice, chosen_scope?.id ?? null);
+        ? await client.create_token(name, read_only, null, days)
+        : await client.create_token(name, choice !== full_choice, chosen_scope?.id ?? null, days);
       close();
       refresh();
       show_once("Your new token", "Copy it now: the server keeps only a fingerprint of it and cannot show it again.", [token]);
@@ -324,6 +333,9 @@ function TokenDialog({ client, refresh, close }: { client: AccountsClient; refre
             <Select<string> id="token-scope" label="May" bare options={[[read_choice, "Only read"], ...scopes.map((scope): [string, string] => [scope.id, scope.label]), [full_choice, "Everything"]]} value={choice} on_change={set_choice} />
           </FormRow>
         )}
+        <FormRow label="Lasts" id="token-days" hint={longest_days === null ? "Days until it stops working; empty for never." : `Days until it stops working, at most ${longest_days}; empty for ${longest_days}.`}>
+          <input id="token-days" type="number" min={1} max={longest_days ?? undefined} step={1} value={days_text} onChange={(event) => set_days_text(event.currentTarget.value)} />
+        </FormRow>
         <p className="tone-bad small" role="alert">{message}</p>
       </div>
     </Dialog>
