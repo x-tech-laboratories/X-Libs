@@ -11,6 +11,8 @@ export interface SqlStatement {
   all: (...params: SqlValue[]) => unknown[];
   // Rows as lists of values instead of objects, as node:sqlite does; Drizzle asks for it.
   setReturnArrays?: (on: boolean) => void;
+  // Integer columns as bigint instead of number, as node:sqlite does; Drizzle asks for it whenever it maps the rows.
+  setReadBigInts?: (on: boolean) => void;
 }
 
 export interface SqlDatabase {

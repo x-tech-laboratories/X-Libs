@@ -69,6 +69,14 @@ describe("drizzle", () => {
     expect(files.saved.get("test.db")?.byteLength).toBeGreaterThan(0);
   });
 
+  it("reads integer columns as bigint in WebAssembly when asked, as node:sqlite does", async () => {
+    const database = await open_wasm_database({ files: memory_files(), file_name: "test.db", save_delay_ms: 0 });
+    const statement = database.connection.prepare("SELECT 9007199254740993 AS big, 2 AS small, 1.5 AS real, 'x' AS text");
+    expect(statement.get()).toEqual({ big: 9007199254740993n, small: 2, real: 1.5, text: "x" });
+    statement.setReadBigInts?.(true);
+    expect(statement.get()).toEqual({ big: 9007199254740993n, small: 2n, real: 1.5, text: "x" });
+  });
+
   it("lets sync stamp the writes Drizzle makes", () => {
     const database = new DatabaseSync(":memory:");
     migrate_drizzle(database, "body", [start_migration]);
