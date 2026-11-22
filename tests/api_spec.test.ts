@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { check_known_ids, input_schema, keep_known_ids, openapi_document, positional_args, unknown_ids, type MethodSpec } from "../src/api_spec.ts";
+import {
+  check_known_ids, input_schema, keep_known_ids, openapi_document, positional_args, route_openapi_document, unknown_ids, type MethodSpec,
+} from "../src/api_spec.ts";
 
 const add_set: MethodSpec = {
   description: "Adds a set to an exercise.",
@@ -41,6 +43,46 @@ describe("api specs", () => {
     expect(Object.keys(paths)).toEqual(["/api/call/add_set", "/api/call/list_sets"]);
     expect(paths["/api/call/add_set"]!.post).toMatchObject({ operationId: "add_set", tags: ["change"], requestBody: { required: true } });
     expect(paths["/api/call/list_sets"]!.post).toMatchObject({ tags: ["read"], requestBody: { required: false } });
+  });
+
+  it("describes REST routes under their own paths and verbs, with path, query and body arguments", () => {
+    const name = { name: "name", schema: { type: "string" } };
+    const document = route_openapi_document(
+      {
+        get_host: { route: "GET /api/hosts/:name", description: "Shows a host.", params: [name, { name: "since", schema: { type: "integer" }, optional: true }] },
+        set_next_boot: {
+          route: "POST /api/hosts/:name/next-boot",
+          description: "Sets the next boot.",
+          params: [name, { name: "entry", schema: { type: "string" } }, { name: "reboot", schema: { type: "boolean" }, optional: true }],
+        },
+        refresh_host: { route: "POST /api/hosts/:name", description: "Reads a host again.", params: [name] },
+        list_hosts: { route: "GET /api/hosts", description: "Lists the hosts.", params: [] },
+      },
+      { title: "Hosts", version: "1.0.0" },
+    );
+
+    const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
+    expect(document).toMatchObject({ openapi: "3.1.0", info: { title: "Hosts", version: "1.0.0" }, security: [{ bearer: [] }] });
+    expect(Object.keys(paths)).toEqual(["/api/hosts/{name}", "/api/hosts/{name}/next-boot", "/api/hosts"]);
+    expect(paths["/api/hosts/{name}"]!.get).toMatchObject({
+      operationId: "get_host",
+      tags: ["read"],
+      parameters: [
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { name: "since", in: "query", required: false, schema: { type: "integer" } },
+      ],
+    });
+    expect(paths["/api/hosts/{name}"]!.get).not.toHaveProperty("requestBody");
+    expect(paths["/api/hosts/{name}"]!.post).toMatchObject({ operationId: "refresh_host", tags: ["change"] });
+    expect(paths["/api/hosts/{name}"]!.post).not.toHaveProperty("requestBody");
+    expect(paths["/api/hosts/{name}/next-boot"]!.post).toMatchObject({
+      parameters: [{ name: "name", in: "path" }],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { properties: { entry: { type: "string" }, reboot: { type: "boolean" } }, required: ["entry"] } } },
+      },
+    });
+    expect(paths["/api/hosts"]!.get).not.toHaveProperty("parameters");
   });
 });
 

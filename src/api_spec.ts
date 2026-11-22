@@ -81,6 +81,24 @@ export function keep_known_ids(value: unknown, known: KnownIds): string[] {
 
 // ── OpenAPI ──────────────────────────────────────────────────────────────────
 
+// What every call can answer.
+const call_responses = {
+  "200": { description: "the call's result as JSON" },
+  "204": { description: "done, with nothing to return" },
+  "400": { description: "the arguments were wrong, or the call refused them" },
+  "401": { description: "not signed in" },
+};
+
+function openapi_envelope(options: Pick<OpenApiOptions, "title" | "version" | "description">, paths: JsonSchema): JsonSchema {
+  return {
+    openapi: "3.1.0",
+    info: { title: options.title, version: options.version, ...(options.description ? { description: options.description } : {}) },
+    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
+    security: [{ bearer: [] }],
+    paths,
+  };
+}
+
 // An OpenAPI 3.1 document with one POST per call, taking its arguments as a JSON object.
 export function openapi_document(api: Record<string, MethodSpec>, options: OpenApiOptions): JsonSchema {
   const paths = Object.fromEntries(
@@ -92,21 +110,45 @@ export function openapi_document(api: Record<string, MethodSpec>, options: OpenA
           summary: spec.description,
           tags: [options.is_read_only(method) ? "read" : "change"],
           requestBody: { required: spec.params.some((param) => !param.optional), content: { "application/json": { schema: input_schema(spec) } } },
-          responses: {
-            "200": { description: "the call's result as JSON" },
-            "204": { description: "done, with nothing to return" },
-            "400": { description: "the arguments were wrong, or the call refused them" },
-            "401": { description: "not signed in" },
-          },
+          responses: call_responses,
         },
       },
     ]),
   );
-  return {
-    openapi: "3.1.0",
-    info: { title: options.title, version: options.version, ...(options.description ? { description: options.description } : {}) },
-    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
-    security: [{ bearer: [] }],
-    paths,
-  };
+  return openapi_envelope(options, paths);
+}
+
+// A call served as a REST route, such as "GET /api/hosts/:name": each :name in the path takes the argument of that name,
+// and the rest go in the query of a GET or DELETE and in the JSON body of anything else.
+export interface RouteSpec extends MethodSpec {
+  route: string;
+}
+
+// An OpenAPI 3.1 document of REST routes, each under its own path and verb; a GET only reads.
+export function route_openapi_document(routes: Record<string, RouteSpec>, options: Pick<OpenApiOptions, "title" | "version" | "description">): JsonSchema {
+  const paths: Record<string, Record<string, JsonSchema>> = {};
+  for (const [method, spec] of Object.entries(routes)) {
+    const [verb, template] = spec.route.split(" ") as [string, string];
+    const in_path = new Set([...template.matchAll(/:(\w+)/g)].map((match) => match[1]!));
+    const rest = spec.params.filter((param) => !in_path.has(param.name));
+    const in_query = verb === "GET" || verb === "DELETE";
+    const parameters = [
+      ...spec.params.filter((param) => in_path.has(param.name)).map((param) => ({ name: param.name, in: "path", required: true, schema: param.schema })),
+      ...(in_query ? rest.map((param) => ({ name: param.name, in: "query", required: !param.optional, schema: param.schema })) : []),
+    ];
+    const body = !in_query && rest.length > 0
+      ? { requestBody: { required: rest.some((param) => !param.optional), content: { "application/json": { schema: input_schema({ ...spec, params: rest }) } } } }
+      : {};
+    const path = template.replace(/:(\w+)/g, "{$1}");
+    paths[path] ??= {};
+    paths[path][verb.toLowerCase()] = {
+      operationId: method,
+      summary: spec.description,
+      tags: [verb === "GET" ? "read" : "change"],
+      ...(parameters.length > 0 ? { parameters } : {}),
+      ...body,
+      responses: call_responses,
+    };
+  }
+  return openapi_envelope(options, paths);
 }

@@ -10,7 +10,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotocol/server";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { input_schema, positional_args, type MethodSpec } from "../api_spec.ts";
+import { input_schema, positional_args, type MethodSpec, type RouteSpec } from "../api_spec.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -31,11 +31,7 @@ export interface McpRouteOptions {
 }
 
 // A REST route offered as a tool.
-export interface RouteToolSpec extends MethodSpec {
-  // The route the tool runs, such as "GET /api/hosts/:name"; each :name in the path takes the argument of that name,
-  // and the rest go in the query of a GET or DELETE and in the JSON body of anything else.
-  route: string;
-}
+export type RouteToolSpec = RouteSpec;
 
 // The request each tool call arrives in, so the call can act as whoever sent it.
 const current_request = new AsyncLocalStorage<FastifyRequest>();
