@@ -4,7 +4,7 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import sqlite3_init, { type Database, type SqlValue as WasmSqlValue } from "@sqlite.org/sqlite-wasm";
+import sqlite3_init, { type Database, type Sqlite3Static, type SqlValue as WasmSqlValue } from "@sqlite.org/sqlite-wasm";
 
 import type { SqlDatabase, SqlStatement, SqlValue } from "../sql.ts";
 
@@ -78,12 +78,28 @@ function to_wasm_value(value: SqlValue): WasmSqlValue {
   return typeof value === "bigint" ? Number(value) : value;
 }
 
-function run_statement(database: Database, sql: string, params: SqlValue[]): Record<string, WasmSqlValue>[] {
+function run_statement(
+  sqlite3: Sqlite3Static,
+  database: Database,
+  sql: string,
+  params: SqlValue[],
+  read_big_ints = false,
+): Record<string, WasmSqlValue>[] {
   const statement = database.prepare(sql);
   try {
     if (params.length > 0) statement.bind(params.map(to_wasm_value));
     const rows: Record<string, WasmSqlValue>[] = [];
-    while (statement.step()) rows.push(statement.get({}));
+    while (statement.step()) {
+      const row = statement.get({});
+      // get() gives a safe integer as a number, so integer columns are read again whole as bigint.
+      if (read_big_ints) {
+        for (let column = 0; column < statement.columnCount; column++) {
+          if (sqlite3.capi.sqlite3_column_type(statement.pointer!, column) !== sqlite3.capi.SQLITE_INTEGER) continue;
+          row[statement.getColumnName(column)] = BigInt(sqlite3.capi.sqlite3_column_int64(statement.pointer!, column));
+        }
+      }
+      rows.push(row);
+    }
     return rows;
   } finally {
     statement.finalize();
@@ -120,16 +136,17 @@ export async function open_wasm_database(options: WasmDatabaseOptions): Promise<
 
   const prepare = (sql: string): SqlStatement => {
     let returns_arrays = false;
+    let reads_big_ints = false;
     // A statement that returns rows can still write, such as INSERT ... RETURNING, so the change count decides the save.
     const rows = (params: SqlValue[]): unknown[] => {
       const changes_before = sqlite3.capi.sqlite3_total_changes(database.pointer!);
-      const found = run_statement(database, sql, params);
+      const found = run_statement(sqlite3, database, sql, params, reads_big_ints);
       if (sqlite3.capi.sqlite3_total_changes(database.pointer!) !== changes_before) save_soon();
       return returns_arrays ? found.map((row) => Object.values(row)) : found;
     };
     return {
       run: (...params) => {
-        run_statement(database, sql, params);
+        run_statement(sqlite3, database, sql, params);
         save_soon();
         return { changes: database.changes(), lastInsertRowid: sqlite3.capi.sqlite3_last_insert_rowid(database.pointer!) };
       },
@@ -137,6 +154,9 @@ export async function open_wasm_database(options: WasmDatabaseOptions): Promise<
       all: (...params) => rows(params),
       setReturnArrays: (on) => {
         returns_arrays = on;
+      },
+      setReadBigInts: (on) => {
+        reads_big_ints = on;
       },
     };
   };

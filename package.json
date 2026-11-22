@@ -213,7 +213,7 @@
     "@tiptap/starter-kit": "^3.33.0",
     "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
-    "drizzle-orm": "1.0.0-rc.5",
+    "drizzle-orm": "1.0.0-rc.6",
     "emojibase": "^18.0.0",
     "emojibase-data": "^18.0.0",
     "es-module-lexer": "^3.0.4",
