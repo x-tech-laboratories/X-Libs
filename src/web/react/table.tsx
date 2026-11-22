@@ -4,7 +4,7 @@
 // on their own unless the app takes them over.
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
-import { getCoreRowModel, getExpandedRowModel, getSortedRowModel, useReactTable, type ColumnDef, type ExpandedState, type Row as TanstackRow } from "@tanstack/react-table";
+import { columnOrderingFeature, columnVisibilityFeature, createExpandedRowModel, createSortedRowModel, rowExpandingFeature, rowSortingFeature, tableFeatures, useTable, type ColumnDef, type ExpandedState, type Row as TanstackRow, type RowData } from "@tanstack/react-table";
 import { cx } from "../dom.ts";
 import { clamp_width, column_id, compare_values, move_column, ordered_columns, sort_after_click, sorting_list, type Sorting, type SortValue } from "../tables.ts";
 import { placement_at, type DropPlacement } from "../tree.ts";
@@ -285,7 +285,18 @@ function same_row<Row>(before: TableRowProps<Row>, after: TableRowProps<Row>): b
 const TableRow = memo(TableRowView, same_row) as <Row>(props: TableRowProps<Row> & { key?: string }) => ReactElement;
 
 // A group's heading or one of the rows, in the order drawn.
-type Line<Row> = { kind: "group"; group: RowGroup<Row> } | { kind: "row"; row: TanstackRow<Row>; key: string };
+type Line<Row extends RowData> = { kind: "group"; group: RowGroup<Row> } | { kind: "row"; row: TanstackRow<Features, Row>; key: string };
+
+// What the table asks of TanStack: sorting, moving and hiding columns, and opening nested rows.
+const features = tableFeatures({
+  rowSortingFeature,
+  columnOrderingFeature,
+  columnVisibilityFeature,
+  rowExpandingFeature,
+  sortedRowModel: createSortedRowModel(),
+  expandedRowModel: createExpandedRowModel(),
+});
+type Features = typeof features;
 
 
 // ── Table ────────────────────────────────────────────────────────────────────
@@ -293,7 +304,7 @@ type Line<Row> = { kind: "group"; group: RowGroup<Row> } | { kind: "row"; row: T
 // A virtual row's height until a drawn one is measured.
 const FIRST_ROW_HEIGHT = 32;
 
-export function DataTable<Row>(props: DataTableProps<Row>) {
+export function DataTable<Row extends RowData>(props: DataTableProps<Row>) {
   const { columns, row_key, caption, get_children, row_passes, groups, allow_inside_drop = true, fill_last_column: fill_last = false } = props;
   const rows = useMemo(() => groups ? groups.flatMap((group) => group.rows) : props.rows, [groups, props.rows]);
   const [own_expanded, set_own_expanded] = useState<string[] | true>(true);
@@ -370,18 +381,19 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const descending = useRef(new Set<string>());
   descending.current = new Set(sorting.filter((key) => key.descending).map((key) => key.key));
 
-  const definitions = useMemo(() => columns.map((column): ColumnDef<Row, SortValue> => ({
+  const definitions = useMemo(() => columns.map((column): ColumnDef<Features, Row> => ({
     id: column_id(column),
     accessorFn: sort_values.get(column_id(column)),
     enableSorting: Boolean(sort_values.get(column_id(column))),
-    sortingFn: (left, right, id) => {
+    sortFn: (left, right, id) => {
       const [first, second] = [left.getValue<SortValue>(id), right.getValue<SortValue>(id)];
       const order = compare_values(first, second);
       return (is_empty(first) || is_empty(second)) && descending.current.has(id) ? -order : order;
     },
   })), [columns, sort_values]);
 
-  const table = useReactTable<Row>({
+  const table = useTable({
+    features,
     data,
     columns: definitions,
     getRowId: row_key ? (row) => String(row_key(row)) : undefined,
@@ -392,13 +404,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       columnVisibility: Object.fromEntries(hidden.map((id) => [id, false])),
       expanded: expanded === true ? true : Object.fromEntries(expanded.map((id) => [id, true])) as ExpandedState,
     },
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
     getRowCanExpand: (row) => row.subRows.length > 0,
     manualSorting: manual,
-    // The table never pages, and the state above is rebuilt each render, so TanStack's reset would draw the table again forever.
-    autoResetPageIndex: false,
   });
 
   const shown_ids = table.getVisibleLeafColumns().map((column) => column.id).join("\n");
@@ -440,7 +447,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // ── Moving ──
 
   const can_move = (column: TableColumn<Row>): boolean => Boolean(props.on_column_order_change) && column.movable !== false;
-  const order = (): string[] => table.getState().columnOrder;
+  const order = (): string[] => table.store.state.columnOrder;
 
   function move(id: string, target: string, after: boolean): void {
     if (id !== target) props.on_column_order_change?.(move_column(order(), id, target, after));
@@ -706,7 +713,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     );
   }
 
-  function body_row(row: TanstackRow<Row>, key: string) {
+  function body_row(row: TanstackRow<Features, Row>, key: string) {
     const original = row.original;
     const keyed = props.on_row_key_down !== undefined;
     return (
@@ -733,13 +740,13 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     );
   }
 
-  const row_line = (row: TanstackRow<Row>): Line<Row> => ({ kind: "row", row, key: row_key ? String(row_key(row.original)) : row.id });
+  const row_line = (row: TanstackRow<Features, Row>): Line<Row> => ({ kind: "row", row, key: row_key ? String(row_key(row.original)) : row.id });
 
   // Each group's heading and then its rows, which keep the order of the sorted whole, so each group is sorted on its own.
   function grouped_lines(groups: RowGroup<Row>[]): Line<Row>[] {
     const group_of = new Map<Row, number>();
     groups.forEach((group, index) => group.rows.forEach((row) => { if (!group_of.has(row)) group_of.set(row, index); }));
-    const rows_by_group = groups.map((): TanstackRow<Row>[] => []);
+    const rows_by_group = groups.map((): TanstackRow<Features, Row>[] => []);
     let current = 0;
     for (const row of table.getRowModel().rows) {
       if (row.depth === 0) current = group_of.get(row.original) ?? current;
