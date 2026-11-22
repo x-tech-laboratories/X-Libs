@@ -1,6 +1,6 @@
 // Pushes from a forge such as GitHub, Gitea, Forgejo or GitLab: whether a delivery is signed with the shared secret, what
-// event and push it carries, a lockout for an address that keeps failing to sign, a debounce for a burst of pushes, and the
-// route that takes deliveries with the raw body kept, since the signature covers its exact bytes.
+// event and push it carries, a lockout for an address that keeps failing to sign, a memory of deliveries already taken so
+// a replayed one is ignored, a debounce for a burst of pushes, and the route that takes deliveries with the raw body kept, since the signature covers its exact bytes.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,37 @@ export class AddressLockout {
 
   succeed(address: string): void {
     this.failures.delete(address);
+  }
+}
+
+// ── Replays ──────────────────────────────────────────────────────────────────
+
+// Remembers each signed delivery's body for a while, so the same delivery sent again is noticed and ignored.
+export class SeenDeliveries {
+  private readonly seen = new Map<string, number>();
+  private readonly remember_in_milliseconds: number;
+  private readonly most: number;
+  private readonly now: () => number;
+
+  constructor(options: { remember_in_milliseconds?: number; most?: number; now?: () => number } = {}) {
+    this.remember_in_milliseconds = options.remember_in_milliseconds ?? 24 * 60 * 60 * 1000;
+    this.most = options.most ?? 10_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  // Whether this body arrived before within the window; notes it as seen either way.
+  is_replay(body: Buffer): boolean {
+    const now = this.now();
+    for (const [key, until] of this.seen) {
+      if (until > now && this.seen.size <= this.most) break;
+      this.seen.delete(key);
+    }
+    const key = createHash("sha256").update(body).digest("hex");
+    const until = this.seen.get(key);
+    // Taken out and put back so the map stays in order of when each body was last seen.
+    this.seen.delete(key);
+    this.seen.set(key, now + this.remember_in_milliseconds);
+    return until !== undefined && until > now;
   }
 }
 

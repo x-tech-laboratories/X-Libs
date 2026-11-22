@@ -49,6 +49,8 @@ export interface Token {
   scope: string | null;
   created_epoch: number;
   last_used_epoch: number | null;
+  // When it stops working, or null for never.
+  expires_epoch: number | null;
 }
 
 // A narrower kind of token the app offers beside full and read-only ones, such as one that may only add items: it reads
@@ -98,6 +100,8 @@ export interface AccountStoreOptions {
   declared_tokens?: readonly DeclaredToken[];
   // The narrower tokens a user may make, by id, such as { add_items: { label: "Add items", calls: ["add_item"] } }.
   token_scopes?: Record<string, TokenScope>;
+  // The most days a token lasts, which is also how long one lasts when made without its own; null, the default, allows tokens that never end.
+  longest_token_days?: number | null;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -140,7 +144,7 @@ const schema = [`
     created_epoch INTEGER NOT NULL,
     last_used_epoch INTEGER
   );
-`, "ALTER TABLE account_tokens ADD COLUMN scope TEXT"];
+`, "ALTER TABLE account_tokens ADD COLUMN scope TEXT", "ALTER TABLE account_tokens ADD COLUMN expires_epoch INTEGER"];
 
 type Row = Record<string, SqlValue>;
 
@@ -156,6 +160,7 @@ export class AccountStore {
   private readonly shortest_password: number;
   private declared_token_list: readonly DeclaredToken[];
   private readonly scopes: Record<string, TokenScope>;
+  readonly longest_token_days: number | null;
 
   constructor(options: AccountStoreOptions) {
     this.database = options.database;
@@ -167,6 +172,7 @@ export class AccountStore {
     this.shortest_password = options.shortest_password ?? 12;
     this.declared_token_list = options.declared_tokens ?? [];
     this.scopes = options.token_scopes ?? {};
+    this.longest_token_days = options.longest_token_days ?? null;
     if (this.roles.length === 0) throw new Error("An account store needs at least one role.");
     migrate(this.database, schema, { owner: "accounts" });
   }
@@ -358,18 +364,31 @@ export class AccountStore {
   // ── Tokens ───────────────────────────────────────────────────────────────
 
   // A token that acts as its owner, shown once; only its digest is kept. A scoped token is read-only plus its scope's calls.
-  create_token(owner: string, fields: { name: unknown; read_only: unknown; scope?: unknown }): { token: string; id: number } {
+  create_token(owner: string, fields: { name: unknown; read_only: unknown; scope?: unknown; days?: unknown }): { token: string; id: number; expires_epoch: number | null } {
     const label = String(fields.name ?? "").trim();
     if (!label || label.length > 64) throw new AccountError("Give the token a name of up to 64 characters, such as what will use it.");
     if (this.user(owner) === null) throw new AccountError(`No user named '${owner}'.`, 404);
     const scope = fields.scope === undefined || fields.scope === null || fields.scope === "" ? null : String(fields.scope);
     if (scope !== null && !Object.hasOwn(this.scopes, scope)) throw new AccountError(`No token scope named '${scope}'.`);
+    const days = this.token_days(fields.days);
+    const now = now_seconds();
+    const expires_epoch = days === null ? null : now + days * 86400;
     const token = `${this.token_prefix}_${randomBytes(32).toString("base64url")}`;
     const id = this.run(
-      "INSERT INTO account_tokens (name, hash, owner, read_only, scope, created_epoch) VALUES (?, ?, ?, ?, ?, ?)",
-      label, digest(token), owner, scope !== null || fields.read_only !== false ? 1 : 0, scope, now_seconds(),
+      "INSERT INTO account_tokens (name, hash, owner, read_only, scope, created_epoch, expires_epoch) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      label, digest(token), owner, scope !== null || fields.read_only !== false ? 1 : 0, scope, now, expires_epoch,
     );
-    return { token, id };
+    return { token, id, expires_epoch };
+  }
+
+  // How many days a new token lasts, or null for one that never ends.
+  private token_days(given: unknown): number | null {
+    const longest = this.longest_token_days;
+    if (given === undefined || given === null || given === "") return longest;
+    const days = Number(given);
+    if (!Number.isInteger(days) || days < 1) throw new AccountError("Give the token's lifetime as a whole number of days.");
+    if (longest !== null && days > longest) throw new AccountError(`A token lasts at most ${longest} days.`);
+    return days;
   }
 
   // The narrower tokens the app offers, in the order it gave them.
@@ -403,6 +422,7 @@ export class AccountStore {
     const row = this.get("SELECT * FROM account_tokens WHERE hash = ?", digest(token));
     if (!row || this.user(String(row.owner)) === null) return null;
     const now = now_seconds();
+    if (row.expires_epoch !== null && row.expires_epoch !== undefined && Number(row.expires_epoch) <= now) return null;
     this.run("UPDATE account_tokens SET last_used_epoch = ? WHERE id = ?", now, Number(row.id));
     return { ...token_of(row), last_used_epoch: now };
   }
@@ -513,6 +533,7 @@ function token_of(row: Row): Token {
     scope: row.scope === null || row.scope === undefined ? null : String(row.scope),
     created_epoch: Number(row.created_epoch),
     last_used_epoch: row.last_used_epoch === null ? null : Number(row.last_used_epoch),
+    expires_epoch: row.expires_epoch === null || row.expires_epoch === undefined ? null : Number(row.expires_epoch),
   };
 }
 

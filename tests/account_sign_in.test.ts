@@ -275,3 +275,71 @@ describe("open prefixes", () => {
     expect((await app.inject({ url: "/api/things" })).statusCode).toBe(401);
   });
 });
+
+describe("required second factor", () => {
+  it("lets a user whose role needs one only read and set it up until they have one", async () => {
+    const accounts = await serve({ second_factor_from: "operator" });
+    accounts.create_user({ name: "vera", role: "operator", access: null, password });
+    const cookie = cookie_of(await sign_in({ name: "vera", password }));
+    const headers = { cookie: `x_test_session=${cookie.value}` };
+
+    expect((await app.inject({ url: "/api/things", headers })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/me", headers })).json()).toMatchObject({ second_factor_needed: true });
+    expect((await app.inject({ method: "POST", url: "/api/things", headers })).json()).toEqual({ error: "Set up a second factor on your account page before making changes." });
+    expect((await app.inject({ method: "POST", url: "/api/account/tokens", headers, payload: { name: "script", read_only: false } })).statusCode).toBe(403);
+    expect((await sign_in({ name: "vera", password, device: "phone" })).statusCode).toBe(403);
+
+    const started = await app.inject({ method: "POST", url: "/api/account/totp/start", headers });
+    const secret = started.json<{ secret: string }>().secret;
+    const confirmed = await app.inject({ method: "POST", url: "/api/account/totp/confirm", headers, payload: { code: code_at(secret, Date.now() / 1000) } });
+    expect(confirmed.statusCode).toBe(200);
+
+    expect((await app.inject({ method: "POST", url: "/api/things", headers })).statusCode).toBe(200);
+  });
+
+  it("leaves lower roles and tokens alone", async () => {
+    const accounts = await serve({ second_factor_from: "admin", needed: () => "any" });
+    accounts.create_user({ name: "otto", role: "operator", access: null, password });
+    const cookie = cookie_of(await sign_in({ name: "otto", password }));
+    const { token } = accounts.create_token("root", { name: "script", read_only: false });
+
+    expect((await app.inject({ method: "POST", url: "/api/things", headers: { cookie: `x_test_session=${cookie.value}` } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/api/things", headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(200);
+  });
+
+  it("refuses a role the store does not know", async () => {
+    await expect(serve({ second_factor_from: "owner" })).rejects.toThrow("No role named 'owner'");
+  });
+});
+
+describe("token lifetimes", () => {
+  it("makes tokens that last the days asked, at most the longest, and stop working once they end", () => {
+    const database = new DatabaseSync(":memory:");
+    const accounts = new AccountStore({ database, app_name: "X-Test", declared: new Map([["root", hash_password(password)]]), longest_token_days: 30 });
+
+    const defaulted = accounts.create_token("root", { name: "default", read_only: true });
+    const short = accounts.create_token("root", { name: "short", read_only: true, days: 2 });
+    const now = Math.floor(Date.now() / 1000);
+
+    expect(defaulted.expires_epoch).toBeGreaterThanOrEqual(now + 30 * 86400 - 1);
+    expect(short.expires_epoch).toBeLessThanOrEqual(now + 2 * 86400 + 1);
+    expect(() => accounts.create_token("root", { name: "long", read_only: true, days: 31 })).toThrow("at most 30 days");
+    expect(() => accounts.create_token("root", { name: "odd", read_only: true, days: "soon" })).toThrow("whole number of days");
+    expect(accounts.tokens("root").map((token) => token.expires_epoch)).toEqual([defaulted.expires_epoch, short.expires_epoch]);
+
+    expect(accounts.check_token(short.token)).not.toBeNull();
+    database.prepare("UPDATE account_tokens SET expires_epoch = ? WHERE id = ?").run(now - 1, short.id);
+    expect(accounts.check_token(short.token)).toBeNull();
+  });
+
+  it("makes tokens that never end when no longest is set", async () => {
+    const accounts = await serve();
+    const cookie = cookie_of(await sign_in({ name: "root", password }));
+
+    const made = await app.inject({ method: "POST", url: "/api/account/tokens", headers: { cookie: `x_test_session=${cookie.value}` }, payload: { name: "script", read_only: true, days: 7 } });
+    const forever = accounts.create_token("root", { name: "forever", read_only: true });
+
+    expect(made.json<{ expires_epoch: number }>().expires_epoch).toBeGreaterThan(Date.now() / 1000);
+    expect(forever.expires_epoch).toBeNull();
+  });
+});

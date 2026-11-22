@@ -1,0 +1,30 @@
+name: Publish
+
+# Publishes each new version from main with npm provenance, through npm's trusted publishing, so apps can check where it was built.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check whether this version is on npm
+        id: version
+        run: |
+          package="$(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')"
+          if npm view "$package" version > /dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.version.outputs.new == 'true'
+        run: npm ci
+      - if: steps.version.outputs.new == 'true'
+        run: npm publish --provenance --access public

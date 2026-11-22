@@ -21,6 +21,10 @@ export interface Me {
   totp_enabled: boolean;
   source: "declared" | "page";
   has_password: boolean;
+  // Whether the role needs a second factor the user has not set up, so they may only read until they do.
+  second_factor_needed?: boolean;
+  // The most days a token may last, or null when tokens may last forever.
+  longest_token_days?: number | null;
 }
 
 export interface SignInInfo {
@@ -61,6 +65,8 @@ export interface AccountToken {
   scope?: string | null;
   created_epoch: number;
   last_used_epoch: number | null;
+  // When it stops working, or null for never.
+  expires_epoch?: number | null;
 }
 
 // A narrower kind of token the app offers: it reads, and may make the calls named.
@@ -144,8 +150,9 @@ export function create_accounts_client(options: AccountsClientOptions = {}) {
     close_session: (id: number) => api<void>(`${base}/account/sessions/${segment(id)}`, "DELETE"),
     close_other_sessions: () => api<void>(`${base}/account/sessions`, "DELETE"),
     own_tokens: () => api<AccountToken[]>(`${base}/account/tokens`),
-    // A scope, by id, keeps the token to reading and that scope's calls.
-    create_token: (name: string, read_only: boolean, scope: string | null = null) => api<{ token: string; id: number }>(`${base}/account/tokens`, "POST", { name, read_only, ...(scope === null ? {} : { scope }) }),
+    // A scope, by id, keeps the token to reading and that scope's calls; days sets how long it lasts, or the server's longest when null.
+    create_token: (name: string, read_only: boolean, scope: string | null = null, days: number | null = null) =>
+      api<{ token: string; id: number; expires_epoch?: number | null }>(`${base}/account/tokens`, "POST", { name, read_only, ...(scope === null ? {} : { scope }), ...(days === null ? {} : { days }) }),
     token_scopes: () => api<AccountTokenScope[]>(`${base}/account/token_scopes`),
     delete_own_token: (id: number) => api<void>(`${base}/account/tokens/${segment(id)}`, "DELETE"),
 
