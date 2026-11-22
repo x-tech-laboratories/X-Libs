@@ -5,11 +5,14 @@
 // A run's folder holds `run.json` (its pid and when the process began), `out` (stdout and stderr together), `exit`
 // once it has ended, and `stopped` once it has been asked to stop. Its stdin, which may carry a secret, is handed over
 // through a pipe and never written down.
+//
+// With the `unit` option each run is a transient systemd unit instead, in a slice of the caller's choosing, so stopping
+// it stops everything it started, however detached. Its stdin then passes through a named pipe in its folder.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { closeSync, constants as fs_constants, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -31,11 +34,28 @@ export interface LongRunOptions {
   kill_grace_in_milliseconds?: number;
   // How often a followed run that has written nothing new is looked at again.
   tail_interval_in_milliseconds?: number;
+  unit?: LongRunUnit;
+}
+
+// How runs become transient systemd units: each is named after the prefix and its run id, `<prefix>-<run id>.service`.
+export interface LongRunUnit {
+  prefix: string;
+  slice?: string;
+  // Further unit properties, such as `OOMScoreAdjust` or `CPUSchedulingPolicy`.
+  properties?: Record<string, string>;
+  // The run's whole environment, since a unit inherits none of the caller's; it is kept in the run's folder, not on a command line.
+  environment?: Record<string, string>;
+  // The commands that start, stop and read units, with any `sudo -n` in front; by default `systemd-run`, `systemctl stop` and `systemctl show`.
+  start_command?: string[];
+  stop_command?: string[];
+  show_command?: string[];
 }
 
 interface RunRecord {
   run_id: string;
   pid: number;
+  // The run's systemd unit, when it runs in one.
+  unit?: string;
   // When the process began, in clock ticks since boot, so a reused pid is not taken for the run.
   start_ticks: number | null;
   started_epoch: number;
@@ -55,6 +75,7 @@ export class LongRuns<Task> {
   private readonly grace: number;
   private readonly tail_interval: number;
   private readonly runner: TaskRunner<Task>;
+  private readonly unit: LongRunUnit | undefined;
   // The runs this agent started, whose exit it hears of directly.
   private readonly children = new Map<string, ChildProcess>();
 
@@ -63,6 +84,7 @@ export class LongRuns<Task> {
     this.grace = options.kill_grace_in_milliseconds ?? kill_grace_in_milliseconds;
     this.tail_interval = options.tail_interval_in_milliseconds ?? 250;
     this.runner = runner;
+    this.unit = options.unit;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
   }
 
@@ -75,6 +97,7 @@ export class LongRuns<Task> {
     writeFileSync(join(folder, "out"), "", { mode: 0o600 });
 
     const launch = this.runner.launch(task, folder, stdin !== null);
+    if (this.unit !== undefined) return this.start_unit(this.unit, run_id, folder, launch, stdin);
     const child = spawn(launch.program, launch.args, {
       detached: true,
       stdio: [stdin === null ? "ignore" : "pipe", "ignore", "ignore"],
@@ -103,6 +126,52 @@ export class LongRuns<Task> {
     const record: RunRecord = { run_id, pid: child.pid, start_ticks: start_ticks_of(child.pid), started_epoch: now_seconds() };
     write_atomically(join(folder, "run.json"), JSON.stringify(record));
     return this.describe(record);
+  }
+
+  // Starts the run as a transient unit and hands it its stdin through a named pipe once the unit opens it.
+  private start_unit(unit: LongRunUnit, run_id: string, folder: string, launch: { program: string; args: string[] }, stdin: string | null): LongRun {
+    const name = `${unit.prefix}-${run_id}.service`;
+    const environment_file = join(folder, "environment");
+    writeFileSync(environment_file, environment_text(unit.environment ?? {}), { mode: 0o600 });
+    const fifo = join(folder, "stdin");
+    if (stdin !== null) mkfifo(fifo);
+    const properties: Record<string, string> = {
+      ExitType: "cgroup",
+      TimeoutStopSec: `${this.grace}ms`,
+      EnvironmentFile: environment_file,
+      ...(stdin === null ? {} : { StandardInput: `file:${fifo}` }),
+      ...unit.properties,
+    };
+    const [program, ...args] = unit.start_command ?? ["systemd-run"];
+    const started = spawnSync(program, [
+      ...args,
+      `--unit=${name}`,
+      "--quiet",
+      "--collect",
+      `--uid=${process.getuid?.() ?? 0}`,
+      `--gid=${process.getgid?.() ?? 0}`,
+      `--working-directory=${folder}`,
+      ...(unit.slice === undefined ? [] : [`--slice=${unit.slice}`]),
+      ...Object.entries(properties).flatMap(([key, value]) => ["--property", `${key}=${value}`]),
+      "--",
+      launch.program,
+      ...launch.args,
+    ], { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+    if (started.status !== 0) {
+      rmSync(folder, { recursive: true, force: true });
+      throw new LongRunError(`Could not start ${name}: ${(started.stderr ?? started.error?.message ?? "").trim()}`);
+    }
+    const pid = Number(this.show(unit, name, "MainPID")) || 0;
+    if (stdin !== null) void hand_over(fifo, stdin, () => this.is_alive({ run_id, pid, start_ticks: null, started_epoch: 0 }));
+    const record: RunRecord = { run_id, pid, unit: name, start_ticks: pid > 0 ? start_ticks_of(pid) : null, started_epoch: now_seconds() };
+    write_atomically(join(folder, "run.json"), JSON.stringify(record));
+    return this.describe(record);
+  }
+
+  private show(unit: LongRunUnit, name: string, property: string): string {
+    const [program, ...args] = unit.show_command ?? ["systemctl", "show"];
+    const shown = spawnSync(program, [...args, "--property", property, "--value", name], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return (shown.stdout ?? "").trim();
   }
 
   // ── Reading ──────────────────────────────────────────────────────────────
@@ -208,6 +277,16 @@ export class LongRuns<Task> {
     const record = this.require(run_id);
     if (this.describe(record).state !== "running") return this.describe(record);
     writeFileSync(join(this.folder(run_id), "stopped"), "");
+    if (record.unit !== undefined && this.unit !== undefined) {
+      const [program, ...args] = this.unit.stop_command ?? ["systemctl", "stop"];
+      await new Promise<void>((resolve) => {
+        const stopping = spawn(program, [...args, record.unit!], { stdio: "ignore" });
+        stopping.on("error", () => resolve());
+        stopping.on("exit", () => resolve());
+      });
+      while (this.is_alive(record)) await new Promise((resolve) => setTimeout(resolve, 50));
+      return this.describe(record);
+    }
     signal_group(record.pid, "SIGTERM");
     const deadline = Date.now() + this.grace;
     while (this.is_alive(record)) {
@@ -264,6 +343,7 @@ export class LongRuns<Task> {
   private is_alive(record: RunRecord): boolean {
     const child = this.children.get(record.run_id);
     if (child !== undefined) return child.exitCode === null && child.signalCode === null;
+    if (record.pid <= 0) return false;
     try {
       process.kill(record.pid, 0);
     } catch (error) {
@@ -281,6 +361,42 @@ export class LongRuns<Task> {
     else if (this.is_alive(record)) state = "running";
     else state = stopped ? "stopped" : "lost";
     return { run_id: record.run_id, pid: record.pid, started_epoch: record.started_epoch, state, exit_code };
+  }
+}
+
+// ── Units ──────────────────────────────────────────────────────────────────
+
+// An environment file systemd reads as written: every value quoted, with nothing in it expanded.
+function environment_text(environment: Record<string, string>): string {
+  return Object.entries(environment)
+    .map(([key, value]) => `${key}="${value.replace(/[\\"$`]/g, (character) => `\\${character}`)}"\n`)
+    .join("");
+}
+
+function mkfifo(path: string): void {
+  const made = spawnSync("mkfifo", ["-m", "600", path], { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+  if (made.status !== 0) throw new LongRunError(`Could not make ${path}: ${(made.stderr ?? made.error?.message ?? "").trim()}`);
+}
+
+// Writes stdin into the named pipe once the unit has opened it, giving up if the run ends first.
+async function hand_over(fifo: string, stdin: string, alive: () => boolean): Promise<void> {
+  for (;;) {
+    let descriptor: number;
+    try {
+      descriptor = openSync(fifo, fs_constants.O_WRONLY | fs_constants.O_NONBLOCK);
+    } catch {
+      if (!alive()) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      continue;
+    }
+    try {
+      writeSync(descriptor, stdin);
+    } catch {
+      // The run closed its stdin without reading it.
+    } finally {
+      closeSync(descriptor);
+    }
+    return;
   }
 }
 

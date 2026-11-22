@@ -114,3 +114,91 @@ describe("long runs", () => {
     expect((await typed.poll("typed", 0)).new_output).toBe("hello\n");
   });
 });
+
+// Stands in for systemd-run, systemctl stop and systemctl show: each unit is a process in a session of its own.
+const fake_systemd = `
+dir=$1; mode=$2; shift 2
+case $mode in
+run)
+  echo "$*" >> "$dir/started"
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --unit=*) unit=\${1#--unit=} ;;
+      --working-directory=*) cwd=\${1#*=} ;;
+      --property) shift; case $1 in StandardInput=file:*) input=\${1#StandardInput=file:} ;; EnvironmentFile=*) environment=\${1#EnvironmentFile=} ;; esac ;;
+      --) shift; break ;;
+    esac
+    shift
+  done
+  [ -n "$input" ] || input=/dev/null
+  (cd "$cwd" && set -a && . "$environment" && set +a && exec setsid "$@" < "$input") > /dev/null 2>&1 &
+  echo $! > "$dir/$unit"
+  ;;
+show) cat "$dir/$4" ;;
+stop)
+  pid=$(cat "$dir/$1")
+  kill -TERM -- "-$pid"
+  for _ in $(seq 250); do kill -0 "$pid" 2> /dev/null || break; sleep 0.02; done
+  ;;
+esac
+`;
+
+describe("long runs as systemd units", () => {
+  let units: string;
+  let unit_runs: LongRuns<string>;
+
+  beforeEach(() => {
+    units = mkdtempSync(join(tmpdir(), "x-libs-units-"));
+    const script = join(units, "fake-systemd");
+    writeFileSync(script, fake_systemd, { mode: 0o700 });
+    unit_runs = new LongRuns(state, shell_runner("x-test-unit"), {
+      kill_grace_in_milliseconds: 300,
+      unit: {
+        prefix: "x-test",
+        slice: "work.slice",
+        properties: { OOMScoreAdjust: "500" },
+        environment: { PATH: process.env.PATH ?? "", GREETING: 'say "hi" $HOME `x` \\' },
+        start_command: ["bash", script, units, "run"],
+        stop_command: ["bash", script, units, "stop"],
+        show_command: ["bash", script, units, "show"],
+      },
+    });
+  });
+
+  afterEach(async () => {
+    for (const run of unit_runs.list()) if (run.state === "running") await unit_runs.stop(run.run_id);
+  });
+
+  async function unit_ended(run_id: string) {
+    while (unit_runs.get(run_id).state === "running") await new Promise((resolve) => setTimeout(resolve, 20));
+    return unit_runs.get(run_id);
+  }
+
+  it("starts a run in its own unit and slice with the properties given, and hands it stdin through a pipe", async () => {
+    const run = unit_runs.start("piped", 'cat; printf "%s\\n" "$GREETING"; exit 4', "secret\n");
+    expect(run.pid).toBeGreaterThan(0);
+    expect(await unit_ended("piped")).toMatchObject({ state: "exited", exit_code: 4 });
+    expect((await unit_runs.poll("piped", 0)).new_output).toBe('secret\nsay "hi" $HOME `x` \\\n');
+
+    const started = readFileSync(join(units, "started"), "utf8");
+    expect(started).toContain("--unit=x-test-piped.service");
+    expect(started).toContain("--slice=work.slice");
+    expect(started).toContain("ExitType=cgroup");
+    expect(started).toContain("TimeoutStopSec=300ms");
+    expect(started).toContain("OOMScoreAdjust=500");
+    expect(started).not.toContain("secret");
+    expect(started).not.toContain("hi");
+  });
+
+  it("stops a run through its unit", async () => {
+    unit_runs.start("long", "sleep 30 & wait", null);
+    expect(unit_runs.get("long").state).toBe("running");
+    expect((await unit_runs.stop("long")).state).toBe("stopped");
+  });
+
+  it("removes the run's folder when its unit cannot start", () => {
+    const failing = new LongRuns(state, shell_runner("x-test-unit"), { unit: { prefix: "x-test", start_command: ["sh", "-c", "echo refused >&2; exit 1", "sh"] } });
+    expect(() => failing.start("refused", "true", null)).toThrow(/Could not start x-test-refused.service: refused/);
+    expect(failing.list()).toEqual([]);
+  });
+});
