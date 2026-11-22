@@ -48,8 +48,13 @@ export function register_error_replies(app: FastifyInstance, options: ErrorRepli
   if (not_found) app.setNotFoundHandler(async (_request, reply) => send_error(reply, 404, not_found_text, format));
 }
 
+export interface LenientJsonOptions {
+  // Refuses a body that is not JSON with 400 before any route sees it, in this format; left to each route unless set.
+  refuse_bad_json?: "text" | "json";
+}
+
 // An empty body parses as undefined and a body that is not JSON as BAD_JSON, for the route to refuse in its own words.
-export function register_lenient_json_body(app: FastifyInstance): void {
+export function register_lenient_json_body(app: FastifyInstance, options: LenientJsonOptions = {}): void {
   app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
     if (body === "") return done(null, undefined);
     try {
@@ -57,5 +62,10 @@ export function register_lenient_json_body(app: FastifyInstance): void {
     } catch {
       done(null, BAD_JSON);
     }
+  });
+  const format = options.refuse_bad_json;
+  if (format === undefined) return;
+  app.addHook("preHandler", async (request, reply) => {
+    if (request.body === BAD_JSON) return send_error(reply, 400, "The request body is not JSON", format);
   });
 }

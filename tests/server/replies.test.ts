@@ -62,4 +62,17 @@ describe("lenient JSON body", () => {
     expect((await app.inject({ method: "POST", url: "/call", headers, payload: "{nope" })).body).toBe("bad");
     expect((await app.inject({ method: "POST", url: "/call", headers, payload: "[1,2]" })).body).toBe("[1,2]");
   });
+
+  it("refuses a bad body before the route when asked, leaving an empty one to it", async () => {
+    app = fastify();
+    register_lenient_json_body(app, { refuse_bad_json: "json" });
+    app.post("/call", async (request) => (request.body === undefined ? "empty" : "ran"));
+    const headers = { "content-type": "application/json" };
+
+    const bad = await app.inject({ method: "POST", url: "/call", headers, payload: "{nope" });
+
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: "The request body is not JSON" });
+    expect((await app.inject({ method: "POST", url: "/call", headers, payload: "" })).body).toBe("empty");
+  });
 });
