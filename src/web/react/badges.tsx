@@ -16,6 +16,11 @@ export function StateBadge<State extends string>({ labels, state, title }: { lab
   return <Badge tone={tone} title={title}>{text}</Badge>;
 }
 
+// A badge showing a state's own name, such as "running", in the tone given for it.
+export function ToneBadge<State extends string>({ tones, state, title }: { tones: Record<State, Tone>; state: State; title?: string }) {
+  return <Badge tone={tones[state]} title={title}>{state}</Badge>;
+}
+
 // ── Chips ────────────────────────────────────────────────────────────────────
 
 interface ChipProps {

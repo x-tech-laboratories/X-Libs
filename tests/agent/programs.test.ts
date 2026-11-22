@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BoundedBuffer, on_path, run_program, type Sink } from "../../src/agent/programs.ts";
+import { BoundedBuffer, on_path, run_program, whole_lines, type Sink } from "../../src/agent/programs.ts";
 
 function collector(): Sink & { text: () => string } {
   const chunks: string[] = [];
@@ -66,5 +66,30 @@ describe("programs", () => {
   it("finds a program on the PATH", async () => {
     expect(await on_path("sh")).toMatch(/\/sh$/);
     expect(await on_path("x-libs-no-such-program")).toBeNull();
+  });
+
+  it("passes on only whole lines, decoding characters split across chunks", () => {
+    const written: string[] = [];
+    const lined = whole_lines({ write: (chunk) => void written.push(String(chunk)) });
+    const snowman = Buffer.from("☃");
+
+    lined.write('@nix {"a"');
+    lined.write(":1}\nhalf");
+    lined.write(Buffer.concat([Buffer.from(" "), snowman.subarray(0, 1)]));
+    lined.write(Buffer.concat([snowman.subarray(1), Buffer.from("\n")]));
+    lined.write("rest");
+    lined.flush();
+
+    expect(written).toEqual(['@nix {"a":1}\n', "half ☃\n", "rest\n"]);
+  });
+
+  it("flushes nothing when every line was whole", () => {
+    const written: string[] = [];
+    const lined = whole_lines({ write: (chunk) => void written.push(String(chunk)) });
+
+    lined.write("one\ntwo\n");
+    lined.flush();
+
+    expect(written).toEqual(["one\ntwo\n"]);
   });
 });

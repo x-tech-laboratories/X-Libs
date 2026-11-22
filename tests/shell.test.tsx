@@ -45,6 +45,36 @@ describe("shell sidebar", () => {
     expect(brand.textContent).toBe("");
   });
 
+  it("folds sections open onto their items, lighting up the active item", () => {
+    const folding = [
+      { id: "", label: "Overview", href: "#/" },
+      { id: "hosts", label: "Hosts", href: "#/hosts", children: [{ id: "odin", label: "Odin", href: "#/hosts/odin" }, { id: "thor", label: "Thor", href: "#/hosts/thor" }] },
+    ];
+    const selected = () => screen.getAllByRole("treeitem").filter((item) => item.getAttribute("aria-selected") === "true").map((item) => item.dataset.id);
+    render(<Shell brand="X-Test" sections={folding} active="hosts" active_item="thor" sections_pref="x-test-sidebar" sidebar={<p>Extra</p>} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    expect(screen.getByRole("tree", { name: "Main" })).toBeTruthy();
+    expect(screen.getByText("Extra")).toBeTruthy();
+    expect(selected()).toEqual(["hosts/thor"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Hosts" }));
+
+    expect(selected()).toEqual(["section:hosts"]);
+    expect(screen.queryByText("Thor")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("x-test-sidebar")!)).toEqual(["section:hosts"]);
+  });
+
+  it("lights up a section with no such item and goes to a row's page when picked", () => {
+    const folding = [{ id: "hosts", label: "Hosts", href: "#/hosts", children: [{ id: "odin", label: "Odin", href: "#/hosts/odin" }] }];
+    render(<Shell brand="X-Test" sections={folding} active="hosts" active_item="gone" theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
+
+    expect(screen.getByRole("treeitem", { selected: true }).dataset.id).toBe("section:hosts");
+
+    fireEvent.click(screen.getByText("Odin"));
+
+    expect(window.location.hash).toBe("#/hosts/odin");
+  });
+
   it("shows the app's own sidebar in place of the sections", () => {
     render(<Shell brand="X-Test" sections={sections} sidebar={<button>My Day</button>} theme={theme_choice("x-test-theme")} user="ada">Page</Shell>);
 

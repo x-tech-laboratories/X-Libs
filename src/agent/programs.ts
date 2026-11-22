@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { constants as fs_constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { constants } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,25 @@ export async function on_path(name: string): Promise<string | null> {
     }
   }
   return null;
+}
+
+// Passes on only whole lines, so programs printing side by side never split each other's; flush passes on the rest.
+export function whole_lines(sink: Sink): Sink & { flush(): void } {
+  const decoder = new StringDecoder("utf8");
+  let carry = "";
+  return {
+    write(chunk) {
+      const text = carry + (typeof chunk === "string" ? chunk : decoder.write(chunk));
+      const end = text.lastIndexOf("\n") + 1;
+      carry = text.slice(end);
+      if (end > 0) sink.write(text.slice(0, end));
+    },
+    flush() {
+      const rest = carry + decoder.end();
+      carry = "";
+      if (rest !== "") sink.write(`${rest}\n`);
+    },
+  };
 }
 
 // ── Running ──────────────────────────────────────────────────────────────────
