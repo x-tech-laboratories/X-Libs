@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { load_plugin_folder, plugin_entries } from "../src/plugin_folder.ts";
+import { load_plugin_folder, plugin_entries, read_plugin_file } from "../src/plugin_folder.ts";
 
 function plugin_dir(root: string, name: string, sides: unknown, files: Record<string, string> = {}): void {
   mkdirSync(join(root, name), { recursive: true });
@@ -16,6 +16,21 @@ function plugin_dir(root: string, name: string, sides: unknown, files: Record<st
 const PLUGIN = `export default { id: "x.hello", name: "Hello", version: "1.0.0", start() {} };`;
 
 describe("plugin folder", () => {
+  it("reads the page's list and a plugin's own files, and nothing outside its subfolder", () => {
+    const root = mkdtempSync(join(tmpdir(), "x-libs-plugins-"));
+    plugin_dir(root, "hello world", { web: "dist/web.js" }, { "dist/web.js": PLUGIN });
+    writeFileSync(join(root, "secret.txt"), "no");
+
+    expect(JSON.parse(read_plugin_file(root, "index.json"))).toEqual({ entries: ["hello%20world/dist/web.js"], problems: [] });
+    expect(read_plugin_file(root, "hello%20world/dist/web.js")).toBe(PLUGIN);
+    expect(read_plugin_file(root, "hello%20world/../secret.txt")).toBe("");
+    expect(read_plugin_file(root, "hello%20world/%2E%2E%2Fsecret.txt")).toBe("");
+    expect(read_plugin_file(root, ".hidden/x.js")).toBe("");
+    expect(read_plugin_file(root, "hello%20world/missing.js")).toBe("");
+    expect(read_plugin_file(root, "hello%20world/dist")).toBe("");
+    expect(read_plugin_file(root, "%E0%A4%A/x.js")).toBe("");
+  });
+
   it("finds each subfolder's entry for a side and skips one that has none", () => {
     const root = mkdtempSync(join(tmpdir(), "x-libs-plugins-"));
     plugin_dir(root, "hello", { server: "dist/server.js", web: "dist/web.js" }, { "dist/server.js": PLUGIN, "dist/web.js": PLUGIN });

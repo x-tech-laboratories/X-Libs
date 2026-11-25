@@ -60,6 +60,32 @@ export function inside(root: string, path: string): string | undefined {
   return real_file.startsWith(real_root + sep) ? real_file : undefined;
 }
 
+// The page's list of a folder's entries for one side, as URLs relative to the list, with a problem per broken subfolder.
+export function plugin_index(folder: string, side: string): { entries: string[]; problems: PluginProblem[] } {
+  const { entries, problems } = plugin_entries(folder, side);
+  return { entries: entries.map((entry) => `${encodeURIComponent(entry.name)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`), problems };
+}
+
+// A file the page asks for by its path under the list: "index.json" is plugin_index as JSON, anything else is read from
+// its plugin's own subfolder, and "" when it is not there or leads outside it. For a desktop page reaching the folder over IPC.
+export function read_plugin_file(folder: string, path: string, side = "web"): string {
+  if (path === "index.json") return JSON.stringify(plugin_index(folder, side));
+  const [name = "", ...rest] = path.split("/").map((part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return "";
+    }
+  });
+  const root = name && !name.startsWith(".") ? inside(folder, name) : undefined;
+  const file = root && inside(root, rest.join("/"));
+  try {
+    return file && existsSync(file) ? readFileSync(file, "utf8") : "";
+  } catch {
+    return "";
+  }
+}
+
 // Imports each entry for the side; its default export, or an export named plugin, is the plugin.
 export async function load_plugin_folder<Api extends PluginApi = PluginApi>(folder: string, side: string): Promise<{ plugins: Plugin<Api>[]; problems: PluginProblem[] }> {
   const { entries, problems } = plugin_entries(folder, side);
