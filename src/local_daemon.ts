@@ -8,7 +8,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
 import { homedir, tmpdir, userInfo } from "node:os";
@@ -64,10 +64,51 @@ export function is_answering(socket_path: string, timeout_ms = 1000): Promise<bo
   });
 }
 
+// ── Builds ───────────────────────────────────────────────────────────────────
+
+// Which build of a daemon is answering on a socket: its process and a hash of its entry file's contents, kept beside the
+// socket. A hash rather than the file's path, since an AppImage mounts the same build at a new path on every launch.
+export interface DaemonBuild {
+  pid: number;
+  build: string;
+}
+
+export function daemon_build_path(socket_path: string): string {
+  return `${socket_path}.build.json`;
+}
+
+// The build an entry file is, or null when it cannot be read.
+export function daemon_build_id(script: string): string | null {
+  try {
+    return createHash("sha256").update(readFileSync(script)).digest("hex").slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
+// What the daemon answering on the socket recorded of itself, or null when nothing readable was recorded.
+export function read_daemon_build(socket_path: string): DaemonBuild | null {
+  try {
+    const parsed = JSON.parse(readFileSync(daemon_build_path(socket_path), "utf8")) as Partial<DaemonBuild>;
+    return typeof parsed.pid === "number" && typeof parsed.build === "string" ? { pid: parsed.pid, build: parsed.build } : null;
+  } catch {
+    return null;
+  }
+}
+
+function record_daemon_build(socket_path: string, script: string | undefined): void {
+  const build = script ? daemon_build_id(script) : null;
+  const file = daemon_build_path(socket_path);
+  if (!build) return rmSync(file, { force: true });
+  writeFileSync(`${file}.tmp`, JSON.stringify({ pid: process.pid, build } satisfies DaemonBuild), { mode: 0o600 });
+  renameSync(`${file}.tmp`, file);
+}
+
 // Listens on the socket through the server's own listen, such as Fastify's `(path) => app.listen({ path })`: its folder
 // is made for this user alone, a socket left by a daemon that died is removed, and one still answering refuses with
-// DaemonRunningError, so a second daemon exits. The socket itself is then made readable by its user alone.
-export async function listen_on_socket(socket_path: string, listen: (path: string) => Promise<unknown>): Promise<void> {
+// DaemonRunningError, so a second daemon exits. The socket itself is then made readable by its user alone, and the
+// daemon's build is recorded beside it, from its entry file, the script Node was started with unless given.
+export async function listen_on_socket(socket_path: string, listen: (path: string) => Promise<unknown>, script: string | undefined = process.argv[1]): Promise<void> {
   const folder = dirname(socket_path);
   mkdirSync(folder, { recursive: true, mode: 0o700 });
   chmodSync(folder, 0o700);
@@ -75,6 +116,7 @@ export async function listen_on_socket(socket_path: string, listen: (path: strin
   rmSync(socket_path, { force: true });
   await listen(socket_path);
   chmodSync(socket_path, 0o600);
+  record_daemon_build(socket_path, script);
 }
 
 // ── Window side ──────────────────────────────────────────────────────────────
@@ -90,15 +132,24 @@ export interface StartDaemonOptions {
   log_file: string;
   // How long to wait for the socket to answer; 15 seconds unless set.
   timeout_ms?: number;
+  // Stop a daemon of another build that is answering, such as one left running across an upgrade, and start this one.
+  // Meant for a window's first start only: two windows of different builds both reconnecting with it would take turns
+  // stopping each other's daemon.
+  replace_other_build?: boolean;
 }
 
 const POLL_MS = 100;
 
 // Starts the daemon unless one is answering already, and waits until it answers. It is started apart from this
-// process, so closing the window leaves it running. Resolves to whether it had to be started.
-export async function start_daemon(options: StartDaemonOptions): Promise<"running" | "started"> {
-  const { socket_path, script, args = [], env = {}, log_file, timeout_ms = 15_000 } = options;
-  if (await is_answering(socket_path)) return "running";
+// process, so closing the window leaves it running. Resolves to whether it had to be started, or replaced one of
+// another build.
+export async function start_daemon(options: StartDaemonOptions): Promise<"running" | "started" | "replaced"> {
+  const { socket_path, script, args = [], env = {}, log_file, timeout_ms = 15_000, replace_other_build = false } = options;
+  let replaced = false;
+  if (await is_answering(socket_path)) {
+    if (!replace_other_build || !(await stop_other_build(socket_path, script, timeout_ms))) return "running";
+    replaced = true;
+  }
 
   mkdirSync(dirname(log_file), { recursive: true });
   const log = openSync(log_file, "a");
@@ -116,12 +167,31 @@ export async function start_daemon(options: StartDaemonOptions): Promise<"runnin
 
   const deadline = Date.now() + timeout_ms;
   while (Date.now() < deadline) {
-    if (await is_answering(socket_path)) return "started";
+    if (await is_answering(socket_path)) return replaced ? "replaced" : "started";
     // A second daemon started at the same moment exits once the first answers, so its exit is only a failure if none answers.
     if (exit_code !== null && !(await is_answering(socket_path))) throw new Error(`the daemon exited with ${exit_code}: ${last_line(log_file)}`);
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
   throw new Error(`the daemon did not answer on ${socket_path} within ${timeout_ms / 1000} seconds: ${last_line(log_file)}`);
+}
+
+// Stops the daemon answering on the socket when it recorded a build other than the script's, and waits until it has
+// gone. Answers whether it stopped one; a daemon that recorded nothing, or this build, is left running.
+async function stop_other_build(socket_path: string, script: string, timeout_ms: number): Promise<boolean> {
+  const running = read_daemon_build(socket_path);
+  const wanted = daemon_build_id(script);
+  if (!running || !wanted || running.build === wanted) return false;
+  try {
+    process.kill(running.pid, "SIGTERM");
+  } catch {
+    return false;
+  }
+  const deadline = Date.now() + timeout_ms;
+  while (await is_answering(socket_path)) {
+    if (Date.now() > deadline) throw new Error(`the daemon of another build, process ${running.pid}, did not stop within ${timeout_ms / 1000} seconds`);
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+  return true;
 }
 
 // Electron leaves many of its own descriptors open across a launch, such as its DevTools port, its single-instance socket

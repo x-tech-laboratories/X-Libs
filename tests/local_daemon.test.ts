@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  call_daemon, covered_descriptors, daemon_log_path, daemon_socket_path, DaemonRunningError, follow_daemon_events, is_answering, listen_on_socket, parse_event, start_daemon,
+  call_daemon, covered_descriptors, daemon_build_id, daemon_build_path, daemon_log_path, daemon_socket_path, DaemonRunningError, follow_daemon_events, is_answering, listen_on_socket, parse_event,
+  read_daemon_build, start_daemon,
 } from "../src/local_daemon.ts";
 
 let folder: string;
@@ -73,6 +74,31 @@ describe("listen_on_socket", () => {
     expect(await is_answering(socket)).toBe(false);
     await listen_on_socket(socket, serve((_, response) => response.end()).listen);
     expect(await is_answering(socket)).toBe(true);
+  });
+});
+
+describe("daemon builds", () => {
+  it("records the build that listens, from its entry file's contents", async () => {
+    const socket = join(folder, "daemon.sock");
+    const script = join(folder, "daemon.mjs");
+    writeFileSync(script, "// build one\n");
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen, script);
+
+    expect(read_daemon_build(socket)).toEqual({ pid: process.pid, build: daemon_build_id(script) });
+    expect(statSync(daemon_build_path(socket)).mode & 0o777).toBe(0o600);
+    writeFileSync(script, "// build two\n");
+    expect(daemon_build_id(script)).not.toBe(read_daemon_build(socket)!.build);
+  });
+
+  it("records nothing for an entry file it cannot read, and reads nothing from a broken record", async () => {
+    const socket = join(folder, "daemon.sock");
+    writeFileSync(daemon_build_path(socket), "{}");
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen, join(folder, "missing.mjs"));
+
+    expect(daemon_build_id(join(folder, "missing.mjs"))).toBeNull();
+    expect(read_daemon_build(socket)).toBeNull();
+    writeFileSync(daemon_build_path(socket), "not json");
+    expect(read_daemon_build(socket)).toBeNull();
   });
 });
 
@@ -160,5 +186,40 @@ describe("start_daemon", () => {
     const script = join(folder, "broken.mjs");
     writeFileSync(script, `console.error("no database given");\nprocess.exit(3);\n`);
     await expect(start_daemon({ socket_path: join(folder, "daemon.sock"), script, log_file: join(folder, "daemon.log") })).rejects.toThrow("exited with 3: no database given");
+  });
+
+  it("replaces a daemon of another build only when asked, and leaves its own build running", async () => {
+    const socket = join(folder, "daemon.sock");
+    const log_file = join(folder, "daemon.log");
+    // Each records its own build beside the socket, as listen_on_socket does.
+    const daemon_source = (name: string) =>
+      `// ${name}\nimport { createHash } from "node:crypto";\nimport { readFileSync, writeFileSync } from "node:fs";\nimport { createServer } from "node:http";\n` +
+      `const server = createServer((_, r) => r.end()).listen(process.env.SOCKET, () => writeFileSync(process.env.SOCKET + ".build.json", JSON.stringify({ pid: process.pid, build: createHash("sha256").update(readFileSync(process.argv[1])).digest("hex").slice(0, 16) })));\n` +
+      `process.on("SIGTERM", () => server.close(() => process.exit(0)));\nsetTimeout(() => process.exit(0), 10000);\n`;
+    const old_build = join(folder, "old.mjs");
+    const new_build = join(folder, "new.mjs");
+    writeFileSync(old_build, daemon_source("old"));
+    writeFileSync(new_build, daemon_source("new"));
+    const start = (script: string, replace_other_build?: boolean) => start_daemon({ socket_path: socket, script, env: { SOCKET: socket }, log_file, replace_other_build });
+
+    expect(await start(old_build)).toBe("started");
+    await wait_for(() => read_daemon_build(socket) !== null);
+    const old_pid = read_daemon_build(socket)!.pid;
+    expect(await start(new_build)).toBe("running");
+
+    expect(await start(new_build, true)).toBe("replaced");
+    await wait_for(() => read_daemon_build(socket)?.build === daemon_build_id(new_build));
+    expect(() => process.kill(old_pid, 0)).toThrow();
+    expect(await start(new_build, true)).toBe("running");
+    process.kill(read_daemon_build(socket)!.pid, "SIGTERM");
+  });
+
+  it("leaves running a daemon that recorded no build", async () => {
+    const socket = join(folder, "daemon.sock");
+    const script = join(folder, "daemon.mjs");
+    writeFileSync(script, "// some build\n");
+    await listen_on_socket(socket, serve((_, response) => response.end()).listen, join(folder, "missing.mjs"));
+
+    expect(await start_daemon({ socket_path: socket, script, log_file: join(folder, "daemon.log"), replace_other_build: true })).toBe("running");
   });
 });
