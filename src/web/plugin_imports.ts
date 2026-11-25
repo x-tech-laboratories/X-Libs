@@ -96,6 +96,16 @@ export async function load_plugin_modules<Api extends PluginApi = PluginApi>(ind
   return result;
 }
 
+// A fetch_text for load_plugin_modules that reads URLs under base through read, such as a desktop's IPC call to
+// read_plugin_file; give load_plugin_modules `${base}index.json`.
+export function bridge_fetch_text(base: string, read: (path: string) => string | Promise<string>): (url: string) => Promise<string> {
+  return async (url) => {
+    const text = url.startsWith(base) ? await read(url.slice(base.length)) : "";
+    if (!text) throw new Error(`${url} is not in the plugins folder.`);
+    return text;
+  };
+}
+
 async function default_fetch_text(url: string): Promise<string> {
   const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) throw new Error(`${url} answered ${response.status}.`);

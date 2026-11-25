@@ -1,6 +1,7 @@
 // Keeps an app's SQLite tables alike on every device. Every value sync tracks is a cell, one column of one row, holding the
 // time it was last written and the device that wrote it; the newest write of each cell wins on every device, and a row's
-// presence is a cell of its own. Triggers stamp the app's own writes, whatever code makes them, so the app's store code
+// presence is a cell of its own. A map column, a JSON object, keeps a cell for each of its keys instead, so two devices
+// writing different keys of it keep both. Triggers stamp the app's own writes, whatever code makes them, so the app's store code
 // needs no changes to sync.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
@@ -18,6 +19,8 @@ export interface SyncedTable {
   local_columns?: string[];
   // Rows kept only on this device, by key, such as a setting for this device alone.
   local_keys?: readonly string[];
+  // JSON object columns whose keys sync one by one, so two devices adding different keys keep both; a removed key is null.
+  map_columns?: string[];
 }
 
 export interface SyncEngineOptions {
@@ -53,6 +56,18 @@ export type SyncEngine = ReturnType<typeof create_sync_engine>;
 const exists_column = "_exists";
 const now_ms = `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 const trigger_events = ["insert", "update", "delete"] as const;
+// Joins a map column's name to one of its keys to name that key's cell.
+const map_separator = ":";
+
+// A map column's value as an object; anything that is not one is empty.
+function object_of(value: unknown): Record<string, unknown> {
+  try {
+    const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { ...(parsed as Record<string, unknown>) } : {};
+  } catch {
+    return {};
+  }
+}
 
 // Safe to run on every start; a new database gets fresh device and data ids.
 export const sync_schema_sql = `
@@ -89,9 +104,20 @@ interface CellRow {
 // ── Engine ───────────────────────────────────────────────────────────────────
 
 export function create_sync_engine(options: SyncEngineOptions) {
-  const tables = options.tables.map((table) => ({ ...table, local_columns: table.local_columns ?? [], local_keys: table.local_keys ?? [] }));
+  const tables = options.tables.map((table) => ({ ...table, local_columns: table.local_columns ?? [], local_keys: table.local_keys ?? [], map_columns: table.map_columns ?? [] }));
   const tables_by_name = new Map(tables.map((table) => [table.name, table]));
   type Table = (typeof tables)[number];
+  interface KnownColumns {
+    columns: string[];
+    map_columns: string[];
+  }
+
+  // The map column and key a cell names, or null for a cell of a whole value.
+  function split_map_cell(table: Table, cell_name: string): { column: string; key: string } | null {
+    const at = cell_name.indexOf(map_separator);
+    if (at < 0 || !table.map_columns.includes(cell_name.slice(0, at))) return null;
+    return { column: cell_name.slice(0, at), key: cell_name.slice(at + map_separator.length) };
+  }
 
   function key_sql(table: Table, alias: string): string {
     return table.key_columns.map((column) => `${alias}."${column}"`).join(` || '/' || `);
@@ -103,9 +129,19 @@ export function create_sync_engine(options: SyncEngineOptions) {
     return `${key_sql(table, alias)} NOT IN (${table.local_keys.map((key) => `'${key.replaceAll("'", "''")}'`).join(", ")})`;
   }
 
+  function column_names(database: SqlDatabase, table: Table): string[] {
+    return (database.prepare(`PRAGMA table_info("${table.name}")`).all() as { name: string }[]).map((column) => column.name);
+  }
+
+  // The columns that sync as one value each.
   function synced_columns(database: SqlDatabase, table: Table): string[] {
-    const columns = database.prepare(`PRAGMA table_info("${table.name}")`).all() as { name: string }[];
-    return columns.map((column) => column.name).filter((name) => !table.local_columns.includes(name));
+    return column_names(database, table).filter((name) => !table.local_columns.includes(name) && !table.map_columns.includes(name));
+  }
+
+  // The map columns the table has, each of whose keys syncs as a value of its own.
+  function synced_map_columns(database: SqlDatabase, table: Table): string[] {
+    const names = column_names(database, table);
+    return table.map_columns.filter((name) => names.includes(name) && !table.local_columns.includes(name));
   }
 
   // ── Triggers ─────────────────────────────────────────────────────────────
@@ -126,6 +162,33 @@ export function create_sync_engine(options: SyncEngineOptions) {
       ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq;`;
   }
 
+  // A map column's value as an object SQLite can walk; anything else counts as empty.
+  function object_sql(value: string): string {
+    return `(CASE WHEN json_valid(${value}) THEN (CASE WHEN json_type(${value}) = 'object' THEN ${value} ELSE '{}' END) ELSE '{}' END)`;
+  }
+
+  // Stamps a cell for each key the select names, in a column called key, as stamp_cell_sql does for one.
+  function stamp_map_sql(table: Table, row_key: string, column: string, keys_select: string): string {
+    const cell_name = `'${column}' || '${map_separator}' || changed.key`;
+    return `UPDATE sync_state SET last_seq = last_seq + 1 WHERE EXISTS (${keys_select});
+      INSERT INTO sync_cells (table_name, row_key, column_name, ts, site, seq)
+        SELECT '${table.name}', ${row_key}, ${cell_name},
+          max(${now_ms}, coalesce((SELECT ts + 1 FROM sync_cells WHERE table_name = '${table.name}' AND row_key = ${row_key} AND column_name = ${cell_name}), 0)),
+          (SELECT site FROM sync_state), (SELECT last_seq FROM sync_state)
+        FROM (${keys_select}) AS changed WHERE 1
+      ON CONFLICT (table_name, row_key, column_name) DO UPDATE SET ts = excluded.ts, site = excluded.site, seq = excluded.seq;`;
+  }
+
+  // The keys of a map column an update added, changed or removed.
+  function changed_keys_sql(column: string): string {
+    const old_object = object_sql(`OLD."${column}"`);
+    const new_object = object_sql(`NEW."${column}"`);
+    return `SELECT now.key AS key FROM json_each(${new_object}) AS now
+        WHERE now.value IS NOT (SELECT was.value FROM json_each(${old_object}) AS was WHERE was.key = now.key)
+      UNION SELECT was.key AS key FROM json_each(${old_object}) AS was
+        WHERE NOT EXISTS (SELECT 1 FROM json_each(${new_object}) AS now WHERE now.key = was.key)`;
+  }
+
   function drop_triggers(database: SqlDatabase): void {
     for (const table of tables) for (const event of trigger_events) database.exec(`DROP TRIGGER IF EXISTS ${trigger_name(table, event)}`);
   }
@@ -138,14 +201,21 @@ export function create_sync_engine(options: SyncEngineOptions) {
 
     for (const table of tables) {
       const columns = synced_columns(database, table);
+      const map_columns = synced_map_columns(database, table);
       const new_key = key_sql(table, "NEW");
       const old_key = key_sql(table, "OLD");
 
       database.exec(`CREATE TRIGGER ${trigger_name(table, "insert")} AFTER INSERT ON "${table.name}"
         WHEN ${is_local} AND ${filter_sql(table, "NEW")}
-        BEGIN ${[exists_column, ...columns].map((column) => stamp_cell_sql(table, new_key, column)).join("\n")} END`);
+        BEGIN ${[
+          ...[exists_column, ...columns].map((column) => stamp_cell_sql(table, new_key, column)),
+          ...map_columns.map((column) => stamp_map_sql(table, new_key, column, `SELECT key FROM json_each(${object_sql(`NEW."${column}"`)})`)),
+        ].join("\n")} END`);
 
-      const update_steps = columns.map((column) => stamp_cell_sql(table, new_key, column, `OLD."${column}" IS NOT NEW."${column}"`));
+      const update_steps = [
+        ...columns.map((column) => stamp_cell_sql(table, new_key, column, `OLD."${column}" IS NOT NEW."${column}"`)),
+        ...map_columns.map((column) => stamp_map_sql(table, new_key, column, changed_keys_sql(column))),
+      ];
       database.exec(`CREATE TRIGGER ${trigger_name(table, "update")} AFTER UPDATE ON "${table.name}"
         WHEN ${is_local} AND ${filter_sql(table, "NEW")}
         BEGIN ${update_steps.join("\n")} END`);
@@ -168,6 +238,21 @@ export function create_sync_engine(options: SyncEngineOptions) {
              SELECT '${table.name}', ${key_sql(table, "row")}, '${column}', 0, '', 0 FROM "${table.name}" AS row WHERE ${filter_sql(table, "row")}`,
           )
           .run();
+      }
+      // A column that has just become a map column gives each of its keys the version the whole value had.
+      for (const column of synced_map_columns(database, table)) {
+        const row_key = key_sql(table, "row");
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO sync_cells (table_name, row_key, column_name, ts, site, seq)
+             SELECT '${table.name}', ${row_key}, '${column}${map_separator}' || entry.key, coalesce(whole.ts, 0), coalesce(whole.site, ''), coalesce(whole.seq, 0)
+             FROM "${table.name}" AS row
+               JOIN json_each(${object_sql(`row."${column}"`)}) AS entry
+               LEFT JOIN sync_cells AS whole ON whole.table_name = '${table.name}' AND whole.row_key = ${row_key} AND whole.column_name = '${column}'
+             WHERE ${filter_sql(table, "row")}`,
+          )
+          .run();
+        database.prepare("DELETE FROM sync_cells WHERE table_name = ? AND column_name = ?").run(table.name, column);
       }
     }
   }
@@ -227,7 +312,11 @@ export function create_sync_engine(options: SyncEngineOptions) {
       const row = rows.get(row_id);
 
       const base = { table: cell.table_name, key: cell.row_key, column: cell.column_name, ts: cell.ts, site: cell.site };
+      const map_cell = split_map_cell(table, cell.column_name);
       if (cell.column_name === exists_column) changes.push({ ...base, value: row ? 1 : 0 });
+      else if (map_cell) {
+        if (row && map_cell.column in row) changes.push({ ...base, value: object_of(row[map_cell.column])[map_cell.key] ?? null });
+      }
       else if (row && cell.column_name in row) changes.push({ ...base, value: row[cell.column_name] });
     }
     return changes;
@@ -285,7 +374,8 @@ export function create_sync_engine(options: SyncEngineOptions) {
   }
 
   // Changes from another device for one row: whether it should exist, then each value newer than this device's.
-  function apply_row_changes(database: SqlDatabase, table: Table, known_columns: string[], row_key: string, changes: SyncChange[]): number {
+  function apply_row_changes(database: SqlDatabase, table: Table, known: KnownColumns, row_key: string, changes: SyncChange[]): number {
+    const { columns: known_columns, map_columns: known_map_columns } = known;
     const current_cells = new Map(
       (database.prepare("SELECT column_name, ts, site FROM sync_cells WHERE table_name = ? AND row_key = ?").all(table.name, row_key) as CellRow[]).map(
         (cell) => [cell.column_name, cell],
@@ -300,10 +390,13 @@ export function create_sync_engine(options: SyncEngineOptions) {
       record_cell(database, exists_change);
       applied += 1;
       if (exists_change.value === 1 && !exists) {
-        const values = changes.filter((change) => change.column !== exists_column && known_columns.includes(change.column));
+        const values: [string, SqlValue][] = [
+          ...changes.filter((change) => change.column !== exists_column && known_columns.includes(change.column)).map((change) => [change.column, change.value as SqlValue] as [string, SqlValue]),
+          ...known_map_columns.map((column) => [column, "{}"] as [string, SqlValue]),
+        ];
         database
-          .prepare(`INSERT INTO "${table.name}" (${values.map((change) => `"${change.column}"`).join(", ")}) VALUES (${values.map(() => "?").join(", ")})`)
-          .run(...values.map((change) => change.value as SqlValue));
+          .prepare(`INSERT INTO "${table.name}" (${values.map(([column]) => `"${column}"`).join(", ")}) VALUES (${values.map(() => "?").join(", ")})`)
+          .run(...values.map(([, value]) => value));
         exists = true;
       }
       if (exists_change.value === 0 && exists) {
@@ -313,10 +406,20 @@ export function create_sync_engine(options: SyncEngineOptions) {
     }
 
     for (const change of changes) {
-      if (change.column === exists_column || !known_columns.includes(change.column) || !is_newer(change, current_cells.get(change.column))) continue;
+      const map_cell = split_map_cell(table, change.column);
+      const is_known = map_cell ? known_map_columns.includes(map_cell.column) : known_columns.includes(change.column);
+      if (change.column === exists_column || !is_known || !is_newer(change, current_cells.get(change.column))) continue;
       record_cell(database, change);
       applied += 1;
-      if (exists) {
+      if (exists && map_cell) {
+        const select = `SELECT "${map_cell.column}" AS value FROM "${table.name}" AS row WHERE ${where_row}`;
+        const object = object_of((database.prepare(select).get(row_key) as { value: unknown }).value);
+        if (change.value === null || change.value === undefined) delete object[map_cell.key];
+        else object[map_cell.key] = change.value;
+        database
+          .prepare(`UPDATE "${table.name}" SET "${map_cell.column}" = ? WHERE rowid IN (SELECT rowid FROM "${table.name}" AS row WHERE ${where_row})`)
+          .run(JSON.stringify(object), row_key);
+      } else if (exists) {
         database
           .prepare(`UPDATE "${table.name}" SET "${change.column}" = ? WHERE rowid IN (SELECT rowid FROM "${table.name}" AS row WHERE ${where_row})`)
           .run(change.value as SqlValue, row_key);
@@ -363,7 +466,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
     }
 
     const ordered_rows = [...rows.values()].sort((first, second) => tables.indexOf(first.table) - tables.indexOf(second.table));
-    const known_columns = new Map(tables.map((table) => [table, synced_columns(database, table)]));
+    const known_columns = new Map(tables.map((table): [Table, KnownColumns] => [table, { columns: synced_columns(database, table), map_columns: synced_map_columns(database, table) }]));
     let applied = 0;
     for (const row of ordered_rows) applied += apply_row_changes(database, row.table, known_columns.get(row.table)!, row.key, row.changes);
     return applied;

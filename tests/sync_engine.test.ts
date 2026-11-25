@@ -117,3 +117,85 @@ describe("sync engine", () => {
     expect(engine.has_unpushed_changes(desktop)).toBe(false);
   });
 });
+
+const map_engine = create_sync_engine({ tables: [{ name: "games", key_columns: ["id"], map_columns: ["other_ids"] }] });
+const games_sql = `CREATE TABLE games (id TEXT PRIMARY KEY, title TEXT NOT NULL, other_ids TEXT NOT NULL DEFAULT '{}')`;
+
+function open_map_device(): SqlDatabase {
+  const database = new DatabaseSync(":memory:");
+  migrate(database, [games_sql]);
+  map_engine.install(database);
+  return database;
+}
+
+function push_map(from: SqlDatabase, to: SqlDatabase): number {
+  const outgoing = map_engine.collect_unpushed_changes(from);
+  map_engine.write_state(from, { pushed_seq: outgoing.up_to_seq });
+  return map_engine.apply_changes(to, outgoing.changes);
+}
+
+function other_ids(database: SqlDatabase): unknown {
+  return JSON.parse((database.prepare("SELECT other_ids FROM games WHERE id = 'g1'").get() as { other_ids: string }).other_ids);
+}
+
+describe("sync engine map columns", () => {
+  it("carries a new row with its keys", () => {
+    const phone = open_map_device();
+    const desktop = open_map_device();
+    phone.exec(`INSERT INTO games VALUES ('g1', 'Ori', '{"shelfdb":"7"}')`);
+    push_map(phone, desktop);
+    expect(other_ids(desktop)).toEqual({ shelfdb: "7" });
+  });
+
+  it("keeps keys two devices added to the same value at once", () => {
+    const phone = open_map_device();
+    const desktop = open_map_device();
+    phone.exec("INSERT INTO games (id, title) VALUES ('g1', 'Ori')");
+    push_map(phone, desktop);
+
+    phone.exec(`UPDATE games SET other_ids = '{"shelfdb":"7"}'`);
+    desktop.exec(`UPDATE games SET other_ids = '{"gamedb":"x1"}'`);
+    push_map(phone, desktop);
+    push_map(desktop, phone);
+    expect(other_ids(phone)).toEqual({ shelfdb: "7", gamedb: "x1" });
+    expect(other_ids(desktop)).toEqual({ shelfdb: "7", gamedb: "x1" });
+  });
+
+  it("carries a removed key, and the later write of the same key", async () => {
+    const phone = open_map_device();
+    const desktop = open_map_device();
+    phone.exec(`INSERT INTO games VALUES ('g1', 'Ori', '{"shelfdb":"7","gamedb":"x1"}')`);
+    push_map(phone, desktop);
+
+    desktop.exec(`UPDATE games SET other_ids = '{"shelfdb":"8","gamedb":"x1"}'`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    phone.exec(`UPDATE games SET other_ids = '{"shelfdb":"9"}'`);
+    push_map(phone, desktop);
+    push_map(desktop, phone);
+    expect(other_ids(desktop)).toEqual({ shelfdb: "9" });
+    expect(other_ids(phone)).toEqual({ shelfdb: "9" });
+  });
+
+  it("rebuilds a device's keys from a snapshot", () => {
+    const phone = open_map_device();
+    const desktop = open_map_device();
+    phone.exec(`INSERT INTO games VALUES ('g1', 'Ori', '{"shelfdb":"7"}')`);
+    map_engine.replace_with_snapshot(desktop, map_engine.collect_snapshot(phone).changes);
+    expect(other_ids(desktop)).toEqual({ shelfdb: "7" });
+  });
+
+  it("gives each key of a column that became a map column the version the whole value had", () => {
+    const whole_engine = create_sync_engine({ tables: [{ name: "games", key_columns: ["id"] }] });
+    const phone = new DatabaseSync(":memory:");
+    migrate(phone, [games_sql]);
+    whole_engine.install(phone);
+    phone.exec(`INSERT INTO games VALUES ('g1', 'Ori', '{"shelfdb":"7"}')`);
+
+    map_engine.install(phone);
+    const cells = phone.prepare("SELECT column_name FROM sync_cells WHERE column_name LIKE 'other_ids%'").all().map((row) => (row as { column_name: string }).column_name);
+    expect(cells).toEqual(["other_ids:shelfdb"]);
+    const desktop = open_map_device();
+    push_map(phone, desktop);
+    expect(other_ids(desktop)).toEqual({ shelfdb: "7" });
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { load_plugin_modules, rewrite_imports, share_modules } from "../src/web/plugin_imports.ts";
+import { bridge_fetch_text, load_plugin_modules, rewrite_imports, share_modules } from "../src/web/plugin_imports.ts";
 
 const shared_library = { greet: (name: string) => `hello ${name}`, default: { kind: "library" } };
 share_modules({ "shared-library": shared_library });
@@ -41,5 +41,17 @@ describe("plugin imports", () => {
       { name: "unbuilt", problem: "Its web entry is missing." },
       { name: "https://app.test/plugins/broken/web.js", problem: "It imports react, which the app does not share; bundle it into the plugin." },
     ]);
+  });
+
+  it("reads entries under a base through a bridge, and refuses what it does not have", async () => {
+    const files: Record<string, string> = {
+      "index.json": JSON.stringify({ entries: ["hello/web.js"] }),
+      "hello/web.js": `export default { id: "x.hello", name: "Hello", version: "1.0.0", start() {} };`,
+    };
+    const fetch_text = bridge_fetch_text("app-plugins://folder/", (path) => files[path] ?? "");
+    const { plugins } = await load_plugin_modules("app-plugins://folder/index.json", fetch_text);
+    expect(plugins.map((plugin) => plugin.id)).toEqual(["x.hello"]);
+    await expect(fetch_text("app-plugins://folder/gone.js")).rejects.toThrow("app-plugins://folder/gone.js is not in the plugins folder.");
+    await expect(fetch_text("https://elsewhere.test/x.js")).rejects.toThrow("not in the plugins folder");
   });
 });

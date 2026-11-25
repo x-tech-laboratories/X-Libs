@@ -91,6 +91,8 @@ export interface SyncOptions {
   local_columns?: Record<string, string[]>;
   // Rows kept only on this device, by table name and key.
   local_keys?: Record<string, readonly string[]>;
+  // JSON object columns whose keys sync one by one, by table name.
+  map_columns?: Record<string, string[]>;
 }
 
 // The sync list for the tables given, parents first, each named by its primary key.
@@ -100,7 +102,7 @@ export function synced_tables(tables: readonly SQLiteTable[], options: SyncOptio
     const composite = config.primaryKeys[0]?.columns.map((column) => column.name);
     const key_columns = composite ?? config.columns.filter((column) => column.primary).map((column) => column.name);
     if (key_columns.length === 0) throw new Error(`table ${config.name} has no primary key to sync by`);
-    return { name: config.name, key_columns, local_columns: options.local_columns?.[config.name], local_keys: options.local_keys?.[config.name] };
+    return { name: config.name, key_columns, local_columns: options.local_columns?.[config.name], local_keys: options.local_keys?.[config.name], map_columns: options.map_columns?.[config.name] };
   });
 }
 

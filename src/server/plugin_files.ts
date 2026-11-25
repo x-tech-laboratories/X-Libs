@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { inside, plugin_entries } from "../plugin_folder.ts";
+import { inside, plugin_index } from "../plugin_folder.ts";
 
 export interface PluginFilesOptions {
   folder: string;
@@ -31,9 +31,8 @@ export function register_plugin_files(app: FastifyInstance, options: PluginFiles
   const side = options.side ?? "web";
 
   app.get(`${prefix}/index.json`, async (_request, reply) => {
-    const { entries, problems } = plugin_entries(folder, side);
     void reply.header("cache-control", "no-cache");
-    return { entries: entries.map((entry) => `${encodeURIComponent(entry.name)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`), problems };
+    return plugin_index(folder, side);
   });
 
   app.get<{ Params: { name: string; "*": string } }>(`${prefix}/:name/*`, async (request, reply) => {
