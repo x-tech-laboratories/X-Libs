@@ -35,12 +35,15 @@ interface PluginSlotProps<Api extends PluginApi, Slot extends SlotsWithProps<Api
   empty?: ReactNode;
   // Told when one plugin's part fails to draw; that part alone is left out.
   on_error?: (plugin_id: string, error: unknown) => void;
+  // Draws only this plugin's part.
+  plugin_id?: string;
 }
 
 // Draws each component running plugins put in the slot, in the order they started.
-export function PluginSlot<Api extends PluginApi, Slot extends SlotsWithProps<Api>>({ host, name, props, empty = null, on_error }: PluginSlotProps<Api, Slot>) {
+export function PluginSlot<Api extends PluginApi, Slot extends SlotsWithProps<Api>>({ host, name, props, empty = null, on_error, plugin_id: only }: PluginSlotProps<Api, Slot>) {
   use_plugins(host);
-  const parts = host.slot(name) as { plugin_id: string; value: ComponentType<PropsOf<Api, Slot>> }[];
+  const all = host.slot(name) as { plugin_id: string; value: ComponentType<PropsOf<Api, Slot>> }[];
+  const parts = only === undefined ? all : all.filter((part) => part.plugin_id === only);
   if (parts.length === 0) return <>{empty}</>;
   return (
     <>
@@ -77,9 +80,9 @@ const STATE_LABELS: Record<PluginState, [string, Tone]> = {
 };
 
 // The settings page's Plugins section: a row per plugin with its version, state and on switch, then its own settings.
-// A heading of null leaves it to the settings section the rows sit in.
-export function PluginSettings<Api extends PluginApi>({ host, heading = "Plugins", empty = "No plugins are installed." }: { host: PluginHost<Api>; heading?: ReactNode | null; empty?: ReactNode }) {
-  const statuses = use_plugins(host);
+// A heading of null leaves it to the settings section the rows sit in; a plugin_id draws that plugin alone.
+export function PluginSettings<Api extends PluginApi>({ host, heading = "Plugins", empty = "No plugins are installed.", plugin_id }: { host: PluginHost<Api>; heading?: ReactNode | null; empty?: ReactNode; plugin_id?: string }) {
+  const statuses = use_plugins(host).filter(({ manifest }) => plugin_id === undefined || manifest.id === plugin_id);
   return (
     <SettingsGroup heading={heading} hint={statuses.length === 0 ? empty : undefined}>
       {statuses.map(({ manifest, state, problem }) => (

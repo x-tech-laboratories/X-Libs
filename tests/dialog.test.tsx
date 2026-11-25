@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Dialog, Dialogs, confirm_dialog } from "../src/web/react/dialog.tsx";
+import { Dialog, Dialogs, SettingsDialogRow, confirm_dialog } from "../src/web/react/dialog.tsx";
 import { Toasts, toast } from "../src/web/react/toasts.tsx";
 
 afterEach(() => {
@@ -40,6 +40,21 @@ describe("dialog", () => {
 
     expect(document.querySelector("dialog")).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("settings dialog row", () => {
+  it("says its status and opens its settings in a dialog until it is done", () => {
+    render(<SettingsDialogRow name="Steam" status="Key set" about="Your library">The settings</SettingsDialogRow>);
+    expect(screen.getByText("Key set")).toBeTruthy();
+    expect(document.querySelector("dialog")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Steam" }));
+    expect(screen.getByText("The settings")).toBeTruthy();
+    expect(screen.getByText("Your library")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(document.querySelector("dialog")).toBeNull();
   });
 });
 

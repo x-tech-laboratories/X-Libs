@@ -1,6 +1,7 @@
 // Modal dialogs on the native one: any body and buttons, one that asks before an action, and one that shows a long text.
 
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { SettingRow } from "./layout.tsx";
 import { toast } from "./toasts.tsx";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
@@ -179,6 +180,34 @@ export function confirm_dialog(options: ConfirmOptions): void {
 
 export function text_dialog(title: string, text: string): void {
   open_dialog((close) => <TextDialog title={title} text={text} on_close={close} />);
+}
+
+// A settings row with a name, a short status and an Open button whose dialog holds that group's settings, so a crowded
+// settings section keeps one line per group.
+export function SettingsDialogRow({ name, status, about, children }: { name: string; status: ReactNode; about?: ReactNode; children: ReactNode }) {
+  const [open, set_open] = useState(false);
+  return (
+    <SettingRow label={name} hint={status}>
+      <button type="button" aria-label={`Open ${name}`} onClick={() => set_open(true)}>
+        Open
+      </button>
+      {open && (
+        <Dialog
+          title={name}
+          subtitle={about}
+          wide
+          on_close={() => set_open(false)}
+          buttons={
+            <button type="button" className="accent solid" onClick={() => set_open(false)}>
+              Done
+            </button>
+          }
+        >
+          {children}
+        </Dialog>
+      )}
+    </SettingRow>
+  );
 }
 
 // Where dialogs opened from anywhere are drawn; the Shell holds one.
