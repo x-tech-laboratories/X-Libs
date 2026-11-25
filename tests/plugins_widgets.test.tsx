@@ -123,3 +123,23 @@ describe("plugin_menu_items", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 });
+
+describe("one plugin alone", () => {
+  it("draws only the named plugin's settings and slot part", async () => {
+    const host = create_plugin_host<Api>({ app });
+    await host.add(plugin("one", { start: (context) => context.fill_slot("sidebar", () => <p>From one</p>) }));
+    await host.add(plugin("two", { start: (context) => context.fill_slot("sidebar", () => <p>From two</p>) }));
+    await host.start();
+
+    render(
+      <>
+        <PluginSettings host={host} plugin_id="two" />
+        <PluginSlot host={host} name="sidebar" props={{ title: "x" }} plugin_id="two" />
+      </>,
+    );
+    expect(screen.getByText("Plugin two")).toBeTruthy();
+    expect(screen.queryByText("Plugin one")).toBeNull();
+    expect(screen.getByText("From two")).toBeTruthy();
+    expect(screen.queryByText("From one")).toBeNull();
+  });
+});
