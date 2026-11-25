@@ -102,9 +102,9 @@ describe("drizzle", () => {
   });
 
   it("reads each table's sync key from its primary key and refuses a table without one", () => {
-    expect(synced_tables([metrics, readings], { local_columns: { readings: ["value"] } })).toEqual([
-      { name: "metrics", key_columns: ["id"], local_columns: undefined, local_keys: undefined },
-      { name: "readings", key_columns: ["metric_id", "day"], local_columns: ["value"], local_keys: undefined },
+    expect(synced_tables([metrics, readings], { local_columns: { readings: ["value"] }, map_columns: { metrics: ["name"] } })).toEqual([
+      { name: "metrics", key_columns: ["id"], local_columns: undefined, local_keys: undefined, map_columns: ["name"] },
+      { name: "readings", key_columns: ["metric_id", "day"], local_columns: ["value"], local_keys: undefined, map_columns: undefined },
     ]);
     expect(() => synced_tables([notes])).toThrow("table notes has no primary key to sync by");
   });
