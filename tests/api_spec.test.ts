@@ -125,13 +125,16 @@ describe("page-only calls", () => {
     expect(page_only.refusal).toBe("Only at the page.");
   });
 
-  it("read a request's arguments as a list or by name, and count unreadable ones as the user's when there is a rule", () => {
+  it("read a request's arguments as a list or by name, leaving wrong names to the call, and count any other body as the user's when there is a rule", () => {
     const page_only = page_only_calls(api, { rule });
 
     expect(page_only.is_page_only_request("set_setting", ["policy", 1])).toBe(true);
     expect(page_only.is_page_only_request("set_setting", { value: 1, key: "policy" })).toBe(true);
     expect(page_only.is_page_only_request("set_setting", { key: "theme", value: "dark" })).toBe(false);
     expect(page_only.is_page_only_request("set_setting", { key: "policy", extra: 1 })).toBe(true);
+    expect(page_only.is_page_only_request("set_setting", { key: "theme" })).toBe(false);
+    expect(page_only.is_page_only_request("list_settings", { not: "an argument" })).toBe(false);
+    expect(page_only.is_page_only_request("no_such_call", { key: "policy" })).toBe(false);
     expect(page_only.is_page_only_request("set_setting", "policy")).toBe(true);
     expect(page_only.is_page_only_request("approve", { id: "p1" })).toBe(true);
     expect(page_only.is_page_only_request("list_settings", undefined)).toBe(false);
