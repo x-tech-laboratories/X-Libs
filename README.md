@@ -69,12 +69,12 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `agent/local_socket`                     | `LineServer` and `follow_lines`: JSON messages, one per line, handed from one local process to every follower of a unix socket, the follower reconnecting whenever the socket is not there, such as a desktop agent following a system agent's notifications. |
 | `agent/long_runs`                        | `LongRuns`: commands that outlive the agent, their output and exit code kept on disk; optionally each in a transient systemd unit and slice, so a stop ends everything it started. |
 | `agent/stalls`                           | What a stalled long run waits for, read from /proc: `watch_for_stalls`, run beside the task in a long run's runner, writes a note into the run's output once it has printed nothing for five minutes and again each half hour: the programs it still runs, the file locks they wait for and who holds them, a known lock named by what it is with a line of advice; `describe_stall`, `lock_holders`, `read_processes`, `read_locks` and `show_holders` for asking the same questions directly. |
-| `agent/keys`                             | Reads and makes OpenSSH ed25519 agent keys; signs and checks the login challenge. |
-| `agent/protocol`                         | The messages between the server and an agent.                                 |
-| `agent/session`, `agent/client`          | The agent's side: `start_agent` dials the server and answers it.              |
+| `agent/keys`                             | Reads and makes OpenSSH ed25519 agent and server keys; signs and checks the login challenge, and the server's signed challenge, bound hello and messages (`server_challenge_text`, `agent_hello_text`, `server_message_text`, netstrings by `signed_bytes`); `public_key_line`, `public_line_of_private_text` and `fingerprint_of` give a key's public line and fingerprint as ssh-keygen does; `parse_server_keys` reads the accepted server keys. |
+| `agent/protocol`                         | The messages between the server and an agent, and the `signed` frame (`encode_signed_message`, `parse_signed_message`) that wraps each message a server with a key sends an agent that checks it. |
+| `agent/session`, `agent/client`          | The agent's side: `start_agent` dials the server and answers it; with `server_keys` it answers only a server that signs its challenge and every message with one of them, hanging up with `server_refused_close_code` on anything else, and without them it warns once that TLS alone proves the server. See [Proving the server to agents](#proving-the-server-to-agents). |
 | `agent/tasks`                            | `TaskRunner`, and `shell_runner` for apps whose tasks are command lines.      |
-| `server/agents/hub`                      | `AgentHub`: the agents that have dialled in, and the server's built-in one; every refused upgrade answered alike (`admission_refused`), at most `most_pending_logins` sockets (8 per address with `most_pending_logins_per_address`) waiting to log in, a socket closed on a first message that is not a hello or one over `pre_login_message_limit_in_bytes`, and a hello's runs and texts clipped. |
-| `server/agents/connection`, `agent`, `local`, `route` | One connected agent, its replies checked and clipped (`parse_long_run_poll`, `parse_long_runs`, `parse_long_run`, `parse_run_result` in `agent/protocol`) and a malformed one rejected as an `AgentError` to try again, the `Agent` interface, `LocalAgent`, and the Fastify route, which holds each socket's frames to the pre-login size until its hello is accepted. |
+| `server/agents/hub`                      | `AgentHub`: the agents that have dialled in, and the server's built-in one; every refused upgrade answered alike (`admission_refused`), at most `most_pending_logins` sockets (8 per address with `most_pending_logins_per_address`) waiting to log in, a socket closed on a first message that is not a hello or one over `pre_login_message_limit_in_bytes`, and a hello's runs and texts clipped; with a `server_key` it signs its challenge to every agent and every message to an agent that asks (`signed_messages` in its status), and gives `server_public_line()` for the agents' config. |
+| `server/agents/connection`, `agent`, `local`, `route` | One connected agent, each message to it signed when it asked, its replies checked and clipped (`parse_long_run_poll`, `parse_long_runs`, `parse_long_run`, `parse_run_result` in `agent/protocol`) and a malformed one rejected as an `AgentError` to try again, the `Agent` interface, `LocalAgent`, and the Fastify route, which holds each socket's frames to the pre-login size until its hello is accepted. |
 | `server/passwords`                       | scrypt hashes and the `name:hash` accounts file.                              |
 | `server/hash_password`                   | The `hash-password` command.                                                  |
 | `server/backup_files`                    | `file_backup_store`: the `backups` store as files in a folder on disk.        |
@@ -518,7 +518,8 @@ and only web and mail links leave the app.
 The server and every agent are given the same `AgentApp`: the app's name, its protocol version, and its tasks.
 
 - The **name**, such as `x-nix`, names the key login's header (`x-nix-agent-host`) and is bound into the challenge the
-  agent signs (`x-nix-agent-v1|<host>|<nonce>`), so agents already deployed for an app keep logging in.
+  agent signs (`x-nix-agent-v1|<host>|<nonce>`), so agents already deployed for an app keep logging in, and into
+  everything a server key signs (see [Proving the server to agents](#proving-the-server-to-agents)).
 - A **task** is what a run, a long run or a stream carries: a shell command line for one app, a typed operation for
   another. The app names the wire field it travels in and checks it. `shell_app("x-backups")` sends a string in
   `command`.
@@ -533,6 +534,38 @@ The protocol carries run, stream, long-run and ping messages. An app adds its ow
   and ask with `hub.request(host, "health")`.
 - **Messages** either way: `session.send(...)` from the agent, with `on_hello` to send once logged in; `connection.send(...)`
   from the server, with the hub's `on_message` to receive; the agent's `on_message` receives the server's.
+
+## Proving the server to agents
+
+An agent proves its host to the server by signing the server's nonce with the host's key. TLS alone proves the server
+to the agent, so whoever can pass for the server's address, with a wrongly issued certificate or a reverse proxy that
+was broken into, could send every agent tasks. A server key closes that gap: the server signs what it sends, and each
+agent answers only a server holding a key it lists.
+
+- **Server**: make a key as for an agent, `ssh-keygen -t ed25519 -N "" -C <app>-server -f server_key`, keep it with the
+  server's secrets, and give the hub `server_key: parse_private_key(readFileSync(file, "utf8"))`. Its public line is in
+  `server_key.pub`, and `public_line_of_private_text(text)` and `hub.server_public_line()` give it too.
+- **Agent**: give `start_agent` that line in `server_keys: ["ssh-ed25519 AAAA..."]`. The agent then waits for the
+  server's challenge, checks its signature over the app, the host it logs in as, the server's nonce and the key's
+  fingerprint before signing anything, and says hello with a nonce of its own. With its host's key it signs the app,
+  the host, both nonces and the server key's fingerprint, so its hello is good for no other connection and no other
+  server. Every message the server sends afterwards comes as `{"type":"signed","counter":n,"message":"<the message's
+  JSON text>","signature":"<base64>"}`, its counter one more than the last, starting at 1, and its signature over the
+  app, the host, both nonces, the counter and the message's text exactly as sent. The agent refuses a message that is
+  not signed, is signed wrongly or for another connection, or whose counter does not follow the last: it answers a
+  request with `failed`, logs why, and hangs up with code 4009. A server that signs nothing, or signs with a key the
+  agent does not list, is refused the same way, and a token login waits `challenge_timeout_in_milliseconds` (10
+  seconds) for the challenge. With a token login the host the agent names must be the host the server knows the token by.
+- **Old and new together**: nothing changes the protocol version. A server with a key sends its signed challenge to
+  every agent, and the fields an older agent does not know are ignored; it signs messages only to an agent whose hello
+  carried a nonce. An agent with no `server_keys` behaves as before and logs once that TLS alone proves the server. An
+  agent with `server_keys` never answers an older server or one without a key.
+- **Replacing the server key**: make the new key, add its public line to every agent's `server_keys` beside the old one
+  and roll that out; switch the server to the new private key and restart it; once every agent has logged in again,
+  take the old line out of the agents' `server_keys` and destroy the old key.
+
+The agent's replies are not signed, and the key encrypts nothing: whoever terminates TLS still reads every request,
+its stdin and its output, can drop the connection, and can change what the agent answers.
 
 ## A static site
 

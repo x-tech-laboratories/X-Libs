@@ -1,10 +1,11 @@
 // A host's agent key: an ed25519 key made by `ssh-keygen -t ed25519 -N ""`, whose private half the agent holds and
-// whose public line the server's config declares. The agent proves it holds the key by signing the server's nonce.
+// whose public line the server's config declares. The agent proves it holds the key by signing the server's nonce. The
+// server may hold an ed25519 key of its own in the same format, whose public line each agent lists to check the server.
 // sshpk reads and writes the OpenSSH formats, which Node's crypto does not, and Node's crypto signs.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 
 import sshpk from "sshpk";
 
@@ -37,7 +38,98 @@ export function verify_challenge(public_key: KeyObject, app: string, host: strin
   }
 }
 
+// ── Server signatures ────────────────────────────────────────────────────────
+
+// What a signature covers: each part as a netstring, its UTF-8 length in bytes in decimal, a colon, its bytes and a comma, so no two lists of parts give the same bytes.
+export function signed_bytes(parts: readonly string[]): Buffer {
+  return Buffer.concat(parts.map((part) => {
+    const bytes = Buffer.from(part, "utf8");
+    return Buffer.concat([Buffer.from(`${bytes.length}:`, "utf8"), bytes, Buffer.from(",", "utf8")]);
+  }));
+}
+
+// What the server signs in its challenge: the app, the host logging in, the server's nonce and its key's fingerprint.
+export function server_challenge_text(app: string, host: string, server_nonce: string, server_key_fingerprint: string): Buffer {
+  return signed_bytes(["agent-server-challenge-v1", app, host, server_nonce, server_key_fingerprint]);
+}
+
+// What an agent that checks the server signs in its hello: the app, its host, both nonces and the server key's fingerprint, so a relayed hello fits no other connection or server.
+export function agent_hello_text(app: string, host: string, server_nonce: string, agent_nonce: string, server_key_fingerprint: string): Buffer {
+  return signed_bytes(["agent-hello-v2", app, host, server_nonce, agent_nonce, server_key_fingerprint]);
+}
+
+// What the server signs for each message after the hello: the app, the host, both nonces of this connection, the message's counter and the exact text of the message.
+export function server_message_text(app: string, host: string, server_nonce: string, agent_nonce: string, counter: number, message_text: string): Buffer {
+  return signed_bytes(["agent-server-message-v1", app, host, server_nonce, agent_nonce, String(counter), message_text]);
+}
+
+export function sign_text(private_key: KeyObject, text: Buffer): string {
+  return sign(null, text, private_key).toString("base64");
+}
+
+export function verify_text(public_key: KeyObject, text: Buffer, signature: unknown): boolean {
+  if (typeof signature !== "string") return false;
+  try {
+    return verify(null, text, public_key, Buffer.from(signature, "base64"));
+  } catch {
+    return false;
+  }
+}
+
+// A new random nonce of 32 bytes as base64url text.
+export function new_nonce(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+// Whether a text has the shape of a nonce one side made, so the other side keeps no unbounded text.
+export function is_nonce(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(value);
+}
+
+// The accepted server keys from their OpenSSH public lines, by fingerprint; a line that is not an ed25519 key throws an AgentKeyError.
+export function parse_server_keys(lines: readonly string[]): Map<string, KeyObject> {
+  const keys = new Map<string, KeyObject>();
+  for (const line of lines) {
+    const key = parse_public_key(line);
+    keys.set(fingerprint_of(key), key);
+  }
+  return keys;
+}
+
 // ── Public key ───────────────────────────────────────────────────────────────
+
+// The 32 bytes of an ed25519 key's public half, from the public key or its private key.
+function raw_public_key(key: KeyObject): Buffer {
+  const public_key = key.type === "private" ? createPublicKey(key) : key;
+  if (public_key.asymmetricKeyType !== "ed25519") throw new AgentKeyError(`must be an ed25519 key, not ${public_key.asymmetricKeyType ?? public_key.type}.`);
+  return Buffer.from(public_key.export({ format: "jwk" }).x!, "base64url");
+}
+
+// The key in the SSH wire format an OpenSSH public line carries as base64.
+function ssh_public_blob(key: KeyObject): Buffer {
+  const field = (bytes: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(bytes.length);
+    return Buffer.concat([length, bytes]);
+  };
+  return Buffer.concat([field(Buffer.from("ssh-ed25519", "utf8")), field(raw_public_key(key))]);
+}
+
+// The OpenSSH public line of an ed25519 key, from the public key or its private key, as ssh-keygen -y prints it.
+export function public_key_line(key: KeyObject, comment = ""): string {
+  const line = `ssh-ed25519 ${ssh_public_blob(key).toString("base64")}`;
+  return comment === "" ? line : `${line} ${comment}`;
+}
+
+// The OpenSSH public line of an unencrypted OpenSSH ed25519 private key's text, for an operator to put in each agent's config.
+export function public_line_of_private_text(text: string, comment = ""): string {
+  return public_key_line(parse_private_key(text), comment);
+}
+
+// The SHA256 fingerprint of an ed25519 key, from the public key or its private key, as ssh-keygen -l prints it.
+export function fingerprint_of(key: KeyObject): string {
+  return `SHA256:${createHash("sha256").update(ssh_public_blob(key)).digest("base64").replace(/=+$/, "")}`;
+}
 
 // Reads an OpenSSH public key line; the messages never quote the key itself.
 export function parse_public_key(line: string): KeyObject {

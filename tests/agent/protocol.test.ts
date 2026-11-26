@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { check_url } from "../../src/agent/client.ts";
 import {
   clip_hello, clip_text, decode_chunk, encode_chunk, encode_message, is_agent_message, is_run_id, is_server_message, key_host_header, most_runs_in_hello,
-  parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs, parse_run_result, parse_server_message, shell_app, unknown_run_message,
+  encode_signed_message, parse_signed_message, parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs, parse_run_result, parse_server_message, shell_app, unknown_run_message,
   type AgentApp, type AgentMessage, type LongRun, type ServerMessage,
 } from "../../src/agent/protocol.ts";
 
@@ -167,5 +167,36 @@ describe("checking what an agent sends", () => {
 
   it("names a run the agent does not know in the words the server recognises", () => {
     expect(unknown_run_message("backup-1")).toBe("No run named 'backup-1'.");
+  });
+});
+
+describe("signed messages", () => {
+  it("wraps a message's exact text with its counter and signature, and reads it back", () => {
+    const text = '{"type":"ping", "epoch_ms":1}';
+    const frame = encode_signed_message(text, 3, "c2ln");
+
+    expect(JSON.parse(frame)).toEqual({ type: "signed", counter: 3, message: text, signature: "c2ln" });
+    expect(parse_signed_message(frame)).toEqual({ type: "signed", counter: 3, message: text, signature: "c2ln" });
+  });
+
+  it("reads nothing from a frame that is not a well-formed signed message", () => {
+    for (const frame of [
+      "not json", "[]", "null", '{"type":"ping","epoch_ms":1}',
+      '{"type":"signed","counter":1,"message":{},"signature":"x"}',
+      '{"type":"signed","counter":1,"message":"{}"}',
+      '{"type":"signed","counter":0,"message":"{}","signature":"x"}',
+      '{"type":"signed","counter":1.5,"message":"{}","signature":"x"}',
+      '{"type":"signed","counter":"1","message":"{}","signature":"x"}',
+    ]) {
+      expect(parse_signed_message(frame)).toBeNull();
+    }
+  });
+
+  it("lets a side that knows nothing of server signing read a signed challenge and a hello with a nonce", () => {
+    const challenge = parse_server_message('{"type":"challenge","nonce":"n","server_key":"SHA256:x","server_signature":"s"}', app);
+    const hello = parse_agent_message('{"type":"hello","protocol":1,"host":"odin","agent_version":"1","runs":[],"agent_nonce":"a"}', app);
+
+    expect(challenge).toMatchObject({ type: "challenge", nonce: "n" });
+    expect(hello).toMatchObject({ type: "hello", host: "odin" });
   });
 });

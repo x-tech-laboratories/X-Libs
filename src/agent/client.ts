@@ -1,12 +1,13 @@
 // The agent's connection to the server: dials out over a WebSocket with its host's key or token, hands the connection
-// to a session, and dials again with a growing, jittered wait whenever it drops.
+// to a session, and dials again with a growing, jittered wait whenever it drops. Given the server's public keys, it
+// answers only a server that signs with one of them.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
 import type { KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { AgentKeyError, parse_private_key } from "./keys.ts";
+import { AgentKeyError, parse_private_key, parse_server_keys } from "./keys.ts";
 import { LongRuns, type LongRunOptions } from "./long_runs.ts";
 import { key_host_header, type AgentApp } from "./protocol.ts";
 import { AgentSession, type SessionHooks } from "./session.ts";
@@ -22,6 +23,10 @@ export interface AgentConfig<Task> extends SessionHooks<Task> {
   // Exactly one of these: the host's OpenSSH ed25519 private key, or the token the server issued it.
   key_file?: string;
   token_file?: string;
+  // The OpenSSH public lines of the server keys the agent accepts, one of which must sign the server's challenge and every message, with room for a new key before the server switches to it.
+  server_keys?: readonly string[];
+  // How long the agent waits for the server's signed challenge before hanging up, when it checks the server.
+  challenge_timeout_in_milliseconds?: number;
   state_directory: string;
   // The name the agent says hello with, and with a key the host it logs in as; with a token the server knows the host by it.
   host: string;
@@ -81,6 +86,20 @@ export function read_key_file(file: string): KeyObject {
   }
 }
 
+// The accepted server keys by fingerprint, or an AgentConfigError naming the line that is not an ed25519 public key.
+export function read_server_keys(lines: readonly string[]): Map<string, KeyObject> {
+  const keys = new Map<string, KeyObject>();
+  for (const [index, line] of lines.entries()) {
+    try {
+      for (const [fingerprint, key] of parse_server_keys([line])) keys.set(fingerprint, key);
+    } catch (error) {
+      if (error instanceof AgentKeyError) throw new AgentConfigError(`Server key ${index + 1} ${error.message}`);
+      throw error;
+    }
+  }
+  return keys;
+}
+
 // ── Agent ────────────────────────────────────────────────────────────────────
 
 export interface RunningAgent<Task> {
@@ -104,8 +123,12 @@ export function start_agent<Task>(config: AgentConfig<Task>): RunningAgent<Task>
       if (error instanceof AgentConfigError) throw error;
     }
   }
+  const server_keys = read_server_keys(config.server_keys ?? []);
   const runs = new LongRuns(config.state_directory, config.runner, config.long_runs);
   const log = config.log ?? ((line: string) => console.log(line));
+  if (server_keys.size === 0) {
+    log(`Warning: the server at ${url.origin} is proved by TLS alone; give the agent the server's public key in server_keys so it refuses requests the server did not sign.`);
+  }
   const heartbeat = config.heartbeat_in_milliseconds ?? 15_000;
   const initial = config.backoff_initial_in_milliseconds ?? 1000;
   const longest = config.backoff_longest_in_milliseconds ?? 60_000;
@@ -150,7 +173,7 @@ export function start_agent<Task>(config: AgentConfig<Task>): RunningAgent<Task>
       log(`Connected to ${url.origin}`);
       session = new AgentSession(current, runs, {
         app: config.app, runner: config.runner, host: config.host, agent_version: config.agent_version, heartbeat_in_milliseconds: heartbeat, key,
-        requests: config.requests, on_message: config.on_message, on_hello: config.on_hello,
+        server_keys, challenge_timeout_in_milliseconds: config.challenge_timeout_in_milliseconds, log, requests: config.requests, on_message: config.on_message, on_hello: config.on_hello,
       });
     });
     current.addEventListener("message", (event) => {
