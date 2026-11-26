@@ -10,7 +10,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotocol/server";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { input_schema, positional_args, type MethodSpec, type RouteSpec } from "../api_spec.ts";
+import { input_schema, page_only_calls, positional_args, type MethodSpec, type PageOnlyCalls, type RouteSpec } from "../api_spec.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,9 @@ export interface McpRouteOptions {
   is_read_only: (method: string) => boolean;
   // Runs one call with its arguments in order, for the request the call came in.
   call: (method: string, args: unknown[], request: FastifyRequest) => unknown;
+  // The calls only the user at the app's own page may make, from `page_only_calls`: a marked call is not offered, and a
+  // use the app's rule names is refused. The specs' own marks unless set.
+  page_only?: PageOnlyCalls;
 }
 
 // A REST route offered as a tool.
@@ -54,7 +57,9 @@ function as_text(result: unknown): string {
 
 export function create_mcp_server(options: McpRouteOptions): McpServer {
   const server = new McpServer({ name: options.name, version: options.version }, options.instructions ? { instructions: options.instructions } : {});
+  const page_only = options.page_only ?? page_only_calls(options.api);
   for (const [method, spec] of Object.entries(options.api)) {
+    if (page_only.is_page_only(method)) continue;
     const read_only = options.is_read_only(method);
     const config = {
       description: spec.description,
@@ -66,7 +71,9 @@ export function create_mcp_server(options: McpRouteOptions): McpServer {
         const request = current_request.getStore()!;
         const refusal = config.annotations.readOnlyHint ? null : refusal_for(request, method);
         if (refusal !== null) throw new Error(refusal);
-        const result = await options.call(method, positional_args(spec, named ?? {}), request);
+        const args = positional_args(spec, named ?? {});
+        if (page_only.is_page_only_call(method, args)) throw new Error(page_only.refusal);
+        const result = await options.call(method, args, request);
         return { content: [{ type: "text" as const, text: as_text(result) }] };
       } catch (error) {
         return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }] };

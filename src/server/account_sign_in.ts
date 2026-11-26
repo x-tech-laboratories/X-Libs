@@ -12,6 +12,7 @@ import fastify_cookie, { type CookieSerializeOptions } from "@fastify/cookie";
 import fastify_rate_limit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type { PageOnlyCalls } from "../api_spec.ts";
 import { AccountError, type AccountStore, type TokenKind, type TokenScopeInfo, type User } from "./account_store.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
@@ -79,6 +80,9 @@ export interface AccountSignInOptions {
   call_of?: (method: string, path: string) => string | null;
   // Whether a named call only reads; none unless set.
   is_read_only?: (call: string) => boolean;
+  // The calls only the user at the page may make, from `api_spec`'s `page_only_calls`: with `call_of`, any token,
+  // a device's included, is refused them, by their marks before the body is read and by the app's rule once it is.
+  page_only?: PageOnlyCalls | null;
   oidc?: OidcClient | null;
   proxy?: ProxySignIn | null;
   // How long a session lasts with "Keep me signed in" unticked; null, the default, ends it when the browser closes.
@@ -121,7 +125,7 @@ export function token_refusal(viewer: Pick<Viewer, "scope">, call: string | null
 export async function register_accounts(app: FastifyInstance, options: AccountSignInOptions): Promise<void> {
   const {
     accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const, call_of = () => null, is_read_only = () => false,
-    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null,
+    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null, page_only = null,
   } = options;
   const prefix = options.api_prefix ?? "/api";
   const oidc_cookie_name = `${cookie_name}_oidc`;
@@ -214,6 +218,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (viewer.via === "token" && (path.startsWith(`${routes.account}/`) || typeof need === "object" && (path.startsWith(routes.users) || path.startsWith(routes.tokens)))) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
+    if (page_only !== null && viewer.via === "token") {
+      const call = call_of(request.method, path);
+      if (call !== null && page_only.is_page_only(call)) return reply.code(403).send({ error: page_only.refusal });
+    }
     if (viewer.second_factor_missing && request.method !== "GET" && !setup_paths.has(path)) {
       return reply.code(403).send({ error: "Set up a second factor on your account page before making changes." });
     }
@@ -226,6 +234,15 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       return reply.code(403).send({ error: `This needs the ${need.role} role; ${viewer.name} is ${article(viewer.role)} ${viewer.role}.` });
     }
   });
+
+  // A call the app's rule keeps to the page for some arguments is checked once they are read.
+  if (page_only !== null) {
+    app.addHook("preHandler", async (request, reply) => {
+      if (request.viewer?.via !== "token") return;
+      const call = call_of(request.method, path_of(request));
+      if (call !== null && page_only.is_page_only_request(call, request.body)) return reply.code(403).send({ error: page_only.refusal });
+    });
+  }
 
   // The routes sit in a scope of their own, so their refusals answer in their own words without changing the app's error handler.
   await app.register(async (scope) => {

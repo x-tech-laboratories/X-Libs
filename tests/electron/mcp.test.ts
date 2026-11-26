@@ -13,6 +13,7 @@ const api: Record<string, MethodSpec> = {
   list_notes: { description: "Lists the notes.", params: [] },
   add_note: { description: "Adds a note.", params: [{ name: "text", schema: { type: "string", minLength: 1 } }] },
   clear_notes: { description: "Removes every note.", params: [], destructive: true },
+  lock_notes: { description: "Locks the notes; only the window may.", params: [], page_only: true },
 };
 
 const protocol_version = "2025-06-18";
@@ -84,6 +85,7 @@ describe("local mcp", () => {
     const listed = await rpc(status.url, "tools/list", {});
     const tools = (listed.body!.result as { tools: { name: string; annotations: Record<string, boolean> }[] }).tools;
     expect(tools.find((tool) => tool.name === "clear_notes")!.annotations).toEqual({ readOnlyHint: false, destructiveHint: true });
+    expect(tools.map((tool) => tool.name)).not.toContain("lock_notes");
 
     const added = await rpc(status.url, "tools/call", { name: "add_note", arguments: { text: "eggs" } });
     expect(added.body).toMatchObject({ result: { content: [{ type: "text", text: "done" }] } });

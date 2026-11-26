@@ -1,6 +1,6 @@
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import type { MethodSpec } from "../../src/api_spec.ts";
+import { page_only_calls, type MethodSpec } from "../../src/api_spec.ts";
 import { register_mcp_route, route_tools, type RouteToolSpec } from "../../src/server/mcp.ts";
 
 let app: FastifyInstance;
@@ -13,13 +13,14 @@ const api: Record<string, MethodSpec> = {
   list_notes: { description: "Lists the notes.", params: [] },
   add_note: { description: "Adds a note.", params: [{ name: "text", schema: { type: "string", minLength: 1 } }, { name: "pinned", schema: { type: "boolean" }, optional: true }] },
   remove_note: { description: "Removes a note.", params: [{ name: "text", schema: { type: "string" } }], destructive: true },
+  lock_notes: { description: "Locks the notes.", params: [], page_only: true },
 };
 
 // The protocol version the stateless fallback serves, which every MCP client still speaks.
 const protocol_version = "2025-06-18";
 
 // A server that marks the "script" token read-only, as server/account_sign_in does.
-async function build(notes: string[]): Promise<FastifyInstance> {
+async function build(notes: string[], page_only?: ReturnType<typeof page_only_calls>): Promise<FastifyInstance> {
   const server = fastify();
   server.decorateRequest("viewer", null);
   server.addHook("onRequest", async (request) => {
@@ -33,6 +34,7 @@ async function build(notes: string[]): Promise<FastifyInstance> {
         instructions: "Notes are plain text.",
         api,
         is_read_only: (method) => method.startsWith("list_"),
+        ...(page_only === undefined ? {} : { page_only }),
         call: (method, args) => {
           if (method === "list_notes") return notes;
           if (args[0] === "boom") throw new Error("the notebook is full");
@@ -119,6 +121,21 @@ async function build_rest(restarts: unknown[]): Promise<FastifyInstance> {
   await server.register(async (scope) => register_mcp_route(scope, { name: "hosts", version: "1.0.0", ...route_tools(server, routes) }), { prefix: "/api" });
   return server;
 }
+
+describe("page-only calls", () => {
+  it("are never offered, and a use the app's rule names is refused", async () => {
+    const notes: string[] = [];
+    app = await build(notes, page_only_calls(api, { rule: (method, args) => method === "add_note" && args[0] === "secret", refusal: "Only at the page." }));
+
+    const tools = ((await rpc("tools/list")).result!.tools as { name: string }[]).map((tool) => tool.name);
+    expect(tools).not.toContain("lock_notes");
+    const locked = await rpc("tools/call", { name: "lock_notes", arguments: {} });
+    expect(locked.error ?? locked.result?.isError).toBeTruthy();
+    expect((await rpc("tools/call", { name: "add_note", arguments: { text: "secret" } })).result).toEqual({ isError: true, content: [{ type: "text", text: "Only at the page." }] });
+    expect((await rpc("tools/call", { name: "add_note", arguments: { text: "milk" } })).result).toEqual({ content: [{ type: "text", text: "done" }] });
+    expect(notes).toEqual(["milk"]);
+  });
+});
 
 describe("read-only tokens", () => {
   it("run the tools that read and are refused the rest", async () => {
