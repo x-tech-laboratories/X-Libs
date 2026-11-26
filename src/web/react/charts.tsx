@@ -267,10 +267,12 @@ interface DonutProps {
   center: string;
   center_label: string;
   message: string;
+  // A part's value as text in the legend, the plain number unless given.
+  format?: (value: number) => string;
 }
 
 // Parts of one whole as a ring, its headline figure in the middle and each part's count in the legend.
-export function Donut({ title, parts, center, center_label, message }: DonutProps) {
+export function Donut({ title, parts, center, center_label, message, format = String }: DonutProps) {
   const total = parts.reduce((sum, part) => sum + part.value, 0);
   if (total === 0) return <EmptyChart title={title} message={message} />;
   const circumference = 2 * Math.PI * donut_radius;
@@ -293,7 +295,7 @@ export function Donut({ title, parts, center, center_label, message }: DonutProp
         strokeDasharray={`${Math.max(0.5, length - 1.5).toFixed(2)} ${circumference.toFixed(2)}`}
         strokeDashoffset={(-start).toFixed(2)}
       >
-        <title>{`${part.label}: ${part.value}`}</title>
+        <title>{`${part.label}: ${format(part.value)}`}</title>
       </circle>
     );
   });
@@ -312,7 +314,7 @@ export function Donut({ title, parts, center, center_label, message }: DonutProp
           {parts.map((part) => (
             <li key={part.label}>
               <span className="legend" style={swatch(part.color)}>{part.label}</span>
-              <span className="meter-value">{`${part.value} · ${Math.round(part.value / total * 100)}%`}</span>
+              <span className="meter-value">{`${format(part.value)} · ${Math.round(part.value / total * 100)}%`}</span>
             </li>
           ))}
         </ul>
@@ -623,8 +625,17 @@ export function squarify<Tile extends { value: number }>(tiles: readonly Tile[],
   return placed;
 }
 
+interface TreemapProps {
+  label: string;
+  tiles: TreemapTile[];
+  on_select?: (tile: TreemapTile) => void;
+  selected?: string | null;
+  // A tile's value as text, the plain number unless given.
+  format?: (value: number) => string;
+}
+
 // Tiles whose areas are their values, each a button in its own colour that hands itself back when clicked.
-export function Treemap({ label, tiles, on_select, selected = null }: { label: string; tiles: TreemapTile[]; on_select?: (tile: TreemapTile) => void; selected?: string | null }) {
+export function Treemap({ label, tiles, on_select, selected = null, format = String }: TreemapProps) {
   return (
     <div className="treemap" role="group" aria-label={label}>
       {squarify(tiles).map(({ tile, x, y, width, height }) => (
@@ -633,12 +644,12 @@ export function Treemap({ label, tiles, on_select, selected = null }: { label: s
           type="button"
           className="treemap-tile"
           aria-pressed={selected === tile.name}
-          title={tile.title ?? `${tile.name}: ${tile.value}`}
+          title={tile.title ?? `${tile.name}: ${format(tile.value)}`}
           style={{ left: `${x}%`, top: `${y}%`, width: `${width}%`, height: `${height}%`, backgroundColor: tile.color }}
           onClick={() => on_select?.(tile)}
         >
           <span className="treemap-name">{tile.name}</span>
-          <span className="treemap-value">{tile.value}</span>
+          <span className="treemap-value">{format(tile.value)}</span>
         </button>
       ))}
     </div>

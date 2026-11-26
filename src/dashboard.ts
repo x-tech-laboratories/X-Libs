@@ -9,7 +9,7 @@
 
 import {
   date_unit_milliseconds, evaluate, is_group, leaf, ranked_sets,
-  type DateClock, type DateUnit, type FilterCatalogue, type FilterField, type FilterNode, type FilterRecord, type RelativeDate,
+  type DateClock, type DateUnit, type FilterCatalogue, type FilterField, type FilterNode, type FilterRecord, type LeafNode, type RelativeDate,
 } from "./filter.ts";
 
 // ── Data sets ────────────────────────────────────────────────────────────────
@@ -146,6 +146,85 @@ function filter_fields(node: FilterNode | null, into = new Set<string>()): Set<s
   return into;
 }
 
+// The fields a measure can read: numbers for the numeric measures, any field for a distinct count, none for a count.
+export function measure_fields(data_set: DataSet, measure: Measure): DataField[] {
+  if (measure === "count") return [];
+  if (measure === "distinct") return [...data_set.fields];
+  return data_set.fields.filter((field) => field.kind === "number");
+}
+
+// The measures a data set offers: the latest value only when it has a time to pick it by.
+export function offered_measures(data_set: DataSet): Measure[] {
+  return measures.filter((measure) => measure !== "latest" || data_set.time_field !== undefined);
+}
+
+// A card set straight after a change: a split and a span only where the grouping takes one, a measured field that fits the measure, and a view that fits.
+export function settle_card(card: ChartCard, data_set: DataSet): ChartCard {
+  const group = field_of_set(data_set, card.group_by);
+  const group_by = group ? group.id : null;
+  const bucket = group?.kind === "time" ? (card.bucket ?? "day") : null;
+  const split = field_of_set(data_set, card.split_by);
+  const split_by = group && split && split.kind === "text" && split.id !== group.id ? split.id : null;
+  const measure = offered_measures(data_set).includes(card.measure) ? card.measure : "count";
+  const fields = measure_fields(data_set, measure);
+  const measure_field = fields.some((field) => field.id === card.measure_field) ? card.measure_field : (fields[0]?.id ?? null);
+  const period = data_set.time_field ? card.period : null;
+  const settled: ChartCard = { ...card, group_by, bucket, split_by, measure, measure_field, period };
+  const views = fitting_views(settled, data_set);
+  return views.includes(settled.view) ? settled : { ...settled, view: views[0]! };
+}
+
+// ── Conditions ───────────────────────────────────────────────────────────────
+
+// The operators a condition offers on each kind of field.
+export const condition_ops: Readonly<Record<DataFieldKind, readonly string[]>> = {
+  text: ["is", "not_is", "contains", "starts", "ends", "empty", "defined"],
+  number: ["is", "not_is", ">", "<", ">=", "<=", "empty", "defined"],
+  time: ["in_last", "not_in_last", "empty", "defined"],
+};
+
+// Whether an operator compares with a value, which "is empty" and "is set" do not.
+export const op_takes_value = (op: string): boolean => op !== "empty" && op !== "defined";
+
+// A filter as a flat list of conditions joined by all or any of them.
+export interface FlatFilter {
+  join: "and" | "or";
+  conditions: LeafNode[];
+}
+
+// A card's filter as a flat list when every part of it is a condition the editor offers on that field, or null when it is not one.
+export function flat_filter(filter: FilterNode | null, data_set: DataSet): FlatFilter | null {
+  if (filter === null) return { join: "and", conditions: [] };
+  const [join, children] = is_group(filter) ? [filter.op, filter.children] : ["and" as const, [filter]];
+  if (join === "not") return null;
+  const conditions: LeafNode[] = [];
+  for (const child of children) {
+    if (is_group(child) || child.case_sensitive) return null;
+    const field = field_of_set(data_set, child.field);
+    if (!field || !condition_ops[field.kind].includes(child.op)) return null;
+    conditions.push(child);
+  }
+  return { join, conditions };
+}
+
+// A flat list of conditions as the filter tree a card keeps, or null for none.
+export function filter_of(flat: FlatFilter): FilterNode | null {
+  return flat.conditions.length === 0 ? null : { op: flat.join, children: flat.conditions };
+}
+
+// A new condition on a field: its first operator with a value of the field's kind.
+export function new_condition(field: DataField): LeafNode {
+  const op = condition_ops[field.kind][0]!;
+  if (field.kind === "time") return leaf(field.id, op, { count: 7, unit: "day" });
+  return leaf(field.id, op, field.kind === "number" ? 0 : (known_values(field)[0] ?? ""));
+}
+
+// A text field's values the app names, in their order, for a condition to pick from.
+export function known_values(field: DataField): string[] {
+  if (field.kind !== "text") return [];
+  return ordered_keys(field, [...(field.order ?? []), ...Object.keys(field.value_labels ?? {}), ...Object.keys(field.colors ?? {})]).filter((key): key is string => key !== null);
+}
+
 // ── Time ─────────────────────────────────────────────────────────────────────
 
 // A time field's value as milliseconds, or null when it holds none.
@@ -180,6 +259,25 @@ export function next_bucket(start: number, bucket: TimeBucket): number {
 // The moment a period reaches back to from now.
 export function period_start(now: number, period: RelativeDate): number {
   return now - period.count * date_unit_milliseconds[period.unit];
+}
+
+// ── Loading ──────────────────────────────────────────────────────────────────
+
+// The data sets a dashboard's chart cards read, each with the longest period one of its cards needs, or null when one needs every row.
+export function periods_needed(cards: readonly DashboardCard[]): Map<string, RelativeDate | null> {
+  const needed = new Map<string, RelativeDate | null>();
+  const span = (period: RelativeDate) => period.count * date_unit_milliseconds[period.unit];
+  for (const card of cards) {
+    if (card.kind !== "chart") continue;
+    const before = needed.get(card.data_set);
+    if (before === undefined || (before !== null && (card.period === null || span(card.period) > span(before)))) needed.set(card.data_set, card.period);
+  }
+  return needed;
+}
+
+// The earliest moment a load needs, for a data set's `since`, or null for every row.
+export function since_of(period: RelativeDate | null, now: number): number | null {
+  return period === null ? null : period_start(now, period);
 }
 
 // ── Working a card out ───────────────────────────────────────────────────────

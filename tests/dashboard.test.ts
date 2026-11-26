@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  bucket_start, card_problem, clean_dashboards, fitting_views, matching_rows, measure_rows, milliseconds_of, new_chart_card, next_bucket, run_card,
+  bucket_start, card_problem, clean_dashboards, filter_of, fitting_views, flat_filter, known_values, matching_rows, measure_fields, measure_rows,
+  milliseconds_of, new_chart_card, new_condition, next_bucket, offered_measures, op_takes_value, periods_needed, run_card, settle_card, since_of,
   type ChartCard, type DataRow, type DataSet,
 } from "../src/dashboard.ts";
 import { leaf } from "../src/filter.ts";
@@ -193,5 +194,81 @@ describe("saved dashboards", () => {
     expect(with_filter({ op: "not", children: [leaf("state", "empty"), leaf("host", "empty")] })).toBeNull();
     expect(with_filter({ field: "state", op: "contains", value: "FAIL", case_sensitive: true })).toEqual({ field: "state", op: "contains", value: "FAIL", case_sensitive: true });
     expect(with_filter({ field: "host", op: "any", value: ["odin", "thor"] })).toEqual(leaf("host", "any", ["odin", "thor"]));
+  });
+});
+
+describe("a card after a change", () => {
+  it("drops the split and span a grouping no longer takes, and picks a view that fits", () => {
+    expect(settle_card(card({ split_by: "state", bucket: "week", view: "bars" }), jobs)).toMatchObject({ split_by: null, bucket: null, view: "number" });
+    expect(settle_card(card({ group_by: "started" }), jobs)).toMatchObject({ bucket: "day", view: "bars" });
+    expect(settle_card(card({ group_by: "host", split_by: "host" }), jobs)).toMatchObject({ split_by: null });
+    expect(settle_card(card({ group_by: "host", split_by: "seconds" }), jobs)).toMatchObject({ split_by: null });
+    expect(settle_card(card({ group_by: "host", split_by: "state", view: "donut" }), jobs)).toMatchObject({ split_by: "state", view: "stacked_bars" });
+    expect(settle_card(card({ group_by: "gone" }), jobs)).toMatchObject({ group_by: null });
+  });
+
+  it("measures a field that fits the measure, and keeps the latest and a period only where there is a time", () => {
+    const timeless = { ...jobs, time_field: undefined };
+
+    expect(settle_card(card({ measure: "sum" }), jobs).measure_field).toBe("seconds");
+    expect(settle_card(card({ measure: "sum", measure_field: "host" }), jobs).measure_field).toBe("seconds");
+    expect(settle_card(card({ measure: "distinct", measure_field: "host" }), jobs).measure_field).toBe("host");
+    expect(settle_card(card({ measure: "count", measure_field: "seconds" }), jobs).measure_field).toBeNull();
+    expect(settle_card(card({ measure: "latest", period: { count: 1, unit: "day" } }), timeless)).toMatchObject({ measure: "count", period: null });
+  });
+
+  it("offers number fields for the numeric measures and every field for a distinct count", () => {
+    expect(measure_fields(jobs, "count")).toEqual([]);
+    expect(measure_fields(jobs, "average").map((field) => field.id)).toEqual(["seconds"]);
+    expect(measure_fields(jobs, "distinct")).toHaveLength(4);
+    expect(offered_measures({ ...jobs, time_field: undefined })).not.toContain("latest");
+  });
+});
+
+describe("conditions", () => {
+  it("read a filter of conditions as a flat list, and write it back as the same tree", () => {
+    const tree = { op: "or" as const, children: [leaf("state", "is", "failed"), leaf("seconds", ">", 30)] };
+    const flat = flat_filter(tree, jobs)!;
+
+    expect(flat).toEqual({ join: "or", conditions: tree.children });
+    expect(filter_of(flat)).toEqual(tree);
+    expect(flat_filter(null, jobs)).toEqual({ join: "and", conditions: [] });
+    expect(flat_filter(leaf("host", "is", "odin"), jobs)).toEqual({ join: "and", conditions: [leaf("host", "is", "odin")] });
+    expect(filter_of({ join: "and", conditions: [] })).toBeNull();
+  });
+
+  it("leave a filter the editor cannot show without losing any of it as not a flat list", () => {
+    expect(flat_filter({ op: "and", children: [{ op: "or", children: [leaf("host", "is", "odin")] }] }, jobs)).toBeNull();
+    expect(flat_filter({ op: "not", children: [leaf("host", "is", "odin")] }, jobs)).toBeNull();
+    expect(flat_filter(leaf("seconds", "top", 3), jobs)).toBeNull();
+    expect(flat_filter(leaf("owner", "is", "x"), jobs)).toBeNull();
+    expect(flat_filter({ ...leaf("host", "contains", "O"), case_sensitive: true }, jobs)).toBeNull();
+  });
+
+  it("start a new condition with a value of the field's kind, a known value first", () => {
+    expect(new_condition(jobs.fields[0]!)).toEqual(leaf("host", "is", ""));
+    expect(new_condition(jobs.fields[1]!)).toEqual(leaf("state", "is", "succeeded"));
+    expect(new_condition(jobs.fields[2]!)).toEqual(leaf("seconds", "is", 0));
+    expect(new_condition(jobs.fields[3]!)).toEqual(leaf("started", "in_last", { count: 7, unit: "day" }));
+    expect(known_values(jobs.fields[1]!)).toEqual(["succeeded", "failed"]);
+    expect(known_values(jobs.fields[2]!)).toEqual([]);
+    expect([op_takes_value("is"), op_takes_value("empty"), op_takes_value("defined")]).toEqual([true, false, false]);
+  });
+});
+
+describe("loading", () => {
+  it("loads each data set once, from the longest period its cards need, or every row when one has none", () => {
+    const needed = periods_needed([
+      card({ id: "a", period: { count: 1, unit: "day" } }),
+      card({ id: "b", period: { count: 2, unit: "week" } }),
+      card({ id: "c", data_set: "hosts", period: { count: 3, unit: "day" } }),
+      card({ id: "d", data_set: "hosts" }),
+      card({ id: "e", data_set: "hosts", period: { count: 9, unit: "month" } }),
+      { id: "map", kind: "ready", name: "map" },
+    ]);
+
+    expect([...needed]).toEqual([["jobs", { count: 2, unit: "week" }], ["hosts", null]]);
+    expect(since_of(null, now)).toBeNull();
+    expect(since_of({ count: 1, unit: "hour" }, now)).toBe(now - 3_600_000);
   });
 });
