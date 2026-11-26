@@ -3,7 +3,7 @@ import { request as http_request } from "node:http";
 import { connect } from "node:net";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -11,12 +11,15 @@ import { finished } from "node:stream/promises";
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { start_agent, type AgentConfig, type RunningAgent } from "../../src/agent/client.ts";
+import { fingerprint_of, parse_private_key, parse_server_keys } from "../../src/agent/keys.ts";
+import { LongRuns } from "../../src/agent/long_runs.ts";
+import { AgentSession, server_refused_close_code } from "../../src/agent/session.ts";
 import {
   encode_message, key_host_header, most_hello_text_length, most_runs_in_hello, shell_app, type AgentApp, type AppMessage, type LongRun,
 } from "../../src/agent/protocol.ts";
 import { shell_runner } from "../../src/agent/tasks.ts";
 import {
-  admission_refused, AgentHub, close_codes, pre_login_message_limit_in_bytes, too_many_pending_logins, type AgentTokenLookup,
+  admission_refused, AgentHub, close_codes, pre_login_message_limit_in_bytes, too_many_pending_logins, type AgentTokenLookup, type HubOptions,
 } from "../../src/server/agents/hub.ts";
 import type { ServerSocket } from "../../src/server/agents/connection.ts";
 import { LocalAgent } from "../../src/server/agents/local.ts";
@@ -719,5 +722,237 @@ describe("before login", () => {
     expect(await hub.runs("thor")).toEqual([good_run]);
     expect(await hub.run("thor", "true", { timeout_in_seconds: 1 })).toMatchObject({ exit_code: -1, stderr: expect.stringContaining("malformed") });
     socket.close();
+  });
+});
+
+describe("server key", () => {
+  let agent_key: { private_file: string; public_line: string };
+  let server: { private_file: string; public_line: string };
+  let logged: string[];
+
+  // Replaces the test's hub with one built from these options, holding the given server key file.
+  async function serve(server_key_file: string | null, options: Partial<HubOptions<string>> = {}): Promise<void> {
+    await app.close();
+    hub = new AgentHub({
+      app: agent_app, tokens, connection: { window_in_bytes: 64 * 1024 },
+      server_key: server_key_file === null ? null : parse_private_key(readFileSync(server_key_file, "utf8")), ...options,
+    });
+    hub.set_agent_keys(new Map([["odin", agent_key.public_line]]));
+    app = fastify();
+    await register_agent_route(app, hub);
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    url = `ws://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}/api/agent`;
+  }
+
+  function start_checking_agent(extra: Partial<AgentConfig<string>> = {}): RunningAgent<string> {
+    return start_test_agent({
+      token_file: undefined, key_file: agent_key.private_file, host: "odin", server_keys: [server.public_line], log: (line) => logged.push(line), ...extra,
+    });
+  }
+
+  // Opens a key login socket for odin, with the first message the server sends.
+  async function open_key_socket(): Promise<{ socket: WebSocket; first: string }> {
+    const socket = new WebSocket(url, { headers: { [key_host_header(app_name)]: "odin" } } as unknown as string[]);
+    socket.addEventListener("error", () => {});
+    const first = new Promise<MessageEvent>((resolve) => socket.addEventListener("message", resolve, { once: true }));
+    return { socket, first: String((await first).data) };
+  }
+
+  function closed(socket: WebSocket): Promise<CloseEvent> {
+    return new Promise((resolve) => socket.addEventListener("close", resolve, { once: true }));
+  }
+
+  // A session for odin's agent whose socket keeps what it sends.
+  function captured_session(): { session: AgentSession<string>; sent: string[] } {
+    const sent: string[] = [];
+    const socket = { readyState: 1, send: (data: string | Uint8Array<ArrayBuffer>) => void sent.push(String(data)), close: () => {} };
+    const session = new AgentSession(socket, new LongRuns(mkdtempSync(join(folder, "relay-")), runner), {
+      app: agent_app, runner, host: "odin", agent_version: "test", heartbeat_in_milliseconds: 60_000,
+      key: parse_private_key(readFileSync(agent_key.private_file, "utf8")), server_keys: parse_server_keys([server.public_line]), log: () => {},
+    });
+    return { session, sent };
+  }
+
+  async function until(check: () => boolean): Promise<void> {
+    while (!check()) await sleep(20);
+  }
+
+  beforeEach(async () => {
+    logged = [];
+    agent_key = make_key(folder, "odin-agent");
+    server = make_key(folder, "server");
+    await serve(server.private_file);
+  });
+
+  it("logs a checking agent in with a signed challenge and signs every request it sends it", async () => {
+    start_checking_agent();
+    await connected();
+
+    expect(hub.status("odin")).toMatchObject({ login: "key", signed_messages: true });
+    expect(hub.server_key_fingerprint()).toBe(fingerprint_of(parse_private_key(readFileSync(server.private_file, "utf8"))));
+    expect(hub.server_public_line()).toBe(server.public_line.split(" ").slice(0, 2).join(" "));
+    expect(await hub.run("odin", "cat", { timeout_in_seconds: 5, stdin: "secret\n" })).toEqual({ exit_code: 0, stdout: "secret", stderr: "" });
+    await hub.start("odin", "signed-run", "echo started; sleep 30");
+    expect((await hub.runs("odin")).map((run) => run.run_id)).toContain("signed-run");
+    while ((await hub.poll("odin", "signed-run", 0)).new_output === "") await sleep(20);
+    expect(await hub.stop("odin", "signed-run")).toMatchObject({ run_id: "signed-run", state: "stopped" });
+    expect((await hub.poll("odin", "signed-run", 0)).new_output).toBe("started\n");
+    await hub.forget("odin", "signed-run");
+    const stream = hub.stream("odin", "seq 1 3");
+    const chunks: Buffer[] = [];
+    stream.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    expect((await stream.done).exit_code).toBe(0);
+    expect(Buffer.concat(chunks).toString()).toBe("1\n2\n3\n");
+    await expect(hub.request("odin", "format_disk")).rejects.toThrow(/does not know/);
+    expect(logged.join("\n")).not.toMatch(/Refused|TLS alone/);
+  });
+
+  it("signs for a checking agent that logs in with a token", async () => {
+    hub.set_agent_keys(new Map());
+    start_checking_agent({ key_file: undefined, token_file });
+    await connected();
+
+    expect(hub.status("odin")).toMatchObject({ login: "token", signed_messages: true });
+    expect((await hub.run("odin", "echo token", { timeout_in_seconds: 5 })).stdout).toBe("token");
+  });
+
+  it("keeps serving an agent that checks nothing, which warns that TLS alone proves the server", async () => {
+    start_test_agent({ token_file: undefined, key_file: agent_key.private_file, host: "odin", log: (line) => logged.push(line) });
+    await connected();
+
+    expect(hub.status("odin")).toMatchObject({ login: "key", signed_messages: false });
+    expect((await hub.run("odin", "echo plain", { timeout_in_seconds: 5 })).stdout).toBe("plain");
+    expect(logged.filter((line) => /TLS alone/.test(line))).toHaveLength(1);
+    await agent?.stop();
+    await until(() => !hub.is_connected("odin"));
+    hub.set_agent_keys(new Map());
+
+    start_test_agent({ log: () => {} });
+    await connected();
+    expect(hub.status("odin")).toMatchObject({ login: "token", signed_messages: false });
+    expect((await hub.run("odin", "echo plain token", { timeout_in_seconds: 5 })).stdout).toBe("plain token");
+  });
+
+  it("is refused by a checking agent, before it signs, when the server holds another key or none", async () => {
+    let connections = 0;
+    const count = () => connections++;
+    for (const server_key_file of [make_key(folder, "impostor").private_file, null]) {
+      await serve(server_key_file);
+      hub.on("connect", count);
+      logged = [];
+      start_checking_agent();
+      await until(() => logged.some((line) => line.startsWith("Refused the server")));
+      await agent?.stop();
+      agent = null;
+    }
+
+    expect(connections).toBe(0);
+    expect(logged.join("\n")).toMatch(/did not sign its challenge/);
+  });
+
+  it("is refused by a checking agent logging in with a token when the server sends no challenge", async () => {
+    await serve(null);
+    hub.set_agent_keys(new Map());
+    start_checking_agent({ key_file: undefined, token_file, challenge_timeout_in_milliseconds: 100 });
+
+    await until(() => logged.some((line) => /No signed challenge came/.test(line)));
+    expect(hub.is_connected("odin")).toBe(false);
+  });
+
+  it("turns away a hello relayed onto another connection, or stripped of the agent's nonce", async () => {
+    const first = await open_key_socket();
+    const { session, sent } = captured_session();
+    session.receive(first.first);
+    const hello = JSON.parse(sent[0]) as Record<string, unknown>;
+    expect(hello).toMatchObject({ type: "hello", agent_nonce: expect.any(String), signature: expect.any(String) });
+    session.close();
+
+    for (const relayed of [hello, { ...hello, agent_nonce: undefined }]) {
+      const second = await open_key_socket();
+      const ended = closed(second.socket);
+      second.socket.send(JSON.stringify(relayed));
+      expect((await ended).code).toBe(close_codes.bad_key);
+    }
+    first.socket.close();
+    expect(hub.is_connected("odin")).toBe(false);
+  });
+
+  it("refuses to sign a challenge relayed from a server with another key", async () => {
+    const first = await open_key_socket();
+    const { session, sent } = captured_session();
+    session.receive(first.first.replace(/"server_key":"[^"]+"/, `"server_key":"${fingerprint_of(parse_private_key(readFileSync(make_key(folder, "relay").private_file, "utf8")))}"`));
+
+    expect(sent).toEqual([]);
+    first.socket.close();
+  });
+
+  it("closes an agent's socket when a message reaches it out of order", async () => {
+    const first = await open_key_socket();
+    const sent: string[] = [];
+    let close_code: number | null = null;
+    const socket = {
+      readyState: 1,
+      send: (data: string | Uint8Array<ArrayBuffer>) => {
+        sent.push(String(data));
+        first.socket.send(data);
+      },
+      close: (code?: number) => {
+        close_code = code ?? null;
+      },
+    };
+    const session = new AgentSession(socket, new LongRuns(mkdtempSync(join(folder, "order-")), runner), {
+      app: agent_app, runner, host: "odin", agent_version: "test", heartbeat_in_milliseconds: 60_000,
+      key: parse_private_key(readFileSync(agent_key.private_file, "utf8")), server_keys: parse_server_keys([server.public_line]), log: () => {},
+    });
+    const frames: string[] = [];
+    first.socket.addEventListener("message", (event) => frames.push(String(event.data)));
+    session.receive(first.first);
+    await connected();
+
+    void hub.run("odin", "echo one", { timeout_in_seconds: 5 });
+    void hub.run("odin", "echo two", { timeout_in_seconds: 5 });
+    await until(() => frames.length >= 2);
+    session.receive(frames[1]);
+
+    expect(close_code).toBe(server_refused_close_code);
+    expect(JSON.parse(sent.at(-1)!)).toMatchObject({ type: "failed", id: "r2", error: expect.stringMatching(/went from 0 to 2/) });
+    session.close();
+    first.socket.close();
+  });
+
+  it("turns away a hello asking for signed messages from a server with no key", async () => {
+    await serve(null);
+    const { socket, first } = await open_key_socket();
+    const ended = closed(socket);
+
+    socket.send(encode_message({ type: "hello", protocol: agent_app.protocol_version, host: "odin", agent_version: "test", runs: [], agent_nonce: "a".repeat(43) }, agent_app));
+
+    expect(JSON.parse(first)).toEqual({ type: "challenge", nonce: expect.any(String) });
+    expect((await ended).code).toBe(close_codes.bad_agent_nonce);
+  });
+
+  it("lets an agent listing two server keys log in to a server holding either", async () => {
+    const next = make_key(folder, "next-server");
+    for (const server_key_file of [server.private_file, next.private_file]) {
+      await serve(server_key_file);
+      start_checking_agent({ server_keys: [server.public_line, next.public_line] });
+      await connected();
+      expect((await hub.run("odin", "echo rotated", { timeout_in_seconds: 5 })).stdout).toBe("rotated");
+      await agent?.stop();
+      agent = null;
+    }
+  });
+
+  it("answers for its own machine through the built-in agent, with no signing", async () => {
+    const local = new LocalAgent(state_directory, { runner });
+    await serve(server.private_file, { local: { host: "server", agent: local } });
+
+    expect(hub.status("server")).toMatchObject({ built_in: true, signed_messages: false });
+    expect(await hub.run("server", "cat", { timeout_in_seconds: 5, stdin: "local" })).toEqual({ exit_code: 0, stdout: "local", stderr: "" });
+  });
+
+  it("refuses to start an agent given a server key that is not an ed25519 public line", () => {
+    expect(() => start_checking_agent({ server_keys: ["ssh-rsa AAAA"] })).toThrow(/Server key 1 must be an ssh-ed25519 key/);
   });
 });
