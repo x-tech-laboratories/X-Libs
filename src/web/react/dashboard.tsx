@@ -102,9 +102,9 @@ export function series_color(own: string | null, index: number): string {
   return own ?? `var(--series-${(index % 6) + 1})`;
 }
 
-// What a card measures in words, such as "Average Seconds".
+// What a card measures in words, such as "Average Seconds", a count going by what its data set holds, such as "Jobs".
 export function measure_label(card: ChartCard, data_set: DataSet): string {
-  if (card.measure === "count") return "Rows";
+  if (card.measure === "count") return data_set.label;
   const field = field_of_set(data_set, card.measure_field)?.label ?? "";
   return card.measure === "distinct" ? `Distinct ${field}` : `${measure_names[card.measure]} ${field}`.trim();
 }

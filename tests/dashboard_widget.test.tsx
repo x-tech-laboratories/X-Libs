@@ -274,7 +274,7 @@ describe("loading", () => {
     const cards = [chart({ id: "a", title: "Last day", period: { count: 1, unit: "day" } }), chart({ id: "b", title: "Last three days", period: { count: 3, unit: "day" } })];
     render(<Page start={[board("main", "Main", cards)]} data_sources={[source]} />);
 
-    expect(await screen.findAllByText("Rows")).toHaveLength(2);
+    expect(await screen.findAllByText("Jobs")).toHaveLength(2);
     expect(source.load).toHaveBeenCalledTimes(1);
     expect(source.load).toHaveBeenCalledWith({ since: now - 3 * 86_400_000 });
     expect(within(screen.getByRole("group", { name: "Last day" })).getByText("1")).toBeTruthy();
@@ -284,7 +284,7 @@ describe("loading", () => {
   it("loads every row when one card has no period", async () => {
     const source = jobs_source();
     render(<Page start={[board("main", "Main", [chart({ id: "a", period: { count: 1, unit: "day" } }), chart({ id: "b" })])]} data_sources={[source]} />);
-    await screen.findAllByText("Rows");
+    await screen.findAllByText("Jobs");
     expect(source.load).toHaveBeenCalledWith({ since: null });
   });
 
@@ -350,7 +350,7 @@ describe("a chart card", () => {
     cleanup();
 
     draw({ group_by: "state", view: "donut" });
-    expect(screen.getByRole("img", { name: "Jobs: 4 Rows" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Jobs: 4 Jobs" })).toBeTruthy();
     expect(screen.getByText("Succeeded")).toBeTruthy();
     cleanup();
 
