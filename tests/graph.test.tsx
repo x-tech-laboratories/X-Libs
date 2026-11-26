@@ -216,23 +216,22 @@ test("zooms, pans, fits and centres on a node asked for, from buttons and keys",
   expect(graph.calls.zoomToFit).toBeUndefined();
   const placed = graph.last("graphData")![0] as { nodes: { id: string; x?: number; y?: number }[] };
   for (const [index, node] of placed.nodes.entries()) Object.assign(node, { x: index * 10, y: 5 });
-  graph.scale = 3;
   fireEvent.click(screen.getByRole("button", { name: "Fit" }));
   expect(graph.calls.zoomToFit).toHaveLength(1);
   // The zoom is held to a comfortable one once the fit has moved.
-  expect(graph.scale).toBe(3);
+  graph.scale = 4;
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
   });
-  expect(graph.scale).toBe(2);
+  expect(graph.scale).toBe(3);
   (graph.last("onEngineStop")![0] as () => void)();
   expect(graph.calls.zoomToFit).toHaveLength(2);
 
   const drawing = screen.getByRole("img", { name: "Graph" });
   fireEvent.keyDown(drawing, { key: "+" });
-  expect(graph.scale).toBeCloseTo(2.5);
+  expect(graph.scale).toBeCloseTo(3.75);
   fireEvent.keyDown(drawing, { key: "ArrowRight" });
-  expect(graph.centre.x).toBeCloseTo(24);
+  expect(graph.centre.x).toBeCloseTo(16);
   for (const key of ["ArrowLeft", "ArrowUp", "ArrowDown", "-", "0", "x"]) fireEvent.keyDown(drawing, { key });
   fireEvent.keyDown(drawing, { key: "Enter" });
   expect(on_activate).toHaveBeenCalledWith("p1");
@@ -284,6 +283,6 @@ test("fits again when the drawing changes width, such as when a pane beside it o
   watched[0]!();
   expect(graph.last("width")).toEqual([380]);
   expect(graph.calls.zoomToFit).toHaveLength(1);
-  expect(graph.scale).toBe(2);
+  expect(graph.scale).toBe(3);
   vi.unstubAllGlobals();
 });

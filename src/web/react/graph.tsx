@@ -177,8 +177,13 @@ function end_id(end: string | SimNode): string {
 
 // Below this zoom only the selection and its neighbours keep their labels, so a large graph stays readable.
 const label_zoom = 1.4;
+// Link labels need more room than node labels, so they show only closer in, or along the selection.
+const link_label_zoom = 3;
+// How far apart linked nodes settle, and how hard every node pushes the others away, so a fitted graph has room.
+const link_distance = 60;
+const node_charge = -160;
 const fit_padding = 40;
-const most_fit_zoom = 2;
+const most_fit_zoom = 3;
 
 export function trace_shape(context: CanvasRenderingContext2D, shape: GraphShape, x: number, y: number, radius: number): void {
   context.beginPath();
@@ -252,7 +257,7 @@ export function draw_link_label(context: CanvasRenderingContext2D, link: SimLink
   const target = link.target as SimNode;
   const text = link.data.label;
   const touches = state.selected !== null && (source.id === state.selected || target.id === state.selected);
-  if (!text || (scale < label_zoom && !touches)) return;
+  if (!text || (scale < link_label_zoom && !touches)) return;
   const x = ((source.x ?? 0) + (target.x ?? 0)) / 2;
   const y = ((source.y ?? 0) + (target.y ?? 0)) / 2;
   const size = Math.max(9 / scale, 2.5);
@@ -340,6 +345,9 @@ export function GraphView({
       chain("nodeId", "id");
       chain("warmupTicks", 60);
       chain("cooldownTime", 4000);
+      const forces = graph.d3Force as unknown as ((name: string) => { distance?: (value: number) => void; strength?: (value: number) => void } | undefined) | undefined;
+      forces?.("link")?.distance?.(link_distance);
+      forces?.("charge")?.strength?.(node_charge);
       chain("nodeLabel", (node: SimNode) => node.data.detail ? `${node.data.label}: ${node.data.detail}` : node.data.label);
       chain("nodeCanvasObject", (node: SimNode, context: CanvasRenderingContext2D, scale: number) => draw_node(context, node, scale, state));
       chain("nodePointerAreaPaint", (node: SimNode, colour: string, context: CanvasRenderingContext2D) => {
