@@ -116,6 +116,21 @@ export function worker_host<Message = unknown>(target: WorkerWindow = globalThis
   };
 }
 
+// ── Native modules ───────────────────────────────────────────────────────────
+
+// Where the service hands the worker the events of X-Libs' native modules, such as phone_sockets'.
+export interface NativeWindow {
+  x_libs_native_event?: (module: string, json: string) => void;
+  x_libs_native_modules?: Map<string, (json: string) => void>;
+}
+
+// Gives one native module's events to `handler`, replacing the module's handler before it.
+export function on_native_event(module: string, handler: (json: string) => void, target: NativeWindow = globalThis as NativeWindow): void {
+  const modules = (target.x_libs_native_modules ??= new Map());
+  modules.set(module, handler);
+  target.x_libs_native_event ??= (name, json) => target.x_libs_native_modules?.get(name)?.(json);
+}
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 // A message's value, or undefined for text that is not JSON.
