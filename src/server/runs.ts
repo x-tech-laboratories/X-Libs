@@ -2,7 +2,7 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import type { LongRunPoll } from "../agent/protocol.ts";
+import { parse_long_run_poll, unknown_run_message, type LongRunPoll } from "../agent/protocol.ts";
 import { AgentError } from "./agents/agent.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -21,6 +21,7 @@ export interface RunSink {
 }
 
 export interface Followed {
+  // Unreachable leaves the run as it was, to be followed again, whether the agent could not be reached or its answer could not be used.
   outcome: "running" | "ended" | "unreachable";
   error: string;
 }
@@ -34,31 +35,85 @@ export interface FollowOptions {
 
 // ── Following ────────────────────────────────────────────────────────────────
 
-// Copies the run's new output into the sink, and finishes it once the run has ended; an agent that cannot be reached leaves
-// the run as it was, to be followed again.
+// One follow takes at most this many polls, and the next follow carries on where it stopped.
+export const most_polls_per_follow = 256;
+
+// One follow copies at most about this much output, and the next follow carries on where it stopped.
+export const most_output_per_follow_in_bytes = 64 * 1024 * 1024;
+
+// Copies the run's new output into the sink and finishes it once ended; any failure but the agent not knowing the run leaves it "unreachable", to be followed again.
 export async function follow_run(source: RunSource, run_id: string, output_offset: number, sink: RunSink, options: FollowOptions = {}): Promise<Followed> {
   let offset = output_offset;
-  let poll: Pick<LongRunPoll, "alive" | "exit_code">;
-  try {
-    let latest: LongRunPoll;
-    do {
-      latest = await source.poll(run_id, offset);
-      sink.append_output(options.translate === undefined ? latest.new_output : options.translate(latest.new_output, false), latest.next_offset);
-      offset = latest.next_offset;
-    } while (offset < latest.size && latest.new_output !== "");
-    poll = latest;
-  } catch (error) {
-    if (error instanceof AgentError && error.unreachable) return { outcome: "unreachable", error: error.message };
-    // A run the agent no longer knows has ended without a word.
-    poll = { alive: false, exit_code: null };
+  let taken_in_bytes = 0;
+  let latest: LongRunPoll;
+  for (let polls = 1; ; polls++) {
+    let reply: unknown;
+    try {
+      reply = await source.poll(run_id, offset);
+    } catch (error) {
+      if (error instanceof AgentError && !error.unreachable && error.message === unknown_run_message(run_id)) {
+        return finish_run(source, run_id, sink, options, null);
+      }
+      return { outcome: "unreachable", error: message_of(error) };
+    }
+    const checked = checked_poll(reply, offset);
+    if (typeof checked === "string") return { outcome: "unreachable", error: `The agent's answer to a poll of ${run_id} ${checked}.` };
+    latest = checked;
+    try {
+      sink.append_output(translated(options, latest.new_output, false), latest.next_offset);
+    } catch (error) {
+      return { outcome: "unreachable", error: message_of(error) };
+    }
+    taken_in_bytes += Math.max(latest.next_offset - offset, latest.new_output.length);
+    offset = latest.next_offset;
+    if (latest.new_output === "" || offset >= latest.size) break;
+    // A run with more output than one follow takes is still being copied, so it is not finished yet.
+    if (polls >= most_polls_per_follow || taken_in_bytes >= most_output_per_follow_in_bytes) return { outcome: "running", error: "" };
   }
-  if (poll.alive) return { outcome: "running", error: "" };
-  if (options.translate !== undefined) sink.append_output(options.translate("", true));
+  if (latest.alive) return { outcome: "running", error: "" };
+  return finish_run(source, run_id, sink, options, latest.exit_code);
+}
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// Finishes the run in the sink and forgets it on the agent; a sink that fails leaves it to be followed again.
+async function finish_run(source: RunSource, run_id: string, sink: RunSink, options: FollowOptions, exit_code: number | null): Promise<Followed> {
   let error: string | null = null;
-  if (poll.exit_code === null) error = "The run ended without writing an exit code";
-  else if (poll.exit_code !== 0) error = options.describe?.(poll.exit_code) ?? `Exited with status ${poll.exit_code}`;
-  sink.finish(error === null ? "succeeded" : "failed", poll.exit_code, error);
-  await source.forget(run_id);
+  if (exit_code === null) error = "The run ended without writing an exit code";
+  else if (exit_code !== 0) error = options.describe?.(exit_code) ?? `Exited with status ${exit_code}`;
+  try {
+    if (options.translate !== undefined) sink.append_output(translated(options, "", true));
+    sink.finish(error === null ? "succeeded" : "failed", exit_code, error);
+  } catch (failure) {
+    return { outcome: "unreachable", error: message_of(failure) };
+  }
+  try {
+    await source.forget(run_id);
+  } catch {
+    // The run is already finished in the sink, and an output left on the agent does no harm.
+  }
   return { outcome: "ended", error: error ?? "" };
+}
+
+// The chunk as the app's translate gives it, or as it came when the translate fails, so no output is lost.
+function translated(options: FollowOptions, chunk: string, ended: boolean): string {
+  if (options.translate === undefined) return chunk;
+  try {
+    return options.translate(chunk, ended);
+  } catch {
+    return chunk;
+  }
+}
+
+// The poll reply when it is well formed and moves on from the offset asked for, or what is wrong with it.
+function checked_poll(reply: unknown, offset: number): LongRunPoll | string {
+  const poll = parse_long_run_poll(reply);
+  if (poll === null) return "is malformed";
+  if (poll.next_offset < offset) return "goes back in its output";
+  if (poll.new_output !== "" && poll.next_offset === offset) return "does not move on in its output";
+  return poll;
+}
+
+function message_of(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
