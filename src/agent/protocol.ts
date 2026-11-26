@@ -11,6 +11,12 @@
 // An agent logging in with its host's key, rather than a token, names the host in the upgrade; the server's first
 // message is then a `challenge`, and the agent's hello carries its signature of that nonce (see keys.ts).
 //
+// A server with a key of its own signs its challenge, to every agent and with either login. An agent that lists the
+// server's public key checks that signature before it signs anything, adds a nonce of its own to its hello, and from
+// then on takes only `signed` messages: each wraps the exact text of one message the server sends, with a counter one
+// more than the last and the server's signature over both nonces, the counter and that text. An agent that lists no
+// server key sends no nonce, so the server sends it plain messages as before.
+//
 // An app adds its own messages beside these: any other `type` is handed to the app, and one carrying a string `id` is
 // a request the app's handler answers like any other.
 
@@ -99,14 +105,14 @@ export type ServerMessage<Task> =
   | { type: "cancel"; id: string }
   | { type: "ping"; epoch_ms: number }
   | { type: "pong"; epoch_ms: number }
-  // Sent first to an agent logging in with its key, which signs the nonce in its hello.
-  | { type: "challenge"; nonce: string };
+  // Sent first to a key login, or to every login by a server with a key, which adds its fingerprint and signature of `server_challenge_text`.
+  | { type: "challenge"; nonce: string; server_key?: string; server_signature?: string };
 
 // ── Agent to server ──────────────────────────────────────────────────────────
 
 export type AgentMessage =
-  // An agent logging in with its key adds its signature of the challenge.
-  | { type: "hello"; protocol: number; host: string; agent_version: string; runs: LongRun[]; signature?: string }
+  // A key login adds its signature of the challenge, and an agent that checked the server adds its own nonce to ask for signed messages.
+  | { type: "hello"; protocol: number; host: string; agent_version: string; runs: LongRun[]; signature?: string; agent_nonce?: string }
   | { type: "reply"; id: string; value: unknown }
   | { type: "failed"; id: string; error: string }
   | { type: "stream_end"; id: string; exit_code: number; stderr: string }
@@ -285,6 +291,40 @@ export function clip_hello<Hello extends Extract<AgentMessage, { type: "hello" }
     agent_version: clip_text(hello.agent_version, most_hello_text_length),
     runs: parse_long_runs(hello.runs, most_runs_in_hello) ?? [],
   };
+}
+
+// ── Signed messages ──────────────────────────────────────────────────────────
+
+// The type of the frame that wraps each message a server with a key sends an agent that asked for signed messages.
+export const signed_message_type = "signed";
+
+// One message the server signed: `message` is the exact JSON text of the wrapped message, which the agent checks and then parses.
+export interface SignedMessage {
+  type: typeof signed_message_type;
+  // One more than the counter of the connection's last signed message, starting at 1.
+  counter: number;
+  message: string;
+  signature: string;
+}
+
+// The frame that wraps a message's text with its counter and signature.
+export function encode_signed_message(message_text: string, counter: number, signature: string): string {
+  return JSON.stringify({ type: signed_message_type, counter, message: message_text, signature });
+}
+
+// A signed message with its fields, or null for a frame that is not one.
+export function parse_signed_message(text: string): SignedMessage | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.type !== signed_message_type || typeof record.message !== "string" || typeof record.signature !== "string") return null;
+  if (typeof record.counter !== "number" || !Number.isSafeInteger(record.counter) || record.counter < 1) return null;
+  return { type: signed_message_type, counter: record.counter, message: record.message, signature: record.signature };
 }
 
 // ── Output frames ────────────────────────────────────────────────────────────

@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { make_key } from "../test_keys.ts";
-import { generate_agent_key, key_fingerprint, parse_private_key, parse_public_key, sign_challenge, verify_challenge } from "../../src/agent/keys.ts";
+import { generateKeyPairSync } from "node:crypto";
+import {
+  agent_hello_text, fingerprint_of, generate_agent_key, is_nonce, key_fingerprint, new_nonce, parse_private_key, parse_public_key, parse_server_keys, public_key_line,
+  public_line_of_private_text, server_challenge_text, server_message_text, sign_challenge, sign_text, signed_bytes, verify_challenge, verify_text,
+} from "../../src/agent/keys.ts";
 
 let folder: string;
 
@@ -82,5 +86,65 @@ describe("agent keys", () => {
 
     expect(public_line.startsWith(derived)).toBe(true);
     expect(verify_challenge(parse_public_key(public_line), "x-test", "odin", "nonce", signature)).toBe(true);
+  });
+});
+
+describe("server key", () => {
+  it("prints the public line and fingerprint ssh-keygen gives for the private key file", () => {
+    const { private_file, public_line } = make_key(folder, "server");
+    const private_text = readFileSync(private_file, "utf8");
+    // ssh-keygen -y adds the key's comment, which the key alone does not carry.
+    const derived = execFileSync("ssh-keygen", ["-y", "-f", private_file], { encoding: "utf8" }).trim().split(" ").slice(0, 2).join(" ");
+    const printed = execFileSync("ssh-keygen", ["-l", "-f", `${private_file}.pub`], { encoding: "utf8" }).split(" ")[1];
+
+    expect(public_line_of_private_text(private_text)).toBe(derived);
+    expect(public_line_of_private_text(private_text, "x-test-server")).toBe(`${derived} x-test-server`);
+    expect(public_key_line(parse_public_key(public_line))).toBe(derived);
+    expect(fingerprint_of(parse_private_key(private_text))).toBe(printed);
+    expect(fingerprint_of(parse_public_key(public_line))).toBe(key_fingerprint(public_line));
+  });
+
+  it("refuses a key that is not ed25519", () => {
+    const { publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+
+    expect(() => fingerprint_of(publicKey)).toThrow(/must be an ed25519 key, not ec/);
+  });
+
+  it("encodes each signed part as a netstring of its UTF-8 bytes", () => {
+    expect(signed_bytes(["ab", "", "é|"]).toString("utf8")).toBe("2:ab,0:,3:é|,");
+    expect(server_message_text("x-test", "odin", "n1", "n2", 7, '{"type":"ping"}').toString("utf8"))
+      .toBe('23:agent-server-message-v1,6:x-test,4:odin,2:n1,2:n2,1:7,15:{"type":"ping"},');
+    expect(server_challenge_text("x-test", "odin", "n1", "SHA256:f").toString("utf8")).toBe("25:agent-server-challenge-v1,6:x-test,4:odin,2:n1,8:SHA256:f,");
+    expect(agent_hello_text("x-test", "odin", "n1", "n2", "SHA256:f").toString("utf8")).toBe("14:agent-hello-v2,6:x-test,4:odin,2:n1,2:n2,8:SHA256:f,");
+    expect(signed_bytes(["a|b", "c"]).equals(signed_bytes(["a", "b|c"]))).toBe(false);
+  });
+
+  it("signs a text only the matching key verifies", () => {
+    const first = parse_private_key(readFileSync(make_key(folder, "signer").private_file, "utf8"));
+    const second = make_key(folder, "not-signer");
+    const text = server_message_text("x-test", "odin", "n1", "n2", 1, "{}");
+    const signature = sign_text(first, text);
+
+    expect(verify_text(first, text, signature)).toBe(true);
+    expect(verify_text(first, server_message_text("x-test", "odin", "n1", "n2", 2, "{}"), signature)).toBe(false);
+    expect(verify_text(parse_public_key(second.public_line), text, signature)).toBe(false);
+    expect(verify_text(first, text, 42)).toBe(false);
+    expect(verify_text(first, text, "not base64 at all")).toBe(false);
+  });
+
+  it("reads the accepted server keys by fingerprint and makes nonces of the expected shape", () => {
+    const one = make_key(folder, "accepted-one");
+    const two = make_key(folder, "accepted-two");
+
+    const keys = parse_server_keys([one.public_line, two.public_line, one.public_line]);
+
+    expect([...keys.keys()]).toEqual([key_fingerprint(one.public_line), key_fingerprint(two.public_line)]);
+    expect(() => parse_server_keys(["ssh-rsa AAAA"])).toThrow(/ssh-ed25519/);
+    expect(is_nonce(new_nonce())).toBe(true);
+    expect(new_nonce()).not.toBe(new_nonce());
+    expect(is_nonce("short")).toBe(false);
+    expect(is_nonce("a".repeat(129))).toBe(false);
+    expect(is_nonce(`${"a".repeat(20)}|`)).toBe(false);
+    expect(is_nonce(7)).toBe(false);
   });
 });

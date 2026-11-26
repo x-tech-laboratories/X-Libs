@@ -1,19 +1,22 @@
 // The agents the server can reach, by host name: those that have dialled in with their host's declared key or a token
 // the app issued, and the one built into the server for its own machine. A host with a declared key logs in only with
-// that key, so a leaked token cannot stand in for it.
+// that key, so a leaked token cannot stand in for it. Given a key of its own, the server signs its challenge to every
+// agent, and every message to an agent that checked that signature.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { randomBytes, type KeyObject } from "node:crypto";
+import type { KeyObject } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { IncomingHttpHeaders } from "node:http";
 
-import { parse_public_key, verify_challenge } from "../../agent/keys.ts";
+import {
+  agent_hello_text, fingerprint_of, is_nonce, new_nonce, parse_public_key, public_key_line, server_challenge_text, sign_text, verify_challenge, verify_text,
+} from "../../agent/keys.ts";
 import {
   clip_hello, encode_message, is_agent_message, key_host_header, parse_agent_message, type AgentApp, type AppMessage, type LongRun, type LongRunPoll, type RunResult,
 } from "../../agent/protocol.ts";
 import { AgentError, ended_stream, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
-import { AgentConnection, type ConnectionOptions, type ServerSocket } from "./connection.ts";
+import { AgentConnection, type ConnectionOptions, type MessageSigning, type ServerSocket } from "./connection.ts";
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +42,8 @@ export interface HubOptions<Task> {
   most_pending_logins?: number;
   most_pending_logins_per_address?: number;
   connection?: Partial<ConnectionOptions>;
+  // The server's own ed25519 private key, read with `parse_private_key`, which signs its challenge to every agent and every message to each agent that asks.
+  server_key?: KeyObject | null;
 }
 
 // A connected agent as the page shows it.
@@ -51,6 +56,8 @@ export interface AgentStatus {
   built_in: boolean;
   // How the agent logged in; null for the built-in one.
   login: AgentLogin | null;
+  // Whether every message to the agent goes signed with the server's key, which it asked for after checking the server.
+  signed_messages: boolean;
   // The long runs the agent knew of when it connected.
   runs: LongRun[];
 }
@@ -85,6 +92,8 @@ export const close_codes = {
   not_hello: 4007,
   // A message before login was larger than a hello can be.
   too_large: 1009,
+  // A hello asked for signed messages from a server with no key, or with a malformed nonce.
+  bad_agent_nonce: 4010,
 } as const;
 
 // Hooks the route gives a socket it hands over, for what it set up around the upgrade.
@@ -117,6 +126,7 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
   private readonly logins = new WeakMap<AgentConnection<Task>, AgentLogin>();
   // Each host's declared public key, with the line it was read from.
   private agent_keys = new Map<string, { line: string; key: KeyObject }>();
+  private readonly server_key: { key: KeyObject; fingerprint: string } | null;
 
   constructor(options: HubOptions<Task>) {
     super();
@@ -128,6 +138,17 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
     this.most_pending_logins = options.most_pending_logins ?? 64;
     this.most_pending_logins_per_address = options.most_pending_logins_per_address ?? 8;
     this.connection_options = { ...default_connection, ...options.connection };
+    this.server_key = options.server_key ? { key: options.server_key, fingerprint: fingerprint_of(options.server_key) } : null;
+  }
+
+  // The OpenSSH public line of the server's key, for each agent's `server_keys`, or null when it has none.
+  server_public_line(comment = ""): string | null {
+    return this.server_key === null ? null : public_key_line(this.server_key.key, comment);
+  }
+
+  // The SHA256 fingerprint of the server's key, or null when it has none.
+  server_key_fingerprint(): string | null {
+    return this.server_key?.fingerprint ?? null;
   }
 
   // The host the built-in agent answers for, which follows the config as it names this server's own host.
@@ -204,7 +225,7 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
 
   // ── Connections ──────────────────────────────────────────────────────────
 
-  // Takes a socket whose upgrade named the host and waits for its hello, closing it on anything else; a key login is sent a nonce first, which its hello must carry signed.
+  // Takes a socket whose upgrade named the host and waits for its hello, closing it on anything else; a key login is sent a nonce first, which its hello must carry signed, and a server with a key sends every login its signed challenge.
   accept(socket: ServerSocket, host: string, login: AgentLogin, hooks: AcceptHooks = {}): void {
     let connection: AgentConnection<Task> | null = null;
     let turned_away = false;
@@ -213,8 +234,8 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
       socket.close(code, reason);
     };
     const hello_timer = setTimeout(() => socket.close(close_codes.no_hello, "No hello came."), this.hello_timeout);
-    const nonce = login === "key" ? randomBytes(32).toString("base64url") : null;
-    if (nonce !== null) socket.send(encode_message({ type: "challenge", nonce }, this.app));
+    const nonce = login === "key" || this.server_key !== null ? new_nonce() : null;
+    if (nonce !== null) socket.send(encode_message(this.challenge(host, nonce), this.app));
 
     socket.on("message", (raw, is_binary) => {
       const data = as_buffer(raw);
@@ -238,13 +259,21 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
         turn_away(close_codes.protocol, `This server speaks agent protocol ${this.app.protocol_version}, not ${hello.protocol}.`);
         return;
       }
-      const { signature, ...greeting } = hello;
-      if (nonce !== null && !this.proves_key(host, nonce, signature)) {
+      const { signature, agent_nonce, ...greeting } = hello;
+      let signing: MessageSigning | null = null;
+      if (agent_nonce !== undefined) {
+        if (this.server_key === null || nonce === null || !is_nonce(agent_nonce)) {
+          turn_away(close_codes.bad_agent_nonce, "The hello asked for signed messages this server cannot give.");
+          return;
+        }
+        signing = { server_key: this.server_key.key, server_nonce: nonce, agent_nonce };
+      }
+      if (login === "key" && !this.proves_key(host, nonce!, signature, signing)) {
         turn_away(close_codes.bad_key, `The agent's key is not the one declared for ${host}.`);
         return;
       }
       this.connections.get(host)?.close(close_codes.replaced, "A newer connection from the same host replaced this one.");
-      const current = new AgentConnection(socket, this.app, host, greeting, this.connection_options);
+      const current = new AgentConnection(socket, this.app, host, greeting, this.connection_options, signing);
       current.on_message = (message) => this.on_message?.(host, message, current);
       connection = current;
       this.connections.set(host, current);
@@ -264,9 +293,19 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
     });
   }
 
-  private proves_key(host: string, nonce: string, signature: unknown): boolean {
+  // The challenge for a login, signed with the server's key when it has one.
+  private challenge(host: string, nonce: string): { type: "challenge"; nonce: string; server_key?: string; server_signature?: string } {
+    if (this.server_key === null) return { type: "challenge", nonce };
+    const { key, fingerprint } = this.server_key;
+    return { type: "challenge", nonce, server_key: fingerprint, server_signature: sign_text(key, server_challenge_text(this.app.name, host, nonce, fingerprint)) };
+  }
+
+  // Whether the hello's signature proves the host's declared key: over the bound hello text for an agent that checked the server, otherwise over the plain challenge.
+  private proves_key(host: string, nonce: string, signature: unknown, signing: MessageSigning | null): boolean {
     const declared = this.agent_keys.get(host);
-    return declared !== undefined && typeof signature === "string" && verify_challenge(declared.key, this.app.name, host, nonce, signature);
+    if (declared === undefined || typeof signature !== "string") return false;
+    if (signing === null) return verify_challenge(declared.key, this.app.name, host, nonce, signature);
+    return verify_text(declared.key, agent_hello_text(this.app.name, host, nonce, signing.agent_nonce, this.server_key!.fingerprint), signature);
   }
 
   disconnect(host: string, code = 1000, reason = "The server hung up."): void {
@@ -354,6 +393,7 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
       connected_epoch: connection.connected_epoch,
       built_in: false,
       login: this.logins.get(connection) ?? null,
+      signed_messages: connection.signs_messages,
       runs: connection.hello.runs,
     };
   }
@@ -370,7 +410,7 @@ function not_connected(host: string): string {
 }
 
 function local_status(host: string): AgentStatus {
-  return { host, reported_host: host, agent_version: "built in", connected_epoch: 0, built_in: true, login: null, runs: [] };
+  return { host, reported_host: host, agent_version: "built in", connected_epoch: 0, built_in: true, login: null, signed_messages: false, runs: [] };
 }
 
 function as_buffer(raw: Buffer | ArrayBuffer | Buffer[]): Buffer {

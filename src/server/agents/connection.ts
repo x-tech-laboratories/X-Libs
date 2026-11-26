@@ -1,12 +1,15 @@
 // One connected agent, as the server sees it: sends it requests and matches each reply by id, and turns its streamed
-// output back into a readable stream, granting the agent more credit only as the reader takes what has come.
+// output back into a readable stream, granting the agent more credit only as the reader takes what has come. For an agent
+// that asked for signed messages, it wraps each message it sends with a counter and the server key's signature.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
+import type { KeyObject } from "node:crypto";
 import { Readable } from "node:stream";
 
+import { server_message_text, sign_text } from "../../agent/keys.ts";
 import {
-  clip_text, decode_chunk, encode_message, is_agent_message, most_runs_in_reply, parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs,
+  clip_text, decode_chunk, encode_message, encode_signed_message, is_agent_message, most_runs_in_reply, parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs,
   parse_run_result, type AgentApp, type AgentMessage, type AppMessage, type LongRun, type LongRunPoll, type RequestType, type Requests, type RunResult, type ServerMessage,
 } from "../../agent/protocol.ts";
 import { AgentError, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
@@ -31,7 +34,14 @@ export interface ConnectionOptions {
   heartbeat_in_milliseconds: number;
 }
 
-export type Hello = Omit<Extract<AgentMessage, { type: "hello" }>, "signature">;
+export type Hello = Omit<Extract<AgentMessage, { type: "hello" }>, "signature" | "agent_nonce">;
+
+// What the server signs each message to one agent with: its own key and this connection's two nonces.
+export interface MessageSigning {
+  server_key: KeyObject;
+  server_nonce: string;
+  agent_nonce: string;
+}
 
 const socket_open = 1;
 
@@ -132,9 +142,13 @@ export class AgentConnection<Task> implements Agent<Task> {
   private last_heard = Date.now();
   private readonly heartbeat: NodeJS.Timeout;
   private closed_reason: string | null = null;
+  private readonly signing: MessageSigning | null;
+  // The counter of the last signed message sent.
+  private counter = 0;
 
-  constructor(socket: ServerSocket, app: AgentApp<Task>, host: string, hello: Hello, options: ConnectionOptions) {
+  constructor(socket: ServerSocket, app: AgentApp<Task>, host: string, hello: Hello, options: ConnectionOptions, signing: MessageSigning | null = null) {
     this.socket = socket;
+    this.signing = signing;
     this.app = app;
     this.host = host;
     this.hello = hello;
@@ -145,6 +159,11 @@ export class AgentConnection<Task> implements Agent<Task> {
 
   get is_open(): boolean {
     return this.closed_reason === null;
+  }
+
+  // Whether every message to this agent goes signed with the server's key.
+  get signs_messages(): boolean {
+    return this.signing !== null;
   }
 
   // ── Agent ────────────────────────────────────────────────────────────────
@@ -194,7 +213,16 @@ export class AgentConnection<Task> implements Agent<Task> {
   // ── Socket ───────────────────────────────────────────────────────────────
 
   send(message: ServerMessage<Task> | AppMessage): void {
-    if (this.is_open && this.socket.readyState === socket_open) this.socket.send(encode_message(message, this.app));
+    if (!this.is_open || this.socket.readyState !== socket_open) return;
+    const text = encode_message(message, this.app);
+    this.socket.send(this.signing === null ? text : this.seal(this.signing, text));
+  }
+
+  // The message's exact text wrapped with the next counter and the server's signature over this connection, the counter and that text.
+  private seal(signing: MessageSigning, text: string): string {
+    this.counter++;
+    const signed_text = server_message_text(this.app.name, this.host, signing.server_nonce, signing.agent_nonce, this.counter, text);
+    return encode_signed_message(text, this.counter, sign_text(signing.server_key, signed_text));
   }
 
   // Handles one frame from the agent after its hello.
