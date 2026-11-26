@@ -12,6 +12,9 @@ import { migrate, type SqlDatabase, type SqlValue } from "../sql.ts";
 import { account_name_pattern, hash_password, verify_password, type Accounts } from "./passwords.ts";
 import { match_declared_token, type DeclaredToken } from "./declared_tokens.ts";
 import { matching_step, new_secret, otpauth_uri } from "./totp.ts";
+import type { TokenKind } from "./viewers.ts";
+
+export type { TokenKind };
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +46,8 @@ export interface Token {
   id: number;
   name: string;
   owner: string;
+  // A device's token may sync what only the user's own devices may change; a program's may not.
+  kind: TokenKind;
   // A read-only token can only make GET requests.
   read_only: boolean;
   // The app's token scope it is kept to, as a read-only token that may also make the scope's calls, or null for none.
@@ -144,7 +149,12 @@ const schema = [`
     created_epoch INTEGER NOT NULL,
     last_used_epoch INTEGER
   );
-`, "ALTER TABLE account_tokens ADD COLUMN scope TEXT", "ALTER TABLE account_tokens ADD COLUMN expires_epoch INTEGER"];
+`, "ALTER TABLE account_tokens ADD COLUMN scope TEXT", "ALTER TABLE account_tokens ADD COLUMN expires_epoch INTEGER",
+// Tokens made before kinds were kept cannot be told apart, so every full one counts as a device and no device is cut off.
+[
+  "ALTER TABLE account_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'program'",
+  "UPDATE account_tokens SET kind = 'device' WHERE read_only = 0 AND scope IS NULL",
+]];
 
 type Row = Record<string, SqlValue>;
 
@@ -364,19 +374,22 @@ export class AccountStore {
   // ── Tokens ───────────────────────────────────────────────────────────────
 
   // A token that acts as its owner, shown once; only its digest is kept. A scoped token is read-only plus its scope's calls.
-  create_token(owner: string, fields: { name: unknown; read_only: unknown; scope?: unknown; days?: unknown }): { token: string; id: number; expires_epoch: number | null } {
+  // A program's unless `kind` says the device sign-in made it, which is always a full token.
+  create_token(owner: string, fields: { name: unknown; read_only: unknown; scope?: unknown; days?: unknown; kind?: TokenKind }): { token: string; id: number; expires_epoch: number | null } {
     const label = String(fields.name ?? "").trim();
     if (!label || label.length > 64) throw new AccountError("Give the token a name of up to 64 characters, such as what will use it.");
     if (this.user(owner) === null) throw new AccountError(`No user named '${owner}'.`, 404);
+    const kind: TokenKind = fields.kind === "device" ? "device" : "program";
     const scope = fields.scope === undefined || fields.scope === null || fields.scope === "" ? null : String(fields.scope);
+    if (kind === "device" && (scope !== null || fields.read_only !== false)) throw new AccountError("A device's token is a full token.");
     if (scope !== null && !Object.hasOwn(this.scopes, scope)) throw new AccountError(`No token scope named '${scope}'.`);
     const days = this.token_days(fields.days);
     const now = now_seconds();
     const expires_epoch = days === null ? null : now + days * 86400;
     const token = `${this.token_prefix}_${randomBytes(32).toString("base64url")}`;
     const id = this.run(
-      "INSERT INTO account_tokens (name, hash, owner, read_only, scope, created_epoch, expires_epoch) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      label, digest(token), owner, scope !== null || fields.read_only !== false ? 1 : 0, scope, now, expires_epoch,
+      "INSERT INTO account_tokens (name, hash, owner, read_only, scope, kind, created_epoch, expires_epoch) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      label, digest(token), owner, scope !== null || fields.read_only !== false ? 1 : 0, scope, kind, now, expires_epoch,
     );
     return { token, id, expires_epoch };
   }
@@ -529,6 +542,7 @@ function token_of(row: Row): Token {
     id: Number(row.id),
     name: String(row.name),
     owner: String(row.owner),
+    kind: row.kind === "device" ? "device" : "program",
     read_only: Boolean(row.read_only),
     scope: row.scope === null || row.scope === undefined ? null : String(row.scope),
     created_epoch: Number(row.created_epoch),

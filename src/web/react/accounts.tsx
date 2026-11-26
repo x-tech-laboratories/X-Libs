@@ -238,8 +238,9 @@ function OwnTokensPanel({ client, longest_days }: { client: AccountsClient; long
   );
 }
 
-// What a token may do, as its chip says: its scope's name, read only, or nothing for a full token.
+// What a token may do, as its chip says: its scope's name, read only, device for a device's, or nothing for a program's full token.
 function token_chip(token: AccountToken, scopes: AccountTokenScope[]): string | null {
+  if (token.kind === "device") return "device";
   if (token.scope) return scopes.find((scope) => scope.id === token.scope)?.label ?? token.scope;
   return token.read_only ? "read only" : null;
 }

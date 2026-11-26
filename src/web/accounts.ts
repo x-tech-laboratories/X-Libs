@@ -60,6 +60,8 @@ export interface AccountToken {
   id: number;
   name: string;
   owner: string;
+  // "device" for one the device sign-in made, which may sync what only the user's own devices may change.
+  kind?: "device" | "program";
   read_only: boolean;
   // The app's token scope it is kept to, by id, or null for a full or read-only token.
   scope?: string | null;

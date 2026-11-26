@@ -144,14 +144,16 @@ function account_server(tokens: unknown[], scopes: unknown[] | null, bodies: Rec
 
 const scoped_token = { id: 3, name: "adder", owner: "root", read_only: true, scope: "add_items", created_epoch: 0, last_used_epoch: null };
 const reading_token = { id: 4, name: "reader", owner: "root", read_only: true, scope: null, created_epoch: 0, last_used_epoch: null };
+const device_token = { id: 5, name: "laptop", owner: "root", kind: "device", read_only: false, scope: null, created_epoch: 0, last_used_epoch: null };
 
 test("the token form offers the app's scopes, and the list names each token's", async () => {
   const bodies: Record<string, unknown>[] = [];
   const scopes = [{ id: "add_items", label: "Add items", hint: "Reads, and adds items.", calls: ["add_item"] }];
-  render(<><AccountView client={create_accounts_client({ fetch: account_server([scoped_token, reading_token], scopes, bodies) })} /><Dialogs /></>);
+  render(<><AccountView client={create_accounts_client({ fetch: account_server([scoped_token, reading_token, device_token], scopes, bodies) })} /><Dialogs /></>);
 
   await waitFor(() => expect(screen.getByText("Add items")).toBeTruthy());
   expect(screen.getByText("read only")).toBeTruthy();
+  expect(screen.getByText("device")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "phone shortcut" } });
   await screen.findByRole("combobox", { name: "May" });
