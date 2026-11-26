@@ -40,4 +40,6 @@ repositories {
 dependencies {
     implementation project(':capacitor-android')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    // WebViewAssetLoader, which serves the phone service worker the app's own page files.
+    implementation "androidx.webkit:webkit:1.12.1"
 }
