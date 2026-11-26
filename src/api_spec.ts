@@ -73,8 +73,8 @@ export interface PageOnlyCalls {
   is_page_only: (method: string) => boolean;
   // Whether this use is: a marked call, or one the app's rule names for these arguments.
   is_page_only_call: (method: string, args: readonly unknown[]) => boolean;
-  // The same for arguments as a request sent them, a JSON list or an object by name; arguments that cannot be read
-  // count as the user's alone when the app has a rule, since the rule cannot tell.
+  // The same for arguments as a request sent them, a JSON list or an object by name; a body that is neither counts as
+  // the user's alone when the app has a rule, since the rule cannot tell.
   is_page_only_request: (method: string, body: unknown) => boolean;
   // What a refused caller is told.
   refusal: string;
@@ -95,12 +95,10 @@ export function page_only_calls(api: Record<string, MethodSpec>, options: PageOn
     if (Array.isArray(body)) return is_page_only_call(method, body);
     if (is_page_only(method)) return true;
     if (rule === undefined) return false;
-    if (typeof body !== "object" || !Object.hasOwn(api, method)) return true;
-    try {
-      return rule(method, positional_args(api[method]!, body as Record<string, unknown>));
-    } catch {
-      return true;
-    }
+    if (typeof body !== "object") return true;
+    // Placed in order without checking them, so wrong or missing names are left for the call itself to refuse.
+    const named = body as Record<string, unknown>;
+    return rule(method, Object.hasOwn(api, method) ? api[method]!.params.map((param) => named[param.name]) : []);
   };
   return { is_page_only, is_page_only_call, is_page_only_request, refusal: options.refusal ?? default_page_only_refusal };
 }
