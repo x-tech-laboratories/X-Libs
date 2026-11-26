@@ -1,5 +1,6 @@
 // An app's calls described once, by name with plain words and a JSON Schema per argument, so other programs can use
-// them: as MCP tools through server/mcp, as an OpenAPI document, and by named arguments in place of a list.
+// them: as MCP tools through server/mcp, as an OpenAPI document, and by named arguments in place of a list. A call
+// marked page-only is the user's alone: only their own page makes it, and tokens and MCP clients are refused.
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,9 @@ export interface MethodSpec {
   params: ParamSpec[];
   // Marks a call that deletes or overwrites data, so an MCP client asks before running it.
   destructive?: boolean;
+  // Marks a call only the user may make, at the app's own page (a signed-in browser, or a desktop window through its
+  // daemon's socket), such as approving what an assistant proposed: tokens are refused it and MCP never offers it.
+  page_only?: boolean;
 }
 
 // A spec for every method of a table, so a method added without one fails to compile.
@@ -53,6 +57,52 @@ export function positional_args(spec: MethodSpec, named: Record<string, unknown>
   const args = spec.params.map((param) => named[param.name]);
   while (args.length > 0 && args.at(-1) === undefined) args.pop();
   return args;
+}
+
+// ── Page-only calls ──────────────────────────────────────────────────────────
+
+// An app's own rule for uses of a call that are the user's alone, by its arguments in order, such as a write to a
+// setting only the user may change.
+export type PageOnlyRule = (method: string, args: readonly unknown[]) => boolean;
+
+export const default_page_only_refusal = "Only you can do this, from the app's own page; a token or an MCP client cannot.";
+
+// Which calls are the user's alone, as `server/account_sign_in`, `server/mcp` and `electron/mcp` ask.
+export interface PageOnlyCalls {
+  // Whether every use of the call is, as its spec marks it, so MCP leaves it out.
+  is_page_only: (method: string) => boolean;
+  // Whether this use is: a marked call, or one the app's rule names for these arguments.
+  is_page_only_call: (method: string, args: readonly unknown[]) => boolean;
+  // The same for arguments as a request sent them, a JSON list or an object by name; arguments that cannot be read
+  // count as the user's alone when the app has a rule, since the rule cannot tell.
+  is_page_only_request: (method: string, body: unknown) => boolean;
+  // What a refused caller is told.
+  refusal: string;
+}
+
+export interface PageOnlyOptions {
+  rule?: PageOnlyRule;
+  refusal?: string;
+}
+
+// The page-only calls of an api: those its specs mark, and the uses the app's rule names.
+export function page_only_calls(api: Record<string, MethodSpec>, options: PageOnlyOptions = {}): PageOnlyCalls {
+  const { rule } = options;
+  const is_page_only = (method: string) => Object.hasOwn(api, method) && api[method]!.page_only === true;
+  const is_page_only_call = (method: string, args: readonly unknown[]) => is_page_only(method) || (rule?.(method, args) ?? false);
+  const is_page_only_request = (method: string, body: unknown) => {
+    if (body === undefined || body === null) return is_page_only_call(method, []);
+    if (Array.isArray(body)) return is_page_only_call(method, body);
+    if (is_page_only(method)) return true;
+    if (rule === undefined) return false;
+    if (typeof body !== "object" || !Object.hasOwn(api, method)) return true;
+    try {
+      return rule(method, positional_args(api[method]!, body as Record<string, unknown>));
+    } catch {
+      return true;
+    }
+  };
+  return { is_page_only, is_page_only_call, is_page_only_request, refusal: options.refusal ?? default_page_only_refusal };
 }
 
 // ── Known ids ────────────────────────────────────────────────────────────────
@@ -89,6 +139,19 @@ const call_responses = {
   "401": { description: "not signed in" },
 };
 
+// What a page-only call adds: the `x-page-only` mark, a line saying so, and the refusal a token gets.
+function page_only_marks(spec: MethodSpec): JsonSchema {
+  if (spec.page_only !== true) return {};
+  return {
+    "x-page-only": true,
+    description: "Only the user at the app's own page may make this call; a token is refused, and MCP does not offer it.",
+  };
+}
+
+function responses_of(spec: MethodSpec): JsonSchema {
+  return spec.page_only === true ? { ...call_responses, "403": { description: "only the user at the app's own page may make this call" } } : call_responses;
+}
+
 function openapi_envelope(options: Pick<OpenApiOptions, "title" | "version" | "description">, paths: JsonSchema): JsonSchema {
   return {
     openapi: "3.1.0",
@@ -109,8 +172,9 @@ export function openapi_document(api: Record<string, MethodSpec>, options: OpenA
           operationId: method,
           summary: spec.description,
           tags: [options.is_read_only(method) ? "read" : "change"],
+          ...page_only_marks(spec),
           requestBody: { required: spec.params.some((param) => !param.optional), content: { "application/json": { schema: input_schema(spec) } } },
-          responses: call_responses,
+          responses: responses_of(spec),
         },
       },
     ]),
@@ -145,9 +209,10 @@ export function route_openapi_document(routes: Record<string, RouteSpec>, option
       operationId: method,
       summary: spec.description,
       tags: [verb === "GET" ? "read" : "change"],
+      ...page_only_marks(spec),
       ...(parameters.length > 0 ? { parameters } : {}),
       ...body,
-      responses: call_responses,
+      responses: responses_of(spec),
     };
   }
   return openapi_envelope(options, paths);

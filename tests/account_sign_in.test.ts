@@ -3,7 +3,8 @@ import { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyInstance, type LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { register_accounts, device_label, is_user_or_device, type AccountSignInOptions } from "../src/server/account_sign_in.ts";
+import { page_only_calls, type MethodSpec } from "../src/api_spec.ts";
+import { register_accounts, calls_under, device_label, is_user_or_device, type AccountSignInOptions } from "../src/server/account_sign_in.ts";
 import { AccountStore } from "../src/server/account_store.ts";
 import { hash_password } from "../src/server/passwords.ts";
 import { code_at } from "../src/server/totp.ts";
@@ -342,6 +343,44 @@ describe("token lifetimes", () => {
 
     expect(made.json<{ expires_epoch: number }>().expires_epoch).toBeGreaterThan(Date.now() / 1000);
     expect(forever.expires_epoch).toBeNull();
+  });
+});
+
+describe("page-only calls", () => {
+  const api: Record<string, MethodSpec> = {
+    approve: { description: "Approves a proposal.", params: [{ name: "id", schema: { type: "string" } }], page_only: true },
+    set_setting: { description: "Sets a setting.", params: [{ name: "key", schema: { type: "string" } }, { name: "value", schema: {} }] },
+  };
+  const page_only = page_only_calls(api, { rule: (method, args) => method === "set_setting" && args[0] === "policy", refusal: "Only at the page." });
+
+  it("are refused to every token, a device's too, and made from a signed-in session", async () => {
+    const accounts = await serve({ call_of: calls_under("/api/call"), page_only });
+    app.post("/api/call/:method", async (request) => ({ ran: (request.params as { method: string }).method }));
+    const device = (await sign_in({ name: "root", password, device: "Laptop" })).json<{ token: string }>().token;
+    const program = accounts.create_token("root", { name: "script", read_only: false }).token;
+    const cookie = cookie_of(await sign_in({ name: "root", password }));
+    const call = (method: string, payload: unknown, headers: Record<string, string>) => app.inject({ method: "POST", url: `/api/call/${method}`, headers, payload: payload as object });
+
+    for (const token of [device, program]) {
+      const headers = { authorization: `Bearer ${token}` };
+      const approved = await call("approve", ["p1"], headers);
+      expect(approved.statusCode).toBe(403);
+      expect(approved.json()).toEqual({ error: "Only at the page." });
+      expect((await call("set_setting", ["policy", "auto"], headers)).statusCode).toBe(403);
+      expect((await call("set_setting", { key: "policy", value: "auto" }, headers)).statusCode).toBe(403);
+      expect((await call("set_setting", ["theme", "dark"], headers)).json()).toEqual({ ran: "set_setting" });
+    }
+    const session = { cookie: `x_test_session=${cookie.value}` };
+    expect((await call("approve", ["p1"], session)).json()).toEqual({ ran: "approve" });
+    expect((await call("set_setting", ["policy", "auto"], session)).json()).toEqual({ ran: "set_setting" });
+  });
+
+  it("are left alone without page_only", async () => {
+    const accounts = await serve({ call_of: calls_under("/api/call") });
+    app.post("/api/call/:method", async () => ({ ok: true }));
+    const headers = { authorization: `Bearer ${accounts.create_token("root", { name: "script", read_only: false }).token}` };
+
+    expect((await app.inject({ method: "POST", url: "/api/call/approve", headers, payload: ["p1"] })).statusCode).toBe(200);
   });
 });
 

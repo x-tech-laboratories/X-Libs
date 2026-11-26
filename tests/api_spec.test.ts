@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  check_known_ids, input_schema, keep_known_ids, openapi_document, positional_args, route_openapi_document, unknown_ids, type MethodSpec,
+  check_known_ids, default_page_only_refusal, input_schema, keep_known_ids, openapi_document, page_only_calls, positional_args, route_openapi_document, unknown_ids, type MethodSpec,
 } from "../src/api_spec.ts";
 
 const add_set: MethodSpec = {
@@ -103,5 +103,57 @@ describe("known ids", () => {
   it("cuts a remembered list down to the ids that still exist", () => {
     expect(keep_known_ids(["c3", "deleted", "a1", "c3", 7, null], tracks)).toEqual(["c3", "a1"]);
     for (const wrong_shape of [null, "a1", 42, { a1: true }]) expect(keep_known_ids(wrong_shape, tracks)).toEqual([]);
+  });
+});
+
+describe("page-only calls", () => {
+  const api: Record<string, MethodSpec> = {
+    approve: { description: "Approves a proposal.", params: [{ name: "id", schema: { type: "string" } }], page_only: true },
+    set_setting: { description: "Sets a setting.", params: [{ name: "key", schema: { type: "string" } }, { name: "value", schema: {} }] },
+    list_settings: { description: "Lists the settings.", params: [] },
+  };
+  const rule = (method: string, args: readonly unknown[]) => method === "set_setting" && args[0] === "policy";
+
+  it("are the marked calls, and the uses the app's rule names", () => {
+    const page_only = page_only_calls(api, { rule, refusal: "Only at the page." });
+
+    expect(page_only.is_page_only("approve")).toBe(true);
+    expect(page_only.is_page_only("set_setting")).toBe(false);
+    expect(page_only.is_page_only("toString")).toBe(false);
+    expect(page_only.is_page_only_call("set_setting", ["policy", 1])).toBe(true);
+    expect(page_only.is_page_only_call("set_setting", ["theme", "dark"])).toBe(false);
+    expect(page_only.refusal).toBe("Only at the page.");
+  });
+
+  it("read a request's arguments as a list or by name, and count unreadable ones as the user's when there is a rule", () => {
+    const page_only = page_only_calls(api, { rule });
+
+    expect(page_only.is_page_only_request("set_setting", ["policy", 1])).toBe(true);
+    expect(page_only.is_page_only_request("set_setting", { value: 1, key: "policy" })).toBe(true);
+    expect(page_only.is_page_only_request("set_setting", { key: "theme", value: "dark" })).toBe(false);
+    expect(page_only.is_page_only_request("set_setting", { key: "policy", extra: 1 })).toBe(true);
+    expect(page_only.is_page_only_request("set_setting", "policy")).toBe(true);
+    expect(page_only.is_page_only_request("approve", { id: "p1" })).toBe(true);
+    expect(page_only.is_page_only_request("list_settings", undefined)).toBe(false);
+    expect(page_only.refusal).toBe(default_page_only_refusal);
+  });
+
+  it("are only the marked calls without a rule, whatever the arguments", () => {
+    const page_only = page_only_calls(api);
+
+    expect(page_only.is_page_only_request("set_setting", { key: "policy", extra: 1 })).toBe(false);
+    expect(page_only.is_page_only_request("set_setting", "policy")).toBe(false);
+    expect(page_only.is_page_only_request("approve", null)).toBe(true);
+  });
+
+  it("are marked in the OpenAPI documents", () => {
+    const document = openapi_document(api, { title: "Inbox", version: "1.0.0", path_of: (method) => `/api/call/${method}`, is_read_only: (method) => method.startsWith("list_") });
+    const paths = document.paths as Record<string, { post: Record<string, unknown> & { responses: Record<string, unknown> } }>;
+    expect(paths["/api/call/approve"]!.post).toMatchObject({ "x-page-only": true });
+    expect(paths["/api/call/approve"]!.post.responses["403"]).toBeDefined();
+    expect(paths["/api/call/set_setting"]!.post["x-page-only"]).toBeUndefined();
+
+    const routes = route_openapi_document({ approve: { ...api.approve!, route: "POST /api/proposals/:id/approve" } }, { title: "Inbox", version: "1.0.0" });
+    expect((routes.paths as Record<string, Record<string, Record<string, unknown>>>)["/api/proposals/{id}/approve"]!.post).toMatchObject({ "x-page-only": true });
   });
 });
