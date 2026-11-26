@@ -1,13 +1,15 @@
 // The frame around every view: the top bar, the sidebar that slides in on phones and resizes on wide screens, its foot
 // pinned with the theme, the signed-in user and Settings, a status bar, and the toasts, dialogs and menus.
 
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { current_route, type Route } from "../router.ts";
 import { store_sizes, stored_sizes } from "../split.ts";
+import { is_boolean } from "../prefs.ts";
 import { next_theme, type Theme, type ThemeChoice } from "../theme.ts";
 import { Dialogs } from "./dialog.tsx";
 import { Icon, type IconGlyph } from "./icons.tsx";
 import { ContextMenus } from "./menus.tsx";
+import { use_media_query } from "./phone.ts";
 import { use_pref } from "./prefs.ts";
 import { ResizeHandle } from "./split.tsx";
 import { Toasts } from "./toasts.tsx";
@@ -55,6 +57,9 @@ export interface ShellLabels {
   settings: string;
   theme_names: Record<Theme, string>;
   change_theme: string;
+  // The side pane's close button and grab bar, each given the pane's title; "Close <title>" and "Resize <title>" unless set.
+  close_side_pane?: (title: string) => string;
+  resize_side_pane?: (title: string) => string;
 }
 
 export const shell_labels: ShellLabels = {
@@ -66,6 +71,8 @@ export const shell_labels: ShellLabels = {
   settings: "Settings",
   theme_names: { system: "System theme", light: "Light theme", dark: "Dark theme" },
   change_theme: "Click to change the theme",
+  close_side_pane: (title) => `Close ${title}`,
+  resize_side_pane: (title) => `Resize ${title}`,
 };
 
 // False while a page drawn on the server is being picked up in the browser, so the first draw matches the server's.
@@ -256,6 +263,36 @@ export interface SidebarWidth {
   on_change?: (width: number, done: boolean) => void;
 }
 
+// A pane docked to the window's right edge beside main, such as a picked item's details or an assistant's conversation:
+// its head, with the title and a close button, sits in the top bar above it; where Halon drops the sidebar for the
+// phone menu, the pane covers main instead of squeezing it, with its head at its top.
+export interface ShellSidePane {
+  // Names the pane: its heading, and its name for screen readers.
+  title: string;
+  // Whether it shows; the app holds it, kept in a pref by use_side_pane when it should outlast a visit.
+  open: boolean;
+  // Called with false by the close button and by Escape inside the pane.
+  on_open_change: (open: boolean) => void;
+  // The head's content in place of the title heading, such as an item's checkbox and editable title.
+  head?: ReactNode;
+  // Buttons in the head before the close button.
+  tools?: ReactNode;
+  // Makes the pane's left edge draggable on wide screens, as sidebar_width does the sidebar's; 360px wide unless set.
+  width?: SidebarWidth;
+  content: ReactNode;
+}
+
+// Halon's phone layout, where the sidebar becomes the phone menu.
+const narrow_query = "(max-width: 700px)";
+
+// The title takes the head's room and is cut short with an ellipsis, keeping the close button at the end.
+const pane_title_style: CSSProperties = { flex: 1, minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+// Whether the side pane is open, kept in a pref such as "x-codex-assistant-open" so it stays as it was left.
+export function use_side_pane(pref_key: string, initial = false): [open: boolean, set_open: (open: boolean) => void] {
+  return use_pref(pref_key, initial, is_boolean);
+}
+
 interface ShellProps {
   brand: string;
   // The app's icon, as an image URL, drawn before the brand.
@@ -303,6 +340,9 @@ interface ShellProps {
   status_bar?: ReactNode;
   // Changes whenever the view does, so focus and scroll move to the new page.
   view_key?: string;
+  // A pane beside main on the right; while it is given, main's children sit in a .main-pane box, so pass it open or
+  // closed rather than leaving it out when it closes, or they are drawn anew.
+  side_pane?: ShellSidePane;
   // Keeps the window still so only main, or its panes, scroll, as in an app rather than a page.
   contained?: boolean;
   // Heads the sidebar with the brand and leaves the top bar to the tools.
@@ -312,8 +352,8 @@ interface ShellProps {
   children: ReactNode;
 }
 
-// The sidebar's width: the app's own, else the one kept in this browser, else the default.
-function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | undefined, change: (width: number, done: boolean) => void] {
+// A pane's width: the app's own, else the one kept in this browser, else the default.
+function use_pane_width(spec: SidebarWidth | undefined): [width: number | undefined, change: (width: number, done: boolean) => void] {
   const [kept, set_kept] = useState(() => spec?.storage_key ? stored_sizes(spec.storage_key, 1)?.[0] : undefined);
   const width = spec ? Math.min(spec.max, Math.max(spec.min, spec.width ?? kept ?? spec.default_width)) : undefined;
   const change = (next: number, done: boolean) => {
@@ -326,7 +366,7 @@ function use_sidebar_width(spec: SidebarWidth | undefined): [width: number | und
 
 export function Shell({
   brand, brand_icon, brand_logo, sections = [], views, active, active_item = null, sections_pref = "sidebar-collapsed", sidebar: sidebar_content, sidebar_width, theme, user, logged_out: held_logged_out, user_href, on_logout, brand_href = "#/", tools, sidebar_foot, settings, status_bar, view_key,
-  menu_open: held_menu_open, on_menu_open_change, main_class, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
+  menu_open: held_menu_open, on_menu_open_change, main_class, side_pane, contained = false, brand_in_sidebar = false, labels = shell_labels, children,
 }: ShellProps) {
   const [own_menu_open, set_own_menu_open] = useState(false);
   const menu_open = held_menu_open ?? own_menu_open;
@@ -340,7 +380,7 @@ export function Shell({
   const first_view = useRef(true);
   const logged_out = held_logged_out ?? user === null;
   const user_name = typeof user === "string" && user !== "" ? user : undefined;
-  const [width, change_width] = use_sidebar_width(sidebar_width);
+  const [width, change_width] = use_pane_width(sidebar_width);
 
   // Every opening and closing of the phone menu goes through here, so an app that holds it hears each one.
   function set_menu_open(open: boolean): void {
@@ -378,6 +418,57 @@ export function Shell({
     return () => document.removeEventListener("keydown", escape);
   }, [menu_open]);
 
+  const [pane_width, change_pane_width] = use_pane_width(side_pane?.width);
+  const pane_open = side_pane?.open === true;
+  // What had focus when the pane opened; undefined while it has not been open, so the first load moves no focus.
+  const pane_opener = useRef<Element | null | undefined>(undefined);
+  // Halon's phone layout, where the pane covers main and the top bar has no room for its head.
+  const narrow = use_media_query(narrow_query);
+
+  // The pane's width reaches its head in the top bar through the body.
+  useEffect(() => {
+    if (pane_width === undefined) return;
+    document.body.style.setProperty("--side-pane-width", `${pane_width}px`);
+    return () => void document.body.style.removeProperty("--side-pane-width");
+  }, [pane_width]);
+
+  // Focus left behind in a pane that closed goes back to where it was when the pane opened, else to main.
+  useEffect(() => {
+    if (pane_open) {
+      pane_opener.current = document.activeElement;
+      return;
+    }
+    const opener = pane_opener.current;
+    if (opener === undefined) return;
+    pane_opener.current = undefined;
+    const focused = document.activeElement;
+    if (focused !== null && focused !== document.body) return;
+    if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) opener.focus();
+    else main.current?.focus({ preventScroll: true });
+  }, [pane_open]);
+
+  function close_pane(): void {
+    side_pane?.on_open_change(false);
+  }
+
+  // Escape inside the pane closes it, unless something there took it, or it was typed in a field.
+  function escape_pane(event: ReactKeyboardEvent): void {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+    event.preventDefault();
+    close_pane();
+  }
+
+  const close_label = side_pane && (labels.close_side_pane ?? shell_labels.close_side_pane!)(side_pane.title);
+  const pane_head = side_pane && (
+    <header className="side-pane-head" onKeyDown={escape_pane}>
+      {side_pane.head ?? <h2 className="side-pane-title" style={pane_title_style}>{side_pane.title}</h2>}
+      {side_pane.tools}
+      <button className="icon" onClick={close_pane} aria-label={close_label} title={close_label}>×</button>
+    </header>
+  );
+
   // A new view closes the menu and takes focus, which tells a screen reader the page changed, but not on the first load.
   useEffect(() => {
     set_menu_open(false);
@@ -398,6 +489,7 @@ export function Shell({
         <button ref={menu_button} className="icon menu-button" aria-label={labels.open_menu} aria-expanded={menu_open} aria-controls="sidebar" onClick={() => set_menu_open(!menu_open)}>☰</button>
         {!(brand_in_sidebar && !logged_out) && <a href={brand_href} className="brand"><BrandMark brand={brand} icon={brand_icon} logo={brand_logo} /></a>}
         {!logged_out && tools}
+        {pane_open && !narrow && !logged_out && pane_head}
       </header>
       <div className="layout" style={width === undefined ? undefined : { "--sidebar-width": `${width}px` } as CSSProperties}>
         <Sidebar ref={sidebar} id="sidebar" className="sidebar" aria-label={views ? undefined : labels.main_navigation}>
@@ -451,7 +543,38 @@ export function Shell({
           )}
         </Sidebar>
         <div className="scrim" hidden={!menu_open} onClick={() => set_menu_open(false)} />
-        <main ref={main} id="main" className={main_class} tabIndex={-1}>{children}</main>
+        {side_pane ? (
+          <main
+            ref={main}
+            id="main"
+            className={[main_class, "with-side-pane"].filter(Boolean).join(" ")}
+            tabIndex={-1}
+            // Closed, the pane's column takes no room, so main's children keep their place and their state.
+            style={{ "--side-pane-width": pane_open ? (pane_width === undefined ? undefined : `${pane_width}px`) : "0px" } as CSSProperties}
+          >
+            <div className="main-pane">{children}</div>
+            {pane_open && !logged_out && (
+              <aside className="side-pane" aria-label={side_pane.title} onKeyDown={escape_pane}>
+                {side_pane.width && pane_width !== undefined && (
+                  <ResizeHandle
+                    side="right"
+                    size={pane_width}
+                    min={side_pane.width.min}
+                    max={side_pane.width.max}
+                    default_size={side_pane.width.default_width}
+                    on_resize={(next) => change_pane_width(next, false)}
+                    on_resize_end={(next) => change_pane_width(next, true)}
+                    label={(labels.resize_side_pane ?? shell_labels.resize_side_pane!)(side_pane.title)}
+                  />
+                )}
+                {narrow && pane_head}
+                <div className="side-pane-body">{side_pane.content}</div>
+              </aside>
+            )}
+          </main>
+        ) : (
+          <main ref={main} id="main" className={main_class} tabIndex={-1}>{children}</main>
+        )}
       </div>
       {status_bar !== undefined && <footer className="status-bar">{status_bar}</footer>}
       <Toasts />

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import "../src/web/react/test_stubs.ts";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FolderIcon, HistoryIcon } from "../src/web/react/icons.tsx";
-import { Shell } from "../src/web/react/shell.tsx";
+import { Shell, shell_labels, use_side_pane, type ShellSidePane } from "../src/web/react/shell.tsx";
 import { theme_choice } from "../src/web/theme.ts";
 
 beforeEach(() => {
@@ -243,3 +244,158 @@ describe("shell top bar", () => {
     expect(document.body.classList.contains("contained")).toBe(true);
   });
 });
+
+// ============================================================================
+// Side pane
+// ============================================================================
+
+function PaneShell({ pane = {}, pref_key = "x-test-pane-open", children = <button>In main</button> }: { pane?: Partial<ShellSidePane>; pref_key?: string; children?: React.ReactNode }) {
+  const [open, set_open] = use_side_pane(pref_key);
+  return (
+    <Shell brand="X-Test" sections={sections} theme={theme_choice("x-test-theme")} user="ada" tools={<button onClick={() => set_open(!open)}>Assistant</button>}
+      side_pane={{ title: "Assistant", open, on_open_change: set_open, content: <><input aria-label="Message" /><button>Send</button></>, ...pane }}>
+      {children}
+    </Shell>
+  );
+}
+
+const pane = () => screen.queryByRole("complementary", { name: "Assistant" });
+const main_width = () => document.querySelector<HTMLElement>("main")!.style.getPropertyValue("--side-pane-width");
+
+describe("shell side pane", () => {
+  it("opens beside main with its title and closes from its close button, remembering which in its pref", () => {
+    const { unmount } = render(<PaneShell />);
+    expect(pane()).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    expect(document.querySelector("main")!.className).toBe("with-side-pane");
+    expect(main_width()).toBe("0px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    expect(pane()).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Assistant" }).closest(".topbar")).toBeTruthy();
+    expect(main_width()).toBe("");
+    expect(localStorage.getItem("x-test-pane-open")).toBe("true");
+
+    unmount();
+    render(<PaneShell />);
+    expect(pane()).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close Assistant" }));
+    expect(pane()).toBeNull();
+    expect(localStorage.getItem("x-test-pane-open")).toBe("false");
+  });
+
+  it("keeps main's children in place, with their state, as the pane opens and closes", () => {
+    function Counter() {
+      const [count, set_count] = useState(0);
+      return <button onClick={() => set_count(count + 1)}>Counted {count}</button>;
+    }
+    render(<PaneShell><Counter /></PaneShell>);
+    fireEvent.click(screen.getByRole("button", { name: "Counted 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Assistant" }));
+    expect(screen.getByRole("button", { name: "Counted 1" }).closest(".main-pane")).toBeTruthy();
+  });
+
+  it("closes on Escape inside it, but not from a field, and gives focus back to what opened it", () => {
+    render(<PaneShell />);
+    const opener = screen.getByRole("button", { name: "Assistant" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Escape" });
+    expect(pane()).toBeTruthy();
+    const send = screen.getByRole("button", { name: "Send" });
+    send.focus();
+    fireEvent.keyDown(send, { key: "Enter" });
+    expect(pane()).toBeTruthy();
+    fireEvent.keyDown(send, { key: "Escape" });
+    expect(pane()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("gives focus to main when what opened it is gone", () => {
+    function Opener() {
+      const [open, set_open] = useState(false);
+      return (
+        <Shell brand="X-Test" sections={sections} theme={theme_choice("x-test-theme")} user="ada" side_pane={{ title: "Details", open, on_open_change: set_open, content: <button>Inside</button> }}>
+          {!open && <button onClick={() => set_open(true)}>Open details</button>}
+        </Shell>
+      );
+    }
+    render(<Opener />);
+    screen.getByRole("button", { name: "Open details" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Open details" }));
+    screen.getByRole("button", { name: "Inside" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Close Details" }));
+    expect(document.activeElement).toBe(document.querySelector("main"));
+  });
+
+  it("takes the app's own head and tools, and words in another language", () => {
+    const labels = { ...shell_labels_for_test(), close_side_pane: (title: string) => `${title} schließen` };
+    function Own() {
+      return (
+        <Shell brand="X-Test" sections={sections} theme={theme_choice("x-test-theme")} user="ada" labels={labels}
+          side_pane={{ title: "Aufgabe", open: true, on_open_change: () => {}, head: <input aria-label="Titel" />, tools: <button>Verlauf</button>, content: "Body" }}>
+          Page
+        </Shell>
+      );
+    }
+    render(<Own />);
+    expect(screen.queryByRole("heading", { name: "Aufgabe" })).toBeNull();
+    const head = screen.getByRole("textbox", { name: "Titel" }).parentElement!;
+    expect([...head.children].map((child) => child.getAttribute("aria-label") ?? child.textContent)).toEqual(["Titel", "Verlauf", "Aufgabe schließen"]);
+    expect(screen.getByRole("complementary", { name: "Aufgabe" }).textContent).toContain("Body");
+  });
+
+  it("resizes from its left edge, keeping the width in this browser", () => {
+    render(<PaneShell pane={{ width: { default_width: 360, min: 280, max: 600, storage_key: "x-test-pane-width" } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    const handle = screen.getByRole("separator", { name: "Resize Assistant" });
+    expect(handle.getAttribute("aria-valuenow")).toBe("360");
+    expect(main_width()).toBe("360px");
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    const grown = Number(handle.getAttribute("aria-valuenow"));
+    expect(grown).toBeGreaterThan(360);
+    expect(main_width()).toBe(`${grown}px`);
+    expect(document.body.style.getPropertyValue("--side-pane-width")).toBe(`${grown}px`);
+    expect(localStorage.getItem("x-test-pane-width")).toContain(String(grown));
+  });
+
+  it("covers main on a phone with its head at its top, following the window across the width", () => {
+    const listeners = new Set<() => void>();
+    let narrow = true;
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      get matches() { return query === "(max-width: 700px)" && narrow; },
+      media: query, onchange: null, addEventListener: (_: string, listener: () => void) => listeners.add(listener), removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      render(<PaneShell />);
+      fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+      expect(screen.getByRole("button", { name: "Close Assistant" }).closest("aside")).toBe(pane());
+      expect(document.querySelector(".topbar .side-pane-head")).toBeNull();
+
+      narrow = false;
+      act(() => listeners.forEach((listener) => listener()));
+      expect(screen.getByRole("button", { name: "Close Assistant" }).closest(".topbar")).toBeTruthy();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("is hidden while logged out", () => {
+    render(
+      <Shell brand="X-Test" theme={theme_choice("x-test-theme")} user={null} side_pane={{ title: "Assistant", open: true, on_open_change: () => {}, content: "Body" }}>
+        Sign in
+      </Shell>,
+    );
+    expect(pane()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close Assistant" })).toBeNull();
+  });
+});
+
+function shell_labels_for_test() {
+  return { ...shell_labels };
+}
