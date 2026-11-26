@@ -15,6 +15,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 ## Candidates for the next X-Libs and Halon round
 
 - From X-Music: the page-view tabs clipped under the header on first open.
+- From X-Music: playlist files (`src/shared/import/playlist_files.ts`): M3U/M3U8, PLS and XSPF read into paths (relative entries joined to the playlist's folder, `file://` URLs decoded) and written from entries with title, artist and length; X-Stream or any app with lists of media could share it.
 - For X-Tasks: move its phone notices (`src/web/android/phone_notices.ts`) onto `phone_notices` and the daemon's due reminders (`src/daemon/notices.ts`) onto `agent/scheduled_notices`.
 - From CODEX: Electron sidecar (autostart, starting the daemon and the tray are in `autostart`, `local_daemon` and `electron/tray`; CODEX can move onto them); reducer/effects store; NumberField; caption heading; the data-empty pattern; force_graph wrapper; StepLog; a scrollIntoView stub; adopt use_shortcuts; a yes/no-with-note dialog.
 - From X-Stream: metadata cache with TTL, refresher, image-to-data-URI, parseViewCount and parseRelativeAge, loading overlay, sidebar entity list, threaded comments.
