@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { PageOnlyCalls } from "../api_spec.ts";
 import { AccountError, type AccountStore, type TokenKind, type TokenScopeInfo, type User } from "./account_store.ts";
+import { AttemptLimit, default_address_tries_allowed, default_address_try_window_seconds, too_many_tries_text } from "./attempt_limit.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
 import { is_under, path_of, route_of } from "./request_path.ts";
@@ -94,6 +95,9 @@ export interface AccountSignInOptions {
   // How many tries one name gets from one address in the window before it waits; 5 in "5 minutes" unless set.
   tries_allowed?: number;
   try_window?: string;
+  // How many sign-ins one address may have failing or running in the window, whatever names they give; 20 in 300 seconds unless set.
+  address_tries_allowed?: number;
+  address_try_window_seconds?: number;
   // The lowest role that must sign in with a second factor; null, the default, leaves it to each user.
   second_factor_from?: string | null;
 }
@@ -128,7 +132,9 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   const {
     accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const, call_of = () => null, is_read_only = () => false,
     session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null, page_only = null,
+    address_tries_allowed = default_address_tries_allowed, address_try_window_seconds = default_address_try_window_seconds,
   } = options;
+  const address_tries = new AttemptLimit({ tries_allowed: address_tries_allowed, window_seconds: address_try_window_seconds });
   const prefix = options.api_prefix ?? "/api";
   const oidc_cookie_name = `${cookie_name}_oidc`;
   const routes = {
@@ -150,7 +156,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   await app.register(fastify_cookie);
   await app.register(fastify_rate_limit, {
     global: false,
-    errorResponseBuilder: () => Object.assign(new Error("Too many tries; wait a few minutes."), { statusCode: 429 }),
+    errorResponseBuilder: () => Object.assign(new Error(too_many_tries_text), { statusCode: 429 }),
   });
 
   app.decorateRequest("viewer", null);
@@ -255,8 +261,10 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   // The routes sit in a scope of their own, so their refusals answer in their own words without changing the app's error handler.
   await app.register(async (scope) => {
     scope.setErrorHandler((error, _request, reply) => {
+      const retry_after_seconds = (error as { retry_after_seconds?: number | null }).retry_after_seconds;
+      if (typeof retry_after_seconds === "number") void reply.header("retry-after", String(retry_after_seconds));
       if (error instanceof AccountError) return reply.code(error.status).send({ error: error.message });
-      // A refusal such as too many tries answers in its own words too.
+      // A refusal such as too many tries or busy password slots answers in its own words too.
       const status = (error as { statusCode?: number }).statusCode;
       if (status !== undefined && status >= 400 && status < 500) return reply.code(status).send({ error: (error as Error).message });
       return reply.send(error);
@@ -277,17 +285,24 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
     scope.get(routes.info, async () => ({ app_name: accounts.app_name, oidc: oidc === null ? null : { label: oidc.settings.label, start: routes.oidc_start } }));
 
-    // Tries are counted per name and address once the body is read, whether they succeed or not.
+    // Tries count per name and address once the body is read, and per address whatever the name while they run or once they fail.
     scope.post<{ Body: { name?: unknown; password?: unknown; code?: unknown; remember?: unknown; device?: unknown } }>(routes.login, {
       config: { rateLimit: { max: tries_allowed, timeWindow: try_window, hook: "preHandler", keyGenerator: (request) => `${request.ip}\n${login_name(request)}` } },
     }, async (request, reply) => {
+      const address_wait = address_tries.take(request.ip);
+      if (address_wait > 0) return reply.code(429).header("retry-after", String(address_wait)).send({ error: too_many_tries_text });
       const body = request.body ?? {};
       const code = typeof body.code === "string" ? body.code : undefined;
-      const { user, needs_code } = typeof body.password === "string" ? accounts.authenticate(login_name(request), body.password, code) : { user: null, needs_code: false };
-      if (user === null) {
-        if (needs_code) return reply.code(401).send({ error: code ? "That code does not match." : "Enter the code from your authenticator app.", code_needed: true });
-        return reply.code(401).send({ error: "Wrong name or password." });
+      const { user, needs_code, retry_after_seconds } = typeof body.password === "string"
+        ? await accounts.authenticate_async(login_name(request), body.password, code)
+        : { user: null, needs_code: false, retry_after_seconds: undefined };
+      if (user === null && !needs_code) return reply.code(401).send({ error: "Wrong name or password." });
+      // The password was right, so this try does not count against the address, and the user's own limit counts the codes.
+      address_tries.give_back(request.ip);
+      if (retry_after_seconds !== undefined) {
+        return reply.code(429).header("retry-after", String(retry_after_seconds)).send({ error: too_many_tries_text, code_needed: true });
       }
+      if (user === null) return reply.code(401).send({ error: code ? "That code does not match." : "Enter the code from your authenticator app.", code_needed: true });
       // A device, such as the phone app syncing with this server, gets a token of its own in place of a cookie.
       if (typeof body.device === "string" && body.device.trim() !== "") {
         if (lacks_second_factor(user)) return reply.code(403).send({ error: "Set up a second factor on the page before signing in a device." });
@@ -363,7 +378,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
     scope.put<{ Body: { current?: unknown; next?: unknown } }>(`${routes.account}/password`, async (request) => {
       const viewer = request.viewer!;
-      accounts.change_password(viewer.name, request.body?.current, request.body?.next);
+      await accounts.change_password_async(viewer.name, request.body?.current, request.body?.next);
       accounts.close_sessions(viewer.name, viewer.via === "session" ? viewer.credential_id : null);
       return { ok: true };
     });
@@ -415,7 +430,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
     scope.post<{ Body: Record<string, unknown> }>(routes.users, async (request, reply) => {
       const body = request.body ?? {};
-      const user = accounts.create_user({ name: body.name, role: body.role, access: body.access, password: body.password });
+      const user = await accounts.create_user_async({ name: body.name, role: body.role, access: body.access, password: body.password });
       request.log.info(`${request.viewer!.name} added the user ${user.name} as ${user.role}`);
       return reply.code(201).send(user);
     });
@@ -423,7 +438,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     // A change to someone's role, access or password signs them out everywhere.
     scope.put<{ Params: { name: string }; Body: Record<string, unknown> }>(`${routes.users}/:name`, async (request) => {
       const body = request.body ?? {};
-      const user = accounts.update_user(request.params.name, { role: body.role, access: body.access, password: body.password });
+      const user = await accounts.update_user_async(request.params.name, { role: body.role, access: body.access, password: body.password });
       accounts.close_sessions(user.name);
       request.log.info(`${request.viewer!.name} changed the user ${user.name}`);
       return user;

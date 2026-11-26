@@ -62,6 +62,21 @@ describe("token sign-in", () => {
     expect(call.statusCode).toBe(401);
   });
 
+  it("makes an address that sends too many wrong tokens wait, without counting the right ones", async () => {
+    await build({ address_tries_allowed: 2 });
+    const headers = { "content-type": "application/x-www-form-urlencoded" };
+    const post = (token: string, remoteAddress = "10.0.0.1") => app.inject({ method: "POST", url: "/login", payload: `token=${token}`, headers, remoteAddress });
+
+    const statuses = [(await post("nope")).statusCode, (await post(secret)).statusCode, (await post(secret)).statusCode, (await post("nope")).statusCode];
+    const refused = await post(secret);
+
+    expect(statuses).toEqual([401, 303, 303, 401]);
+    expect(refused.statusCode).toBe(429);
+    expect(refused.body).toBe("Too many tries; wait a few minutes.");
+    expect(Number(refused.headers["retry-after"])).toBeGreaterThan(0);
+    expect((await post(secret, "10.0.0.2")).statusCode).toBe(303);
+  });
+
   it("takes the token as a bearer header", async () => {
     await build();
     expect((await app.inject({ method: "GET", url: "/api/things", headers: { authorization: `Bearer ${secret}` } })).statusCode).toBe(200);

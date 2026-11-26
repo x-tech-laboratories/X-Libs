@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { page_only_calls, type MethodSpec } from "../src/api_spec.ts";
 import { register_accounts, calls_under, device_label, is_user_or_device, type AccountSignInOptions } from "../src/server/account_sign_in.ts";
-import { AccountStore } from "../src/server/account_store.ts";
-import { hash_password } from "../src/server/passwords.ts";
+import { AccountStore, type AccountStoreOptions } from "../src/server/account_store.ts";
+import { hash_password, PasswordHashSlots, verify_password_async, type PasswordHasher } from "../src/server/passwords.ts";
 import { code_at } from "../src/server/totp.ts";
 import { send_raw } from "./server/raw_request.ts";
 
@@ -15,12 +15,13 @@ let app: FastifyInstance;
 
 afterEach(() => app?.close());
 
-async function serve(options: Partial<AccountSignInOptions> = {}): Promise<AccountStore> {
+async function serve(options: Partial<AccountSignInOptions> = {}, store_options: Partial<AccountStoreOptions> = {}): Promise<AccountStore> {
   const accounts = new AccountStore({
     database: new DatabaseSync(":memory:"),
     app_name: "X-Test",
     roles: ["viewer", "operator", "admin"],
     declared: new Map([["root", hash_password(password)]]),
+    ...store_options,
   });
   app = Fastify();
   await register_accounts(app, {
@@ -502,5 +503,166 @@ describe("spelling of the path", () => {
     expect(await send_raw(app, "GET", "/api/users", headers)).toMatchObject({ status: 403 });
     expect(await send_raw(app, "GET", "/api/account/sessions", headers)).toMatchObject({ status: 403 });
     expect(await send_raw(app, "GET", "/api/%61ccount/sessions", headers)).toMatchObject({ status: 400 });
+  });
+});
+
+describe("sign-in limits", () => {
+  const too_many = { error: "Too many tries; wait a few minutes." };
+  const new_password = "another long password";
+
+  function sign_in_from(address: string, body: Record<string, unknown>): Promise<LightMyRequestResponse> {
+    return app.inject({ method: "POST", url: "/api/login", payload: body, remoteAddress: address });
+  }
+
+  // A hasher whose checks wait until the test lets each one finish.
+  function held_hasher() {
+    const finishers: Array<() => void> = [];
+    const hasher: PasswordHasher = {
+      hash: async () => "unused",
+      verify: async (given, stored) => {
+        await new Promise<void>((finish) => finishers.push(finish));
+        return verify_password_async(given, stored);
+      },
+    };
+    return { hasher, finishers };
+  }
+
+  it("makes an address that gives a new name each time wait, whatever the names", async () => {
+    await serve({ address_tries_allowed: 3 });
+
+    const refused = [];
+    for (let attempt = 0; attempt < 4; attempt++) refused.push(await sign_in_from("10.0.0.1", { name: `guess${attempt}`, password: "wrong" }));
+    const elsewhere = await sign_in_from("10.0.0.2", { name: "root", password });
+
+    expect(refused.map((response) => response.statusCode)).toEqual([401, 401, 401, 429]);
+    expect(refused[3]!.json()).toEqual(too_many);
+    expect(Number(refused[3]!.headers["retry-after"])).toBeGreaterThan(0);
+    expect(elsewhere.statusCode).toBe(204);
+  });
+
+  it("answers a known name and an unknown one alike once an address waits", async () => {
+    await serve({ address_tries_allowed: 1 });
+    await sign_in({ name: "nobody", password: "wrong" });
+
+    const known = await sign_in({ name: "root", password: "wrong" });
+    const unknown = await sign_in({ name: "nobody", password: "wrong" });
+
+    expect([known.statusCode, unknown.statusCode]).toEqual([429, 429]);
+    expect(known.json()).toEqual(unknown.json());
+  });
+
+  it("still makes one name wait after five wrong tries when the address has more", async () => {
+    await serve({ address_tries_allowed: 50 });
+
+    for (let attempt = 0; attempt < 5; attempt++) await sign_in({ name: "root", password: "wrong" });
+
+    expect((await sign_in({ name: "root", password })).statusCode).toBe(429);
+    expect((await sign_in({ name: "vera", password: "wrong" })).statusCode).toBe(401);
+  });
+
+  it("lets a right password in after a few wrong ones, without counting the sign-ins that worked", async () => {
+    await serve({ address_tries_allowed: 3, tries_allowed: 100 });
+
+    await sign_in({ name: "root", password: "wrong" });
+    await sign_in({ name: "root", password: "wrong" });
+    const statuses = [];
+    for (let attempt = 0; attempt < 5; attempt++) statuses.push((await sign_in({ name: "root", password })).statusCode);
+
+    expect(statuses).toEqual([204, 204, 204, 204, 204]);
+    expect((await sign_in({ name: "root", password: "wrong" })).statusCode).toBe(401);
+    expect((await sign_in({ name: "root", password: "wrong" })).statusCode).toBe(429);
+  });
+
+  it("answers 429 with Retry-After when every password slot is taken, without queueing more", async () => {
+    const held = held_hasher();
+    await serve({}, { password_hashes: new PasswordHashSlots({ at_once: 1, waiting: 1, hasher: held.hasher }) });
+
+    const running = sign_in_from("10.0.0.1", { name: "root", password });
+    const queued = sign_in_from("10.0.0.2", { name: "root", password });
+    while (held.finishers.length === 0) await new Promise((settle) => setTimeout(settle, 5));
+    const refused = await sign_in_from("10.0.0.3", { name: "root", password });
+    held.finishers.shift()!();
+    while (held.finishers.length === 0) await new Promise((settle) => setTimeout(settle, 5));
+    held.finishers.shift()!();
+
+    expect(refused.statusCode).toBe(429);
+    expect(refused.headers["retry-after"]).toBe("1");
+    expect(refused.json()).toEqual({ error: "The server is busy checking passwords; try again in a moment." });
+    expect((await running).statusCode).toBe(204);
+    expect((await queued).statusCode).toBe(204);
+  });
+
+  it("still pays a hash for a name that does not exist", async () => {
+    const checked: string[] = [];
+    const hasher: PasswordHasher = {
+      hash: async () => "unused",
+      verify: async (given, stored) => {
+        checked.push(stored);
+        return verify_password_async(given, stored);
+      },
+    };
+    await serve({}, { password_hashes: new PasswordHashSlots({ hasher }) });
+
+    const response = await sign_in({ name: "nobody", password });
+
+    expect(response.json()).toEqual({ error: "Wrong name or password." });
+    expect(checked).toHaveLength(1);
+    expect(checked[0]).toMatch(/^scrypt\$/);
+  });
+
+  it("limits the codes one user may try, from any address, once the password is right", async () => {
+    const accounts = await serve({ address_tries_allowed: 100 }, { secret_tries_allowed: 2 });
+    const { secret } = accounts.start_totp("root");
+    accounts.confirm_totp("root", code_at(secret, Date.now() / 1000));
+
+    const first = await sign_in_from("10.0.0.1", { name: "root", password, code: "000000" });
+    const second = await sign_in_from("10.0.0.2", { name: "root", password, code: "not a recovery code" });
+    const third = await sign_in_from("10.0.0.3", { name: "root", password, code: code_at(secret, Date.now() / 1000 + 30) });
+
+    expect([first.statusCode, second.statusCode]).toEqual([401, 401]);
+    expect(third.statusCode).toBe(429);
+    expect(third.json()).toEqual({ ...too_many, code_needed: true });
+    expect(Number(third.headers["retry-after"])).toBeGreaterThan(0);
+  });
+
+  it("limits the codes tried to turn the second factor off", () => {
+    const accounts = new AccountStore({ database: new DatabaseSync(":memory:"), app_name: "X-Test", declared: new Map([["root", hash_password(password)]]), secret_tries_allowed: 1 });
+    const { secret } = accounts.start_totp("root");
+    accounts.confirm_totp("root", code_at(secret, Date.now() / 1000));
+
+    expect(() => accounts.disable_totp("root", "000000")).toThrow("That code does not match.");
+    expect(() => accounts.disable_totp("root", code_at(secret, Date.now() / 1000 + 30))).toThrow(too_many.error);
+  });
+
+  it("limits the current passwords one user may try when changing it", async () => {
+    const accounts = await serve({}, { secret_tries_allowed: 2 });
+    accounts.create_user({ name: "vera", role: "viewer", access: null, password });
+    const cookies = { x_test_session: cookie_of(await sign_in({ name: "vera", password })).value };
+    const change = (current: string) => app.inject({ method: "PUT", url: "/api/account/password", cookies, payload: { current, next: new_password } });
+
+    expect((await change("wrong")).statusCode).toBe(403);
+    expect((await change(password)).statusCode).toBe(200);
+    expect((await sign_in({ name: "vera", password: new_password })).statusCode).toBe(204);
+    expect((await change("wrong")).statusCode).toBe(403);
+    const refused = await change(new_password);
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json()).toEqual(too_many);
+    expect(Number(refused.headers["retry-after"])).toBeGreaterThan(0);
+    expect(() => accounts.change_password("vera", "wrong", "a third long password")).toThrow(too_many.error);
+  });
+
+  it("adds and changes users with their passwords hashed in the shared slots", async () => {
+    const accounts = await serve();
+    const cookies = { x_test_session: cookie_of(await sign_in({ name: "root", password })).value };
+
+    const added = await app.inject({ method: "POST", url: "/api/users", cookies, payload: { name: "vera", role: "viewer", password } });
+    const changed = await app.inject({ method: "PUT", url: "/api/users/vera", cookies, payload: { role: "operator", password: new_password } });
+    const again = await app.inject({ method: "POST", url: "/api/users", cookies, payload: { name: "vera", role: "viewer", password } });
+
+    expect(added.statusCode).toBe(201);
+    expect(changed.json()).toMatchObject({ name: "vera", role: "operator" });
+    expect(again.statusCode).toBe(409);
+    expect(accounts.authenticate("vera", new_password, undefined).user?.role).toBe("operator");
+    await expect(accounts.update_user_async("nobody", { role: "viewer" })).rejects.toThrow("No user named 'nobody'.");
   });
 });

@@ -1,9 +1,19 @@
 // Password hashes: scrypt with a random salt, and the accounts file an app logs in with, one `name:hash` line per user.
 
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { promisify } from "node:util";
 
 const key_length = 64;
+
+// Each half of a stored hash is whole bytes of hex.
+const hex_pattern = /^(?:[0-9a-f]{2})+$/i;
+
+// How many password hashes run at once and how many more may wait; two leave the rest of Node's thread pool free.
+export const default_hashes_at_once = 2;
+export const default_hashes_waiting = 8;
+
+const scrypt_async = promisify(scrypt) as (password: string, salt: Buffer, length: number) => Promise<Buffer>;
 
 // Each user's name and password hash.
 export type Accounts = Map<string, string>;
@@ -13,19 +23,109 @@ export const account_name_pattern = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 // A line holding only a hash logs in as this user.
 export const default_account_name = "admin";
 
-// Stored as `scrypt$<salt hex>$<hash hex>`.
+// ── Hashes ───────────────────────────────────────────────────────────────────
+
+// Stored as `scrypt$<salt hex>$<hash hex>`; this blocks the thread, so a request handler uses `hash_password_async`.
 export function hash_password(password: string): string {
   const salt = randomBytes(16);
   return `scrypt$${salt.toString("hex")}$${scryptSync(password, salt, key_length).toString("hex")}`;
 }
 
-export function verify_password(password: string, stored: string): boolean {
-  const [scheme, salt_hex, hash_hex] = stored.trim().split("$");
-  if (scheme !== "scrypt" || !salt_hex || !hash_hex) return false;
-  const expected = Buffer.from(hash_hex, "hex");
-  const actual = scryptSync(password, Buffer.from(salt_hex, "hex"), expected.length);
-  return timingSafeEqual(actual, expected);
+// The same hash made on Node's thread pool, so other requests go on while it runs.
+export async function hash_password_async(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  return `scrypt$${salt.toString("hex")}$${(await scrypt_async(password, salt, key_length)).toString("hex")}`;
 }
+
+// This blocks the thread, so a request handler uses `verify_password_async`.
+export function verify_password(password: string, stored: string): boolean {
+  const parts = hash_parts(stored);
+  if (parts === null) return false;
+  return timingSafeEqual(scryptSync(password, parts.salt, parts.expected.length), parts.expected);
+}
+
+// The same check made on Node's thread pool, so other requests go on while it runs.
+export async function verify_password_async(password: string, stored: string): Promise<boolean> {
+  const parts = hash_parts(stored);
+  if (parts === null) return false;
+  return timingSafeEqual(await scrypt_async(password, parts.salt, parts.expected.length), parts.expected);
+}
+
+// The salt and hash a stored hash holds, or null when it is not a whole scrypt hash.
+function hash_parts(stored: string): { salt: Buffer; expected: Buffer } | null {
+  const [scheme, salt_hex = "", hash_hex = ""] = stored.trim().split("$");
+  if (scheme !== "scrypt" || !hex_pattern.test(salt_hex) || !hex_pattern.test(hash_hex)) return null;
+  return { salt: Buffer.from(salt_hex, "hex"), expected: Buffer.from(hash_hex, "hex") };
+}
+
+// ── Hash slots ───────────────────────────────────────────────────────────────
+
+// What makes and checks hashes for `PasswordHashSlots`; the asynchronous scrypt ones unless a test hands in its own.
+export interface PasswordHasher {
+  hash: (password: string) => Promise<string>;
+  verify: (password: string, stored: string) => Promise<boolean>;
+}
+
+export interface PasswordHashSlotsOptions {
+  // How many hashes run at once; `default_hashes_at_once` unless set.
+  at_once?: number;
+  // How many more may wait for a slot before the next is refused; `default_hashes_waiting` unless set.
+  waiting?: number;
+  hasher?: PasswordHasher;
+}
+
+// A hash refused because every slot is taken and the queue is full, which a route answers with 429 and Retry-After.
+export class PasswordHashesBusy extends Error {
+  readonly statusCode = 429;
+  readonly retry_after_seconds = 1;
+
+  constructor() {
+    super("The server is busy checking passwords; try again in a moment.");
+    this.name = "PasswordHashesBusy";
+  }
+}
+
+// Keeps the password hashes a server runs at once to a few with a short queue, so a flood of sign-ins cannot take every thread.
+export class PasswordHashSlots {
+  private readonly at_once: number;
+  private readonly most_waiting: number;
+  private readonly hasher: PasswordHasher;
+  private running = 0;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(options: PasswordHashSlotsOptions = {}) {
+    this.at_once = options.at_once ?? default_hashes_at_once;
+    this.most_waiting = options.waiting ?? default_hashes_waiting;
+    this.hasher = options.hasher ?? { hash: hash_password_async, verify: verify_password_async };
+  }
+
+  hash(password: string): Promise<string> {
+    return this.in_slot(() => this.hasher.hash(password));
+  }
+
+  verify(password: string, stored: string): Promise<boolean> {
+    return this.in_slot(() => this.hasher.verify(password, stored));
+  }
+
+  // Runs the work once a slot is free, refuses it when the queue is full, and hands the slot on when it ends.
+  private async in_slot<Result>(work: () => Promise<Result>): Promise<Result> {
+    if (this.running < this.at_once) this.running += 1;
+    else if (this.queue.length >= this.most_waiting) throw new PasswordHashesBusy();
+    else await new Promise<void>((resume) => this.queue.push(resume));
+    try {
+      return await work();
+    } finally {
+      const next = this.queue.shift();
+      if (next === undefined) this.running -= 1;
+      else next();
+    }
+  }
+}
+
+// The slots every route in the process shares unless it is handed its own.
+export const shared_password_hashes = new PasswordHashSlots();
+
+// ── Accounts file ────────────────────────────────────────────────────────────
 
 // Reads `name:hash` lines, skipping blank lines and `#` comments.
 export function parse_accounts(text: string, source = "the accounts file"): Accounts {

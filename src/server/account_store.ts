@@ -9,7 +9,8 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { migrate, type SqlDatabase, type SqlValue } from "../sql.ts";
-import { account_name_pattern, hash_password, verify_password, type Accounts } from "./passwords.ts";
+import { AttemptLimit, too_many_tries_text } from "./attempt_limit.ts";
+import { account_name_pattern, hash_password, shared_password_hashes, verify_password, type Accounts, type PasswordHashSlots } from "./passwords.ts";
 import { match_declared_token, type DeclaredToken } from "./declared_tokens.ts";
 import { matching_step, new_secret, otpauth_uri } from "./totp.ts";
 import type { TokenKind } from "./viewers.ts";
@@ -79,12 +80,37 @@ export interface TokenScopeInfo {
 
 export class AccountError extends Error {
   readonly status: number;
+  // How many seconds a refused try waits before the next, sent as Retry-After, or null when waiting does not help.
+  readonly retry_after_seconds: number | null;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, retry_after_seconds: number | null = null) {
     super(message);
     this.name = "AccountError";
     this.status = status;
+    this.retry_after_seconds = retry_after_seconds;
   }
+}
+
+// A new user as a form sends it, checked by the store.
+export interface NewUserFields {
+  name: unknown;
+  role: unknown;
+  access: unknown;
+  password: unknown;
+}
+
+// The changes to a user as a form sends them, each left as it was when missing, and the password when empty too.
+export interface UserChanges {
+  role?: unknown;
+  access?: unknown;
+  password?: unknown;
+}
+
+// What a sign-in check found: the user when all matched, whether a code is asked for, and the wait after too many wrong codes.
+export interface SignInCheck {
+  user: User | null;
+  needs_code: boolean;
+  retry_after_seconds?: number;
 }
 
 export interface AccountStoreOptions {
@@ -107,11 +133,18 @@ export interface AccountStoreOptions {
   token_scopes?: Record<string, TokenScope>;
   // The most days a token lasts, which is also how long one lasts when made without its own; null, the default, allows tokens that never end.
   longest_token_days?: number | null;
+  // How many wrong codes, and apart from those wrong current passwords, one user may send before waiting; 5 in 300 seconds unless set.
+  secret_tries_allowed?: number;
+  secret_try_window_seconds?: number;
+  // Where the request handlers' password hashes run; the process's `shared_password_hashes` unless set.
+  password_hashes?: PasswordHashSlots;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 const recovery_code_count = 8;
+const default_secret_tries_allowed = 5;
+const default_secret_try_window_seconds = 5 * 60;
 const default_roles = ["user", "admin"] as const;
 
 // A session's last-seen time is written at most this often.
@@ -171,8 +204,15 @@ export class AccountStore {
   private declared_token_list: readonly DeclaredToken[];
   private readonly scopes: Record<string, TokenScope>;
   readonly longest_token_days: number | null;
+  private readonly secret_tries: AttemptLimit;
+  private readonly password_hashes: PasswordHashSlots;
 
   constructor(options: AccountStoreOptions) {
+    this.secret_tries = new AttemptLimit({
+      tries_allowed: options.secret_tries_allowed ?? default_secret_tries_allowed,
+      window_seconds: options.secret_try_window_seconds ?? default_secret_try_window_seconds,
+    });
+    this.password_hashes = options.password_hashes ?? shared_password_hashes;
     this.database = options.database;
     this.app_name = options.app_name;
     this.roles = options.roles ?? default_roles;
@@ -214,43 +254,99 @@ export class AccountStore {
     return [...[...this.declared.keys()].sort().map((name) => this.user(name)!), ...page];
   }
 
-  // Checks the password and, when the user has one, the second factor; a recovery code stands in for a code once.
-  authenticate(name: string, password: string, code: string | undefined): { user: User | null; needs_code: boolean } {
-    const user = this.user(name);
+  // Checks the password and then any second factor, hashing on the thread, so a request handler uses `authenticate_async`.
+  authenticate(name: string, password: string, code: string | undefined): SignInCheck {
     const stored = this.password_hash(name);
     // A missing user still costs a hash, so timing does not tell which names exist.
     const password_ok = verify_password(password, stored ?? stand_in_hash);
-    if (user === null || stored === null || !password_ok) return { user: null, needs_code: false };
-    if (!user.totp_enabled) return { user, needs_code: false };
-    if (!code) return { user: null, needs_code: true };
-    return { user: this.second_factor(name, code) ? user : null, needs_code: true };
+    return this.after_password(name, stored !== null && password_ok, code);
   }
 
-  create_user(fields: { name: unknown; role: unknown; access: unknown; password: unknown }): User {
+  // The same check with the hash in one of the shared slots, which throws `PasswordHashesBusy` when they are full.
+  async authenticate_async(name: string, password: string, code: string | undefined): Promise<SignInCheck> {
+    const stored = this.password_hash(name);
+    // A missing user still costs a hash, so timing does not tell which names exist.
+    const password_ok = await this.password_hashes.verify(password, stored ?? stand_in_hash);
+    return this.after_password(name, stored !== null && password_ok, code);
+  }
+
+  // Checks the second factor once the password is right, a recovery code standing in for a code once, each counted as a try.
+  private after_password(name: string, password_ok: boolean, code: string | undefined): SignInCheck {
+    const user = this.user(name);
+    if (user === null || !password_ok) return { user: null, needs_code: false };
+    if (!user.totp_enabled) return { user, needs_code: false };
+    if (!code) return { user: null, needs_code: true };
+    const wait = this.secret_tries.take(`code\n${name}`);
+    if (wait > 0) return { user: null, needs_code: true, retry_after_seconds: wait };
+    if (!this.second_factor(name, code)) return { user: null, needs_code: true };
+    this.secret_tries.give_back(`code\n${name}`);
+    return { user, needs_code: true };
+  }
+
+  // This hashes on the thread, so a request handler uses `create_user_async`.
+  create_user(fields: NewUserFields): User {
+    const checked = this.checked_new_user(fields);
+    return this.insert_user(checked, checked.password === null ? null : hash_password(checked.password));
+  }
+
+  async create_user_async(fields: NewUserFields): Promise<User> {
+    const checked = this.checked_new_user(fields);
+    return this.insert_user(checked, checked.password === null ? null : await this.password_hashes.hash(checked.password));
+  }
+
+  private checked_new_user(fields: NewUserFields): { name: string; role: string; access: unknown; password: string | null } {
     const name = String(fields.name ?? "").trim();
     if (!account_name_pattern.test(name)) throw new AccountError("A user name is lowercase letters, digits, '.', '_' or '-', starting with a letter or digit.");
-    if (this.user(name) !== null) throw new AccountError(`A user named '${name}' already exists.`, 409);
+    this.refuse_existing(name);
     const role = this.checked_role(fields.role);
     const access = this.check_access(fields.access ?? null);
     const password = fields.password === undefined || fields.password === "" ? null : this.checked_password(fields.password);
-    this.run(
-      "INSERT INTO account_users (name, role, access, password_hash, created_epoch) VALUES (?, ?, ?, ?, ?)",
-      name, role, access === null ? null : JSON.stringify(access), password === null ? null : hash_password(password), now_seconds(),
-    );
-    return this.user(name)!;
+    return { name, role, access, password };
   }
 
-  update_user(name: string, fields: { role?: unknown; access?: unknown; password?: unknown }): User {
+  private insert_user(checked: { name: string; role: string; access: unknown }, password_hash: string | null): User {
+    // Checked again, as another request may have added the name while the hash ran.
+    this.refuse_existing(checked.name);
+    this.run(
+      "INSERT INTO account_users (name, role, access, password_hash, created_epoch) VALUES (?, ?, ?, ?, ?)",
+      checked.name, checked.role, checked.access === null ? null : JSON.stringify(checked.access), password_hash, now_seconds(),
+    );
+    return this.user(checked.name)!;
+  }
+
+  private refuse_existing(name: string): void {
+    if (this.user(name) !== null) throw new AccountError(`A user named '${name}' already exists.`, 409);
+  }
+
+  // This hashes on the thread, so a request handler uses `update_user_async`.
+  update_user(name: string, fields: UserChanges): User {
+    const password = this.checked_changes(name, fields);
+    return this.apply_changes(name, fields, password === null ? null : hash_password(password));
+  }
+
+  async update_user_async(name: string, fields: UserChanges): Promise<User> {
+    const password = this.checked_changes(name, fields);
+    return this.apply_changes(name, fields, password === null ? null : await this.password_hashes.hash(password));
+  }
+
+  // Checks every change before any is made, and answers the new password, or null when it stays.
+  private checked_changes(name: string, fields: UserChanges): string | null {
     this.refuse_declared(name, "its role and password come from the accounts file");
+    if (this.user(name) === null) throw new AccountError(`No user named '${name}'.`, 404);
+    if (fields.role !== undefined) this.checked_role(fields.role);
+    if (fields.access !== undefined) this.check_access(fields.access);
+    return fields.password !== undefined && fields.password !== "" ? this.checked_password(fields.password) : null;
+  }
+
+  private apply_changes(name: string, fields: UserChanges, password_hash: string | null): User {
+    // Checked again, as another request may have removed the user while the hash ran.
     if (this.user(name) === null) throw new AccountError(`No user named '${name}'.`, 404);
     if (fields.role !== undefined) this.run("UPDATE account_users SET role = ? WHERE name = ?", this.checked_role(fields.role), name);
     if (fields.access !== undefined) {
       const access = this.check_access(fields.access);
       this.run("UPDATE account_users SET access = ? WHERE name = ?", access === null ? null : JSON.stringify(access), name);
     }
-    if (fields.password !== undefined && fields.password !== "") {
-      this.run("UPDATE account_users SET password_hash = ? WHERE name = ?", hash_password(this.checked_password(fields.password)), name);
-    }
+    if (password_hash !== null) this.run("UPDATE account_users SET password_hash = ? WHERE name = ?", password_hash, name);
     return this.user(name)!;
   }
 
@@ -263,13 +359,30 @@ export class AccountStore {
     this.run("DELETE FROM account_tokens WHERE owner = ?", name);
   }
 
+  // This hashes on the thread, so a request handler uses `change_password_async`.
   change_password(name: string, current: unknown, next: unknown): void {
-    this.refuse_declared(name, "its password is in the accounts file");
-    const stored = this.password_hash(name);
-    if (stored === null || typeof current !== "string" || !verify_password(current, stored)) {
+    const stored = this.take_password_try(name);
+    if (stored === null || typeof current !== "string" || !verify_password(current, stored)) throw new AccountError("The current password is wrong.", 403);
+    this.secret_tries.give_back(`password\n${name}`);
+    this.run("UPDATE account_users SET password_hash = ? WHERE name = ?", hash_password(this.checked_password(next)), name);
+  }
+
+  async change_password_async(name: string, current: unknown, next: unknown): Promise<void> {
+    const stored = this.take_password_try(name);
+    if (stored === null || typeof current !== "string" || !(await this.password_hashes.verify(current, stored))) {
       throw new AccountError("The current password is wrong.", 403);
     }
-    this.run("UPDATE account_users SET password_hash = ? WHERE name = ?", hash_password(this.checked_password(next)), name);
+    this.secret_tries.give_back(`password\n${name}`);
+    const password_hash = await this.password_hashes.hash(this.checked_password(next));
+    this.run("UPDATE account_users SET password_hash = ? WHERE name = ?", password_hash, name);
+  }
+
+  // Counts a try at the user's current password, refusing it once they have used up their tries, and answers the stored hash.
+  private take_password_try(name: string): string | null {
+    this.refuse_declared(name, "its password is in the accounts file");
+    const wait = this.secret_tries.take(`password\n${name}`);
+    if (wait > 0) throw new AccountError(too_many_tries_text, 429, wait);
+    return this.password_hash(name);
   }
 
   // ── Second factor ────────────────────────────────────────────────────────
@@ -296,8 +409,12 @@ export class AccountStore {
     return codes;
   }
 
+  // Turning the second factor off takes a code, counted against the same tries as signing in with one.
   disable_totp(name: string, code: unknown): void {
+    const wait = this.secret_tries.take(`code\n${name}`);
+    if (wait > 0) throw new AccountError(too_many_tries_text, 429, wait);
     if (!this.second_factor(name, String(code ?? ""))) throw new AccountError("That code does not match.", 403);
+    this.secret_tries.give_back(`code\n${name}`);
     this.reset_totp(name);
   }
 
