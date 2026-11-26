@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -94,6 +95,11 @@ public class PhoneService extends Service {
         return true;
     }
 
+    // How X-Libs' native modules, such as WorkerSockets, hand the worker their replies and events.
+    interface Emitter {
+        void emit(String module, String json);
+    }
+
     // What the worker's page reaches as window.XLibsWorkerHost.
     private static final class WorkerHost {
         @JavascriptInterface
@@ -110,6 +116,22 @@ public class PhoneService extends Service {
     private WebView worker;
     private boolean worker_ready = false;
     private final List<String> waiting = new ArrayList<>();
+    private WorkerSockets sockets;
+    private PowerManager.WakeLock awake;
+
+    // Hands a native module's event to the worker as window.x_libs_native_event(module, json), keeping the phone
+    // awake a little while so the worker can act on it, such as answering a packet that woke the phone.
+    private void emit(String module, String json) {
+        if (awake != null) awake.acquire(3_000);
+        main.post(() -> {
+            if (worker == null) return;
+            String call = "window.x_libs_native_event && window.x_libs_native_event(" + JSONObject.quote(module) + "," + JSONObject.quote(json) + ")";
+            if (!worker_ready) waiting_calls.add(call);
+            else worker.evaluateJavascript(call, null);
+        });
+    }
+
+    private final List<String> waiting_calls = new ArrayList<>();
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -135,6 +157,11 @@ public class PhoneService extends Service {
     @Override
     public void onDestroy() {
         running = null;
+        if (awake != null && awake.isHeld()) awake.release();
+        if (sockets != null) {
+            sockets.close_all();
+            sockets = null;
+        }
         if (worker != null) {
             worker.destroy();
             worker = null;
@@ -178,6 +205,14 @@ public class PhoneService extends Service {
         worker.getSettings().setJavaScriptEnabled(true);
         worker.getSettings().setDomStorageEnabled(true);
         worker.addJavascriptInterface(new WorkerHost(), "XLibsWorkerHost");
+        sockets = new WorkerSockets(this, this::emit);
+        worker.addJavascriptInterface(sockets, "XLibsSockets");
+        PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        // Without WAKE_LOCK declared the phone simply sleeps sooner.
+        if (power != null && checkSelfPermission(android.Manifest.permission.WAKE_LOCK) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            awake = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "x-libs:phone-service");
+            awake.setReferenceCounted(false);
+        }
         worker.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -190,6 +225,8 @@ public class PhoneService extends Service {
             @Override
             public void onPageFinished(WebView view, String url) {
                 worker_ready = true;
+                for (String call : waiting_calls) worker.evaluateJavascript(call, null);
+                waiting_calls.clear();
                 for (String message : waiting) deliver(message);
                 waiting.clear();
             }
