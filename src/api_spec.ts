@@ -26,6 +26,11 @@ export interface MethodSpec {
   page_only?: boolean;
 }
 
+// The names of a call's arguments in order, all that taking them by name needs; a `MethodSpec` is one.
+export interface NamedParams {
+  params: readonly { name: string; optional?: boolean }[];
+}
+
 // A spec for every method of a table, so a method added without one fails to compile.
 export type ApiSpec<Methods> = { [Name in keyof Methods & string]: MethodSpec };
 
@@ -48,7 +53,7 @@ export function input_schema(spec: MethodSpec): JsonSchema {
 }
 
 // Named arguments put in the method's order, dropping missing ones at the end so the method's own defaults apply.
-export function positional_args(spec: MethodSpec, named: Record<string, unknown>): unknown[] {
+export function positional_args(spec: NamedParams, named: Record<string, unknown>): unknown[] {
   const known = new Set(spec.params.map((param) => param.name));
   const unknown_names = Object.keys(named).filter((name) => !known.has(name));
   if (unknown_names.length > 0) throw new Error(`unknown argument ${unknown_names.join(", ")}`);

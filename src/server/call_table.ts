@@ -1,10 +1,12 @@
 // A table of calls served over HTTP, as a desktop app's daemon and a web server both answer them: POST <path>/<method>
-// with the arguments as a JSON list, every answer sent as JSON, and the other pages told after any call that changes data.
+// with the arguments as a JSON list, or by name as a JSON object for a call whose argument names it is given, every
+// answer sent as JSON, and the other pages told after any call that changes data.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
+import { positional_args, type NamedParams } from "../api_spec.ts";
 import { default_client_id_header } from "./events.ts";
 import { send_text } from "./replies.ts";
 
@@ -19,6 +21,9 @@ export interface CallTableOptions {
   client_id_header?: string;
   // The largest body taken, such as for an import arriving as one call's argument; Fastify's own unless set.
   body_limit?: number;
+  // Each call's argument names in order, such as the app's `api_spec`, so a call also takes its arguments by name as
+  // a JSON object; a call missing here takes only a list, and none does unless set.
+  params?: Partial<Record<string, NamedParams>>;
 }
 
 // ── Route ────────────────────────────────────────────────────────────────────
@@ -31,9 +36,18 @@ export function register_call_table(api: FastifyInstance, path: string, methods:
     const { method } = request.params;
     if (!Object.hasOwn(methods, method)) return send_text(reply, 404, `no call named ${method}`);
     const body: unknown = request.body ?? [];
-    if (!Array.isArray(body)) return send_text(reply, 400, "send the arguments as a JSON list");
+    const spec = options.params && Object.hasOwn(options.params, method) ? options.params[method] : undefined;
+    let args: unknown[];
+    if (Array.isArray(body)) args = body;
+    else if (spec && typeof body === "object" && body !== null) {
+      try {
+        args = positional_args(spec, body as Record<string, unknown>);
+      } catch (error) {
+        return send_text(reply, 400, (error as Error).message);
+      }
+    } else return send_text(reply, 400, spec ? "send the arguments as a JSON list or object" : "send the arguments as a JSON list");
 
-    const result: unknown = await (methods as Record<string, (...args: unknown[]) => unknown>)[method]!(...body);
+    const result: unknown = await (methods as Record<string, (...args: unknown[]) => unknown>)[method]!(...args);
     const is_read_only = options.is_read_only(method);
     if (!is_read_only) options.on_change?.(String(request.headers[header] ?? ""), method, request);
 
