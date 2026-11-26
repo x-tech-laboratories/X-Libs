@@ -459,7 +459,7 @@ export function ChartView({ card, data_set, rows, now }: ChartViewProps) {
 
   switch (card.view) {
     case "bars":
-      return <BarChart title={title} bars={colored.map((group) => ({ label: group.label, value: group.value ?? 0, color: group.color }))} format={format} />;
+      return <BarChart title={title} bars={colored.map((group) => ({ label: group.label, value: group.value ?? 0, color: group.color }))} format={format} labels />;
     case "stacked_bars":
       return (
         <>

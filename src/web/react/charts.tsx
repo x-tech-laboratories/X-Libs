@@ -146,11 +146,32 @@ export function moving_average(points: Series["points"], window_seconds: number)
 
 // ── Bar chart ────────────────────────────────────────────────────────────────
 
-export function BarChart({ title, bars, format }: { title: string; bars: Bar[]; format: (value: number) => string }) {
+interface BarChartProps {
+  title: string;
+  bars: Bar[];
+  format: (value: number) => string;
+  // Names each bar under it, cut short to its width, or only the first and last when the bars are too narrow to name.
+  labels?: boolean;
+}
+
+// The narrowest bar slot that still gets its own name under it.
+const narrowest_named_bar = 30;
+
+// How wide one letter of a tick runs in the chart's own units, near enough to cut a label to its bar.
+const tick_letter_width = 5.5;
+
+// A label cut to the letters that fit a width, ending in an ellipsis when cut.
+export function fitted_label(label: string, room: number): string {
+  const letters = Math.max(1, Math.floor(room / tick_letter_width));
+  return label.length <= letters ? label : `${label.slice(0, Math.max(1, letters - 1))}…`;
+}
+
+export function BarChart({ title, bars, format, labels = false }: BarChartProps) {
   if (bars.length === 0) return <EmptyChart title={title} message="Nothing to show yet." />;
   const top = Math.max(...bars.map((bar) => bar.value)) || 1;
   const slot = (width - margin.left - margin.right) / bars.length;
   const y = (value: number) => height - margin.bottom - value / top * (height - margin.top - margin.bottom);
+  const named = labels && slot >= narrowest_named_bar;
 
   return (
     <Figure title={title} legend={[]}>
@@ -158,6 +179,9 @@ export function BarChart({ title, bars, format }: { title: string; bars: Bar[]; 
         <AxisLines />
         <Tick x={margin.left - 6} y={y(top)} text={format(top)} anchor="end" />
         <Tick x={margin.left - 6} y={height - margin.bottom} text={format(0)} anchor="end" />
+        {named && bars.map((bar, index) => <Tick key={index} x={margin.left + (index + 0.5) * slot} y={height - 4} text={fitted_label(bar.label, slot - 4)} anchor="middle" />)}
+        {labels && !named && <Tick x={margin.left} y={height - 4} text={bars[0]!.label} anchor="start" />}
+        {labels && !named && bars.length > 1 && <Tick x={width - margin.right} y={height - 4} text={bars[bars.length - 1]!.label} anchor="end" />}
         {bars.map((bar, index) => (
           <rect
             key={index}
@@ -683,7 +707,7 @@ function AxisLines() {
   );
 }
 
-function Tick({ x, y, text, anchor }: { x: number; y: number; text: string; anchor: "start" | "end" }) {
+function Tick({ x, y, text, anchor }: { x: number; y: number; text: string; anchor: "start" | "middle" | "end" }) {
   return <text x={x.toFixed(1)} y={y.toFixed(1)} textAnchor={anchor} dominantBaseline="middle" className="tick">{text}</text>;
 }
 
