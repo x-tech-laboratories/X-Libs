@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 
 import { type CommandStream, kill_grace_in_milliseconds, signal_group } from "./commands.ts";
-import { is_run_id, type LongRun, type LongRunPoll, type LongRunState } from "./protocol.ts";
+import { is_run_id, unknown_run_message, type LongRun, type LongRunPoll, type LongRunState } from "./protocol.ts";
 import type { TaskRunner } from "./tasks.ts";
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ export class LongRuns<Task> {
 
   private require(run_id: string): RunRecord {
     const record = this.record(run_id);
-    if (record === null) throw new LongRunError(`No run named '${run_id}'.`);
+    if (record === null) throw new LongRunError(unknown_run_message(run_id));
     return record;
   }
 

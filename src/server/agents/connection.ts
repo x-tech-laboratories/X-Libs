@@ -6,8 +6,8 @@
 import { Readable } from "node:stream";
 
 import {
-  decode_chunk, encode_message, is_agent_message, parse_agent_message,
-  type AgentApp, type AgentMessage, type AppMessage, type LongRun, type LongRunPoll, type RequestType, type Requests, type RunResult, type ServerMessage,
+  clip_text, decode_chunk, encode_message, is_agent_message, most_runs_in_reply, parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs,
+  parse_run_result, type AgentApp, type AgentMessage, type AppMessage, type LongRun, type LongRunPoll, type RequestType, type Requests, type RunResult, type ServerMessage,
 } from "../../agent/protocol.ts";
 import { AgentError, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
 
@@ -37,6 +37,9 @@ const socket_open = 1;
 
 // A run's reply may come this long after its own timeout, which the agent enforces, before the server gives up.
 const run_reply_slack_in_milliseconds = 30_000;
+
+// The error an agent gives for a failed request is cut to this many characters.
+const most_error_length = 16 * 1024;
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -149,7 +152,8 @@ export class AgentConnection<Task> implements Agent<Task> {
   async run(task: Task, options: AgentRunOptions): Promise<RunResult> {
     try {
       const timeout = options.timeout_in_seconds * 1000 + run_reply_slack_in_milliseconds;
-      return await this.send_request("run", { task, stdin: options.stdin ?? null, timeout_in_seconds: options.timeout_in_seconds }, timeout);
+      const reply = await this.send_request("run", { task, stdin: options.stdin ?? null, timeout_in_seconds: options.timeout_in_seconds }, timeout);
+      return parse_run_result(reply) ?? { exit_code: -1, stdout: "", stderr: this.malformed("run").message };
     } catch (error) {
       return { exit_code: -1, stdout: "", stderr: (error as Error).message };
     }
@@ -159,28 +163,28 @@ export class AgentConnection<Task> implements Agent<Task> {
     return this.open_stream((id, window) => ({ type: "stream", id, task, stdin: options.stdin ?? null, window }));
   }
 
-  start(run_id: string, task: Task, options: AgentStreamOptions = {}): Promise<LongRun> {
-    return this.send_request("start", { run_id, task, stdin: options.stdin ?? null });
+  async start(run_id: string, task: Task, options: AgentStreamOptions = {}): Promise<LongRun> {
+    return parse_long_run(await this.send_request("start", { run_id, task, stdin: options.stdin ?? null })) ?? this.reject_malformed("start");
   }
 
-  poll(run_id: string, offset: number): Promise<LongRunPoll> {
-    return this.send_request("poll", { run_id, offset });
+  async poll(run_id: string, offset: number): Promise<LongRunPoll> {
+    return parse_long_run_poll(await this.send_request("poll", { run_id, offset })) ?? this.reject_malformed("poll");
   }
 
   attach(run_id: string, offset: number): CommandStream {
     return this.open_stream((id, window) => ({ type: "attach", id, run_id, offset, window }));
   }
 
-  stop(run_id: string): Promise<LongRun> {
-    return this.send_request("stop", { run_id });
+  async stop(run_id: string): Promise<LongRun> {
+    return parse_long_run(await this.send_request("stop", { run_id })) ?? this.reject_malformed("stop");
   }
 
   async forget(run_id: string): Promise<void> {
     await this.send_request("forget", { run_id });
   }
 
-  runs(): Promise<LongRun[]> {
-    return this.send_request("runs", {});
+  async runs(): Promise<LongRun[]> {
+    return parse_long_runs(await this.send_request("runs", {}), most_runs_in_reply) ?? this.reject_malformed("runs");
   }
 
   request(type: string, body: Record<string, unknown> = {}): Promise<unknown> {
@@ -219,7 +223,7 @@ export class AgentConnection<Task> implements Agent<Task> {
         clearTimeout(pending.timer);
         // The agent answered that the request failed, which is not the host being out of reach.
         if (message.type === "reply") pending.resolve(message.value);
-        else pending.reject(new AgentError(message.error));
+        else pending.reject(new AgentError(clip_text(message.error, most_error_length)));
         return;
       }
       case "stream_end":
@@ -251,6 +255,15 @@ export class AgentConnection<Task> implements Agent<Task> {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  // The error for a reply that is not the shape its request promises, which the caller may try again later.
+  private malformed(type: RequestType): AgentError {
+    return new AgentError(`The agent on ${this.host} answered a ${type} request with a malformed reply.`, true);
+  }
+
+  private reject_malformed(type: RequestType): never {
+    throw this.malformed(type);
+  }
 
   private send_request<K extends RequestType>(type: K, body: Requests<Task>[K]["body"], timeout = this.options.request_timeout_in_milliseconds): Promise<Requests<Task>[K]["reply"]> {
     if (!this.is_open) return Promise.reject(new AgentError(this.closed_reason!, true));

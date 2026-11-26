@@ -204,6 +204,89 @@ export function encode_message<Task>(message: ServerMessage<Task> | AgentMessage
   return JSON.stringify({ ...rest, [app.task_field]: task });
 }
 
+// ── Checking what an agent sends ─────────────────────────────────────────────
+
+// A hello lists at most this many long runs, the newest, so it stays small enough to arrive before login.
+export const most_runs_in_hello = 512;
+
+// A runs reply lists at most this many long runs, the newest.
+export const most_runs_in_reply = 10_000;
+
+// The host and version a hello names are cut to this many characters.
+export const most_hello_text_length = 256;
+
+const long_run_states: readonly LongRunState[] = ["running", "exited", "stopped", "lost"];
+
+function is_count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function is_exit_code(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isSafeInteger(value));
+}
+
+function is_state(value: unknown): value is LongRunState {
+  return typeof value === "string" && (long_run_states as readonly string[]).includes(value);
+}
+
+// The text cut to a length, so an agent cannot make the server keep an unbounded string.
+export function clip_text(text: string, length: number): string {
+  return text.length <= length ? text : text.slice(0, length);
+}
+
+// A long run record with only its own fields, or null for one that is not a well-formed record.
+export function parse_long_run(value: unknown): LongRun | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.run_id !== "string" || !is_run_id(record.run_id)) return null;
+  if (typeof record.pid !== "number" || !Number.isSafeInteger(record.pid)) return null;
+  if (typeof record.started_epoch !== "number" || !Number.isFinite(record.started_epoch)) return null;
+  if (!is_state(record.state) || !is_exit_code(record.exit_code)) return null;
+  return { run_id: record.run_id, pid: record.pid, started_epoch: record.started_epoch, state: record.state, exit_code: record.exit_code };
+}
+
+// The well-formed records in a list of long runs, at most the given number of them, the last; null for a value that is not a list.
+export function parse_long_runs(value: unknown, most: number): LongRun[] | null {
+  if (!Array.isArray(value)) return null;
+  const runs: LongRun[] = [];
+  for (const each of value.slice(-most)) {
+    const run = parse_long_run(each);
+    if (run !== null) runs.push(run);
+  }
+  return runs;
+}
+
+// A poll reply with only its own fields, or null for one whose fields are missing, of the wrong kind or inconsistent.
+export function parse_long_run_poll(value: unknown): LongRunPoll | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (!is_state(record.state) || !is_exit_code(record.exit_code) || typeof record.alive !== "boolean") return null;
+  if (!is_count(record.size) || !is_count(record.next_offset) || record.next_offset > record.size) return null;
+  if (typeof record.new_output !== "string") return null;
+  return {
+    state: record.state, exit_code: record.exit_code, alive: record.alive, size: record.size, new_output: record.new_output, next_offset: record.next_offset,
+  };
+}
+
+// A run reply with only its own fields, or null for one that is not well formed.
+export function parse_run_result(value: unknown): RunResult | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.exit_code !== "number" || !Number.isSafeInteger(record.exit_code)) return null;
+  if (typeof record.stdout !== "string" || typeof record.stderr !== "string") return null;
+  return { exit_code: record.exit_code, stdout: record.stdout, stderr: record.stderr };
+}
+
+// A hello whose texts are cut to length and whose runs are the well-formed ones, at most `most_runs_in_hello` of them.
+export function clip_hello<Hello extends Extract<AgentMessage, { type: "hello" }>>(hello: Hello): Hello {
+  return {
+    ...hello,
+    host: clip_text(hello.host, most_hello_text_length),
+    agent_version: clip_text(hello.agent_version, most_hello_text_length),
+    runs: parse_long_runs(hello.runs, most_runs_in_hello) ?? [],
+  };
+}
+
 // ── Output frames ────────────────────────────────────────────────────────────
 
 // A binary frame is one byte giving the id's length, the id, then the output bytes.
@@ -231,4 +314,9 @@ export function key_host_header(app_name: string): string {
 // A long run's id names its folder on the agent, so it is kept to safe characters.
 export function is_run_id(value: string): boolean {
   return /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/.test(value);
+}
+
+// What an agent answers for a run it does not know, which tells the server the run is gone.
+export function unknown_run_message(run_id: string): string {
+  return `No run named '${run_id}'.`;
 }
