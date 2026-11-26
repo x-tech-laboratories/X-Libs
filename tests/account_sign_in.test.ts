@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyInstance, type LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { register_accounts, device_label, type AccountSignInOptions } from "../src/server/account_sign_in.ts";
+import { register_accounts, device_label, is_user_or_device, type AccountSignInOptions } from "../src/server/account_sign_in.ts";
 import { AccountStore } from "../src/server/account_store.ts";
 import { hash_password } from "../src/server/passwords.ts";
 import { code_at } from "../src/server/totp.ts";
@@ -27,6 +27,7 @@ async function serve(options: Partial<AccountSignInOptions> = {}): Promise<Accou
     ...options,
   });
   app.get("/api/things", async (request) => ({ seen_by: request.viewer?.name }));
+  app.get("/api/who", async (request) => ({ via: request.viewer?.via, token_kind: request.viewer?.token_kind ?? null, is_user_or_device: is_user_or_device(request.viewer) }));
   app.post("/api/things", async () => ({ ok: true }));
   app.get("/", async () => "page");
   app.get("/metrics", async () => "metrics");
@@ -341,5 +342,46 @@ describe("token lifetimes", () => {
 
     expect(made.json<{ expires_epoch: number }>().expires_epoch).toBeGreaterThan(Date.now() / 1000);
     expect(forever.expires_epoch).toBeNull();
+  });
+});
+
+describe("token kinds", () => {
+  it("tells a device's token from a program's, and the page from both", async () => {
+    const accounts = await serve();
+    const device = (await sign_in({ name: "root", password, device: "Laptop" })).json<{ token: string }>().token;
+    const program = accounts.create_token("root", { name: "script", read_only: false }).token;
+    const cookie = cookie_of(await sign_in({ name: "root", password }));
+    const who = async (headers: Record<string, string>) => (await app.inject({ url: "/api/who", headers })).json();
+
+    expect(await who({ authorization: `Bearer ${device}` })).toEqual({ via: "token", token_kind: "device", is_user_or_device: true });
+    expect(await who({ authorization: `Bearer ${program}` })).toEqual({ via: "token", token_kind: "program", is_user_or_device: false });
+    expect(await who({ cookie: `x_test_session=${cookie.value}` })).toEqual({ via: "session", token_kind: null, is_user_or_device: true });
+    expect(accounts.tokens("root").map((token) => [token.name, token.kind])).toEqual([["Laptop", "device"], ["script", "program"]]);
+    expect(is_user_or_device(null)).toBe(false);
+  });
+
+  it("never lets the token form make a device's token, and keeps a device's token full", async () => {
+    const accounts = await serve();
+    const cookie = cookie_of(await sign_in({ name: "root", password }));
+    const made = await app.inject({ method: "POST", url: "/api/account/tokens", headers: { cookie: `x_test_session=${cookie.value}` }, payload: { name: "sneaky", read_only: false, kind: "device" } });
+
+    expect(made.statusCode).toBe(201);
+    expect(accounts.tokens("root")[0]!.kind).toBe("program");
+    expect(() => accounts.create_token("root", { name: "half", read_only: true, kind: "device" })).toThrow("A device's token is a full token.");
+  });
+
+  it("counts every full token made before kinds were kept as a device, and every narrower one as a program", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`
+      CREATE TABLE schema_versions (owner TEXT PRIMARY KEY, version INTEGER NOT NULL);
+      INSERT INTO schema_versions VALUES ('accounts', 3);
+      CREATE TABLE account_users (name TEXT PRIMARY KEY, role TEXT NOT NULL, access TEXT, password_hash TEXT, totp_secret TEXT, totp_pending TEXT, totp_last_step INTEGER, recovery_codes TEXT, created_epoch INTEGER NOT NULL);
+      CREATE TABLE account_sessions (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL, remember INTEGER NOT NULL, label TEXT NOT NULL, created_epoch INTEGER NOT NULL, last_seen_epoch INTEGER NOT NULL, expires_epoch INTEGER);
+      CREATE TABLE account_tokens (id INTEGER PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, owner TEXT NOT NULL, read_only INTEGER NOT NULL, created_epoch INTEGER NOT NULL, last_used_epoch INTEGER, scope TEXT, expires_epoch INTEGER);
+      INSERT INTO account_tokens (name, hash, owner, read_only, created_epoch, scope) VALUES ('phone', 'a', 'root', 0, 0, NULL), ('reader', 'b', 'root', 1, 0, NULL), ('adder', 'c', 'root', 1, 0, 'add_items');
+    `);
+    const accounts = new AccountStore({ database, app_name: "X-Test" });
+
+    expect(accounts.tokens().map((token) => [token.name, token.kind])).toEqual([["phone", "device"], ["reader", "program"], ["adder", "program"]]);
   });
 });

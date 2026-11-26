@@ -12,10 +12,12 @@ import fastify_cookie, { type CookieSerializeOptions } from "@fastify/cookie";
 import fastify_rate_limit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { AccountError, type AccountStore, type TokenScopeInfo, type User } from "./account_store.ts";
+import { AccountError, type AccountStore, type TokenKind, type TokenScopeInfo, type User } from "./account_store.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
 import { path_of, register_sign_in_guard } from "./sign_in.ts";
+
+export { is_user_or_device } from "./viewers.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,8 @@ export interface Viewer {
   declared?: DeclaredToken;
   // The scope of the token the request came with: read-only, plus the scope's calls.
   scope?: TokenScopeInfo;
+  // What made the token the request came with: the device sign-in, or the account page or config for a program.
+  token_kind?: TokenKind;
   // Whether the user's role needs a second factor they have not set up, so they may only read and set one up.
   second_factor_missing?: boolean;
 }
@@ -165,11 +169,11 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       const user = token === null ? null : accounts.user(token.owner);
       if (token !== null && user !== null) {
         const scope = accounts.token_scope(token.scope);
-        return { ...as_viewer(user, "token", token.read_only, token.id), ...(scope === null ? {} : { scope }) };
+        return { ...as_viewer(user, "token", token.read_only, token.id), token_kind: token.kind, ...(scope === null ? {} : { scope }) };
       }
       const declared = accounts.check_declared_token(bearer);
       if (declared !== null && declared.role !== null) {
-        return { name: declared.name, role: declared.role, access: declared.limited_to, via: "token", read_only: declared.read_only, credential_id: null, declared };
+        return { name: declared.name, role: declared.role, access: declared.limited_to, via: "token", read_only: declared.read_only, credential_id: null, declared, token_kind: "program" };
       }
     }
     if (proxy !== null && proxy.trusted.has(request.ip)) {
@@ -262,7 +266,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       // A device, such as the phone app syncing with this server, gets a token of its own in place of a cookie.
       if (typeof body.device === "string" && body.device.trim() !== "") {
         if (lacks_second_factor(user)) return reply.code(403).send({ error: "Set up a second factor on the page before signing in a device." });
-        return reply.code(201).send(accounts.create_token(user.name, { name: body.device, read_only: false }));
+        return reply.code(201).send(accounts.create_token(user.name, { name: body.device, read_only: false, kind: "device" }));
       }
       start_session(request, reply, user, body.remember === true);
       return reply.code(204).send();

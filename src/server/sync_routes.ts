@@ -1,6 +1,7 @@
 // The server's side of sync: it holds the copy every device syncs with, takes each device's changes and hands back
 // everyone else's, gives a new device the whole data, and lets a device replace it, starting a new generation. Given a
-// file store, it also keeps the files the rows name, such as covers, which devices send and fetch by name.
+// file store, it also keeps the files the rows name, such as covers, which devices send and fetch by name. Changes the
+// app keeps to the user's own devices, such as settings only the user may change, are refused from a program's token.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -9,7 +10,8 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { SqlDatabase } from "../sql.ts";
 import type { SyncEngine } from "../sync_engine.ts";
 import { hash_bytes, is_file_name, type SyncFileStore, type SyncFilesMissingResponse } from "../sync_files.ts";
-import { is_change_list, type SyncExchangeRequest, type SyncExchangeResponse, type SyncReplaceResponse, type SyncSnapshot } from "../sync_protocol.ts";
+import { is_change_list, type SyncChange, type SyncExchangeRequest, type SyncExchangeResponse, type SyncReplaceResponse, type SyncSnapshot } from "../sync_protocol.ts";
+import { is_user_or_device } from "./viewers.ts";
 import { send_text } from "./replies.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
@@ -29,6 +31,19 @@ export interface SyncRoutesOptions {
   files?: SyncFileStore;
   // The largest file a device may send; 64 MiB unless set.
   file_limit?: number;
+  // Changes only the user's own devices may send, such as a setting only the user may change: an exchange holding one
+  // from anything else is refused whole, and so is every replace. None unless set.
+  device_only?: (change: SyncChange) => boolean;
+  // Whether a request came from the user's own device or page; unless set, a session, the trusted proxy or a token the
+  // device sign-in made, as `server/account_sign_in` tells them apart (`is_user_or_device`).
+  is_device?: (request: FastifyRequest) => boolean;
+}
+
+export const device_only_refusal = "Only the user's own devices may sync these changes; a program's token cannot.";
+
+// The viewer `server/account_sign_in` set on the request, if any.
+function is_device_by_viewer(request: FastifyRequest): boolean {
+  return is_user_or_device((request as { viewer?: Parameters<typeof is_user_or_device>[0] }).viewer);
 }
 
 export class GenerationMismatch extends Error {}
@@ -56,6 +71,8 @@ export function register_sync_routes(app: FastifyInstance, options: SyncRoutesOp
   const { engine } = options;
   const prefix = options.prefix ?? "/sync";
   const body_limit = options.body_limit ?? 256 * 1024 * 1024;
+  const { device_only } = options;
+  const is_device = options.is_device ?? is_device_by_viewer;
 
   app.get(`${prefix}/snapshot`, async () => read_snapshot(engine, options.database()));
 
@@ -64,6 +81,7 @@ export function register_sync_routes(app: FastifyInstance, options: SyncRoutesOp
     if (!body || !is_change_list(body.changes) || typeof body.site !== "string" || typeof body.generation !== "string" || typeof body.cursor !== "number") {
       return send_text(reply, 400, "send site, generation, cursor and a list of changes");
     }
+    if (device_only && body.changes.some(device_only) && !is_device(request)) return send_text(reply, 403, device_only_refusal);
     try {
       const [answer, has_changed] = exchange_changes(engine, options.database(), body as SyncExchangeRequest);
       if (has_changed) options.on_change?.(request);
@@ -78,6 +96,8 @@ export function register_sync_routes(app: FastifyInstance, options: SyncRoutesOp
   app.post(`${prefix}/replace`, { bodyLimit: body_limit }, async (request, reply) => {
     const body = request.body as { changes?: unknown } | undefined;
     if (!body || !is_change_list(body.changes)) return send_text(reply, 400, "send a list of changes");
+    // Replacing drops whatever the device's copy lacks, so any of the protected changes may go with it.
+    if (device_only && !is_device(request)) return send_text(reply, 403, device_only_refusal);
     const database = options.database();
     await options.back_up?.();
     engine.replace_with_snapshot(database, body.changes);
