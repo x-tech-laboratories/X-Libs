@@ -10,7 +10,7 @@ import type { CommandStream } from "./commands.ts";
 import { sign_challenge } from "./keys.ts";
 import type { LongRuns } from "./long_runs.ts";
 import {
-  encode_chunk, encode_message, is_server_message, parse_server_message,
+  encode_chunk, encode_message, is_server_message, most_runs_in_hello, parse_server_message,
   type AgentApp, type AgentMessage, type AppMessage, type RequestMessage, type ServerMessage,
 } from "./protocol.ts";
 import type { TaskRunner } from "./tasks.ts";
@@ -137,7 +137,7 @@ export class AgentSession<Task> {
 
   private say_hello(signature?: string): void {
     this.greeted = true;
-    const hello = { type: "hello", protocol: this.options.app.protocol_version, host: this.options.host, agent_version: this.options.agent_version, runs: this.runs.list() } as const;
+    const hello = { type: "hello", protocol: this.options.app.protocol_version, host: this.options.host, agent_version: this.options.agent_version, runs: this.runs.list().slice(-most_runs_in_hello) } as const;
     this.send(signature === undefined ? hello : { ...hello, signature });
     this.options.on_hello?.(this);
   }

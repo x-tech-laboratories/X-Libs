@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { check_url } from "../../src/agent/client.ts";
 import {
-  decode_chunk, encode_chunk, encode_message, is_agent_message, is_run_id, is_server_message, key_host_header, parse_agent_message,
-  parse_server_message, shell_app, type AgentApp, type AgentMessage, type ServerMessage,
+  clip_hello, clip_text, decode_chunk, encode_chunk, encode_message, is_agent_message, is_run_id, is_server_message, key_host_header, most_runs_in_hello,
+  parse_agent_message, parse_long_run, parse_long_run_poll, parse_long_runs, parse_run_result, parse_server_message, shell_app, unknown_run_message,
+  type AgentApp, type AgentMessage, type LongRun, type ServerMessage,
 } from "../../src/agent/protocol.ts";
 
 const app = shell_app("x-test");
@@ -123,5 +124,48 @@ describe("agent URL", () => {
     expect(() => check_url("ws://server.example.org/api/agent")).toThrow(/only allowed to this machine/);
     expect(() => check_url("https://server.example.org/api/agent")).toThrow(/must start with wss/);
     expect(() => check_url("server")).toThrow(/not a URL/);
+  });
+});
+
+describe("checking what an agent sends", () => {
+  const run: LongRun = { run_id: "backup-1", pid: 42, started_epoch: 1700000000, state: "exited", exit_code: 0 };
+
+  it("keeps a long run's own fields and refuses a malformed one", () => {
+    expect(parse_long_run({ ...run, extra: "dropped" })).toEqual(run);
+    for (const broken of [null, [], "run", { ...run, run_id: "../x" }, { ...run, pid: 1.5 }, { ...run, started_epoch: "now" }, { ...run, state: "gone" }, { ...run, exit_code: 0.5 }]) {
+      expect(parse_long_run(broken)).toBeNull();
+    }
+  });
+
+  it("keeps the well-formed runs of a list, the last ones up to a limit", () => {
+    expect(parse_long_runs("runs", 10)).toBeNull();
+    expect(parse_long_runs([run, { run_id: "x" }, { ...run, run_id: "second" }], 10)).toEqual([run, { ...run, run_id: "second" }]);
+    expect(parse_long_runs([run, { ...run, run_id: "second" }], 1)).toEqual([{ ...run, run_id: "second" }]);
+  });
+
+  it("refuses a poll reply whose offsets are not counts within its size", () => {
+    const poll = { state: "running", exit_code: null, alive: true, size: 10, new_output: "abc", next_offset: 3 };
+    expect(parse_long_run_poll({ ...poll, extra: 1 })).toEqual(poll);
+    for (const broken of [{ ...poll, size: -1 }, { ...poll, next_offset: 11 }, { ...poll, size: Number.MAX_SAFE_INTEGER + 2 }, { ...poll, alive: 1 }, "poll"]) {
+      expect(parse_long_run_poll(broken)).toBeNull();
+    }
+  });
+
+  it("refuses a run reply that is not a result", () => {
+    expect(parse_run_result({ exit_code: 0, stdout: "a", stderr: "", extra: 1 })).toEqual({ exit_code: 0, stdout: "a", stderr: "" });
+    expect(parse_run_result({ exit_code: 0, stdout: 1, stderr: "" })).toBeNull();
+    expect(parse_run_result(null)).toBeNull();
+  });
+
+  it("cuts a hello's texts and runs to their limits", () => {
+    const hello = clip_hello({ type: "hello", protocol: 1, host: "h".repeat(1000), agent_version: "1", runs: Array.from({ length: most_runs_in_hello + 1 }, () => run), signature: "s" });
+    expect(hello.host.length).toBe(256);
+    expect(hello.runs.length).toBe(most_runs_in_hello);
+    expect(hello.signature).toBe("s");
+    expect(clip_text("short", 10)).toBe("short");
+  });
+
+  it("names a run the agent does not know in the words the server recognises", () => {
+    expect(unknown_run_message("backup-1")).toBe("No run named 'backup-1'.");
   });
 });

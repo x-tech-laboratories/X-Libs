@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { request as http_request } from "node:http";
+import { connect } from "node:net";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -9,9 +11,14 @@ import { finished } from "node:stream/promises";
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { start_agent, type AgentConfig, type RunningAgent } from "../../src/agent/client.ts";
-import { encode_message, key_host_header, shell_app, type AgentApp, type AppMessage } from "../../src/agent/protocol.ts";
+import {
+  encode_message, key_host_header, most_hello_text_length, most_runs_in_hello, shell_app, type AgentApp, type AppMessage, type LongRun,
+} from "../../src/agent/protocol.ts";
 import { shell_runner } from "../../src/agent/tasks.ts";
-import { AgentHub, close_codes, type AgentTokenLookup } from "../../src/server/agents/hub.ts";
+import {
+  admission_refused, AgentHub, close_codes, pre_login_message_limit_in_bytes, too_many_pending_logins, type AgentTokenLookup,
+} from "../../src/server/agents/hub.ts";
+import type { ServerSocket } from "../../src/server/agents/connection.ts";
 import { LocalAgent } from "../../src/server/agents/local.ts";
 import { register_agent_route } from "../../src/server/agents/route.ts";
 import { make_key } from "../test_keys.ts";
@@ -394,15 +401,13 @@ describe("agent key login", () => {
     const header = key_host_header(app_name);
     const local = new AgentHub({ app: agent_app, local: { host: "heimdall", agent: new LocalAgent(state_directory, { runner }) } });
 
-    expect(hub.admit({ [header]: "thor" })).toEqual({ error: "Host 'thor' has no declared agent key." });
-    expect(local.admit({ [header]: "heimdall" })).toEqual({ error: "'heimdall' is the server's own host, which needs no agent." });
-    expect(local.admit({ authorization: "Bearer xt_any" })).toEqual({ error: `Name the host in the ${header} header.` });
+    expect(hub.admit({ [header]: "thor" })).toMatchObject({ error: admission_refused });
+    expect(local.admit({ [header]: "heimdall" })).toMatchObject({ error: admission_refused });
+    expect(local.admit({ authorization: "Bearer xt_any" })).toMatchObject({ error: admission_refused });
   });
 
   it("refuses a token login for a host with a declared key, even with a valid token", async () => {
-    expect(hub.admit({ authorization: `Bearer ${[...tokens.hosts.keys()][0]}` })).toEqual({
-      error: "Host 'odin' has a declared agent key, so it logs in with that key, not a token.",
-    });
+    expect(hub.admit({ authorization: `Bearer ${[...tokens.hosts.keys()][0]}` })).toMatchObject({ error: admission_refused, reason: expect.stringContaining("declared agent key") });
     start_test_agent();
     await sleep(300);
     expect(hub.is_connected("odin")).toBe(false);
@@ -498,5 +503,221 @@ describe("typed tasks", () => {
       await typed_agent.stop();
       await typed_server.close();
     }
+  });
+});
+
+describe("before login", () => {
+  function port_of(server: FastifyInstance): number {
+    const address = server.server.address();
+    return typeof address === "object" && address !== null ? address.port : 0;
+  }
+
+  // Opens a socket with a token for the host, resolving once it is open.
+  async function open_token_socket(host: string, socket_url = url): Promise<WebSocket> {
+    const socket = new WebSocket(socket_url, { headers: { authorization: `Bearer ${tokens.issue(host)}` } } as unknown as string[]);
+    socket.addEventListener("error", () => {});
+    await once(socket, "open");
+    return socket;
+  }
+
+  function closed(socket: WebSocket): Promise<CloseEvent> {
+    return new Promise((resolve) => socket.addEventListener("close", resolve, { once: true }));
+  }
+
+  // The HTTP status an upgrade with these headers is answered, 101 when it is taken, with its body.
+  function upgrade_status(port: number, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const outgoing = http_request({
+        host: "127.0.0.1", port, path: "/api/agent",
+        headers: { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": randomBytes(16).toString("base64"), ...headers },
+      });
+      outgoing.on("upgrade", (_response, socket) => {
+        socket.destroy();
+        resolve({ status: 101, body: "" });
+      });
+      outgoing.on("response", (response) => {
+        let body = "";
+        response.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+      });
+      outgoing.on("error", reject);
+      outgoing.end();
+    });
+  }
+
+  it("answers every refused upgrade alike, without naming the host it was given", async () => {
+    hub.set_agent_keys(new Map([["odin", make_key(folder, "odin").public_line]]));
+    const port = port_of(app);
+
+    const unknown_host = await upgrade_status(port, { [key_host_header(app_name)]: "secret-host-name" });
+    const unknown_token = await upgrade_status(port, { authorization: "Bearer xt_wrong" });
+    const keyed_token = await upgrade_status(port, { authorization: `Bearer ${tokens.issue("odin")}` });
+
+    for (const answer of [unknown_host, unknown_token, keyed_token]) expect(answer).toEqual({ status: 401, body: JSON.stringify({ error: admission_refused }) });
+  });
+
+  it("closes a socket whose first message is not a hello, or is binary", async () => {
+    for (const first of [encode_message({ type: "ping", epoch_ms: 1 }, agent_app), "not json", new Uint8Array([1, 2, 3])]) {
+      const socket = await open_token_socket("thor");
+      const ending = closed(socket);
+      socket.send(first);
+      expect((await ending).code).toBe(close_codes.not_hello);
+    }
+    const socket = await open_token_socket("thor");
+    const ending = closed(socket);
+    socket.send(JSON.stringify({ type: "hello", protocol: agent_app.protocol_version, host: "thor", agent_version: "1", runs: "many" }));
+    expect((await ending).code).toBe(close_codes.not_hello);
+    expect(hub.is_connected("thor")).toBe(false);
+  });
+
+  it("closes a socket that sends a message larger than a hello can be before login", async () => {
+    const socket = await open_token_socket("thor");
+    const ending = closed(socket);
+
+    socket.send("x".repeat(pre_login_message_limit_in_bytes + 1));
+
+    expect((await ending).code).toBe(close_codes.too_large);
+  });
+
+  it("refuses an oversized frame from its header alone, before its payload is read", async () => {
+    const token = tokens.issue("thor");
+    const raw = connect(port_of(app), "127.0.0.1");
+    await once(raw, "connect");
+    raw.write([
+      "GET /api/agent HTTP/1.1", "Host: 127.0.0.1", "Connection: Upgrade", "Upgrade: websocket", "Sec-WebSocket-Version: 13",
+      `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`, `Authorization: Bearer ${token}`, "", "",
+    ].join("\r\n"));
+    let received = Buffer.alloc(0);
+    raw.on("data", (chunk: Buffer) => (received = Buffer.concat([received, chunk])));
+    while (!received.includes("\r\n\r\n")) await sleep(10);
+    expect(received.toString().startsWith("HTTP/1.1 101")).toBe(true);
+    const handshake_length = received.indexOf("\r\n\r\n") + 4;
+
+    // A masked text frame whose header claims one mebibyte, with none of the payload sent.
+    const header = Buffer.alloc(14);
+    header[0] = 0x81;
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(1024 * 1024), 2);
+    raw.write(header);
+    await once(raw, "close");
+
+    const frame = received.subarray(handshake_length);
+    expect(frame[0]).toBe(0x88);
+    expect(frame.readUInt16BE(2)).toBe(close_codes.too_large);
+  });
+
+  it("takes messages up to the full size once the hello is accepted", async () => {
+    const socket = await open_token_socket("thor");
+    socket.send(encode_message({ type: "hello", protocol: agent_app.protocol_version, host: "thor", agent_version: "1", runs: [] }, agent_app));
+    await connected("thor");
+
+    socket.send(JSON.stringify({ type: "pulls", pulls: ["z".repeat(2 * pre_login_message_limit_in_bytes)] }));
+    while (messages.length === 0) await sleep(10);
+
+    expect(messages[0]).toMatchObject({ host: "thor", message: { type: "pulls" } });
+    socket.close();
+  });
+
+  it("refuses upgrades past the limit on sockets still logging in, and takes them again once one logs in or leaves", async () => {
+    const limited = new AgentHub({ app: agent_app, tokens, most_pending_logins: 3, most_pending_logins_per_address: 2 });
+    const server = fastify();
+    await register_agent_route(server, limited);
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const port = port_of(server);
+    const limited_url = `ws://127.0.0.1:${port}/api/agent`;
+    try {
+      const first = await open_token_socket("thor", limited_url);
+      const second = await open_token_socket("loki", limited_url);
+
+      expect(await upgrade_status(port, { authorization: `Bearer ${tokens.issue("frey")}` })).toEqual({ status: 503, body: JSON.stringify({ error: too_many_pending_logins }) });
+
+      first.send(encode_message({ type: "hello", protocol: agent_app.protocol_version, host: "thor", agent_version: "1", runs: [] }, agent_app));
+      while (!limited.is_connected("thor")) await sleep(10);
+      const third = await open_token_socket("frey", limited_url);
+
+      const gone = closed(second);
+      second.close();
+      await gone;
+      await sleep(50);
+      const fourth = await open_token_socket("tyr", limited_url);
+      for (const socket of [first, third, fourth]) socket.close();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("closes an oversized message before login even on a socket whose frames it cannot limit", () => {
+    const closes: number[] = [];
+    let deliver: (data: Buffer, is_binary: boolean) => void = () => {};
+    const socket = {
+      readyState: 1,
+      send: () => {},
+      close: (code?: number) => void closes.push(code ?? 0),
+      on: (event: string, listener: (data: Buffer, is_binary: boolean) => void) => {
+        if (event === "message") deliver = listener;
+      },
+    };
+
+    hub.accept(socket as unknown as ServerSocket, "thor", "token");
+    deliver(Buffer.alloc(pre_login_message_limit_in_bytes + 1, 0x20), false);
+    deliver(Buffer.from("{}"), false);
+
+    expect(closes).toEqual([close_codes.too_large]);
+  });
+
+  it("refuses upgrades past the overall limit, whatever the address", () => {
+    const limited = new AgentHub({ app: agent_app, most_pending_logins: 2, most_pending_logins_per_address: 5 });
+    const releases = [limited.hold_pending_login("10.0.0.1"), limited.hold_pending_login("10.0.0.2")];
+
+    expect(limited.hold_pending_login("10.0.0.3")).toBeNull();
+    releases[0]!();
+    releases[0]!();
+    expect(limited.hold_pending_login("10.0.0.3")).not.toBeNull();
+    expect(limited.hold_pending_login("10.0.0.4")).toBeNull();
+  });
+
+  it("keeps only the well-formed runs a hello lists, at most the limit, with its texts cut to length", async () => {
+    const run = (index: number): LongRun => ({ run_id: `run-${index}`, pid: 100 + index, started_epoch: index, state: "running", exit_code: null });
+    const runs: unknown[] = [];
+    for (let index = 0; index < most_runs_in_hello + 50; index++) runs.push(run(index));
+    runs.push({ run_id: "../escape", pid: 1, started_epoch: 1, state: "running", exit_code: null }, { run_id: "bad-state", pid: 1, started_epoch: 1, state: "zombie", exit_code: null });
+    runs.push("junk", null, { ...run(9999), extra: "x".repeat(1000) });
+    const socket = await open_token_socket("thor");
+    const connecting = new Promise<{ runs: LongRun[]; agent_version: string; reported_host: string }>((resolve) => hub.once("connect", resolve));
+
+    socket.send(JSON.stringify({ type: "hello", protocol: agent_app.protocol_version, host: "h".repeat(5000), agent_version: "v".repeat(5000), runs }));
+    const status = await connecting;
+
+    expect(status.agent_version.length).toBe(most_hello_text_length);
+    expect(status.reported_host.length).toBe(most_hello_text_length);
+    expect(status.runs.length).toBeLessThanOrEqual(most_runs_in_hello);
+    expect(status.runs.every((each) => /^run-\d+$/.test(each.run_id))).toBe(true);
+    expect(status.runs.at(-1)).toEqual(run(9999));
+    socket.close();
+  });
+
+  it("turns an agent's malformed replies into errors to try again, and keeps only its well-formed runs", async () => {
+    const socket = await open_token_socket("thor");
+    socket.send(encode_message({ type: "hello", protocol: agent_app.protocol_version, host: "thor", agent_version: "1", runs: [] }, agent_app));
+    await connected("thor");
+    const good_run: LongRun = { run_id: "fine", pid: 7, started_epoch: 1, state: "exited", exit_code: 0 };
+    const replies: Record<string, unknown> = {
+      poll: { state: "running", exit_code: null, alive: true, size: 1e12, new_output: "x", next_offset: "0" },
+      start: { run_id: "../../etc" },
+      stop: "stopped",
+      runs: [good_run, { run_id: "broken" }, 42],
+      run: { exit_code: "0" },
+    };
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data)) as { type: string; id?: string };
+      if (message.id !== undefined && Object.hasOwn(replies, message.type)) socket.send(JSON.stringify({ type: "reply", id: message.id, value: replies[message.type] }));
+    });
+
+    await expect(hub.poll("thor", "r", 0)).rejects.toMatchObject({ name: "AgentError", unreachable: true, message: expect.stringContaining("malformed") });
+    await expect(hub.start("thor", "r", "true")).rejects.toMatchObject({ unreachable: true });
+    await expect(hub.stop("thor", "r")).rejects.toMatchObject({ unreachable: true });
+    expect(await hub.runs("thor")).toEqual([good_run]);
+    expect(await hub.run("thor", "true", { timeout_in_seconds: 1 })).toMatchObject({ exit_code: -1, stderr: expect.stringContaining("malformed") });
+    socket.close();
   });
 });

@@ -23,7 +23,7 @@ export interface AgentStreamOptions {
 }
 
 export class AgentError extends Error {
-  // Whether the host never answered, so trying again later may work, rather than answering that it failed.
+  // Whether no usable answer came, as when the host never answered or answered with a malformed reply, so trying again later may work, rather than answering that it failed.
   readonly unreachable: boolean;
 
   constructor(message: string, unreachable = false) {

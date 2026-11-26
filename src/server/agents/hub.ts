@@ -10,7 +10,7 @@ import type { IncomingHttpHeaders } from "node:http";
 
 import { parse_public_key, verify_challenge } from "../../agent/keys.ts";
 import {
-  encode_message, is_agent_message, key_host_header, parse_agent_message, type AgentApp, type AppMessage, type LongRun, type LongRunPoll, type RunResult,
+  clip_hello, encode_message, is_agent_message, key_host_header, parse_agent_message, type AgentApp, type AppMessage, type LongRun, type LongRunPoll, type RunResult,
 } from "../../agent/protocol.ts";
 import { AgentError, ended_stream, type Agent, type AgentRunOptions, type AgentStreamOptions, type CommandStream } from "./agent.ts";
 import { AgentConnection, type ConnectionOptions, type ServerSocket } from "./connection.ts";
@@ -35,6 +35,9 @@ export interface HubOptions<Task> {
   on_message?: (host: string, message: AppMessage, connection: AgentConnection<Task>) => void;
   // How long a new socket has to say hello.
   hello_timeout_in_milliseconds?: number;
+  // How many sockets may be open without having logged in yet, from everywhere and from one address.
+  most_pending_logins?: number;
+  most_pending_logins_per_address?: number;
   connection?: Partial<ConnectionOptions>;
 }
 
@@ -54,8 +57,17 @@ export interface AgentStatus {
 
 export type AgentLogin = "token" | "key";
 
-// Who an agent's upgrade says it is, before any socket opens, or why it is turned away.
-export type Admission = { host: string; login: AgentLogin } | { error: string };
+// Who an agent's upgrade says it is, before any socket opens, or why it is turned away: `error` for the caller, the same for every refusal, and `reason` for the server's own log.
+export type Admission = { host: string; login: AgentLogin } | { error: string; reason: string };
+
+// What every refused admission answers, so a caller learns nothing of which hosts exist.
+export const admission_refused = "This agent cannot log in here.";
+
+// What an upgrade is answered when too many sockets are already waiting to log in.
+export const too_many_pending_logins = "Too many agents are logging in; try again shortly.";
+
+// A message before login may be at most this size, room for a hello listing every run it may carry.
+export const pre_login_message_limit_in_bytes = 256 * 1024;
 
 interface HubEvents {
   connect: [status: AgentStatus];
@@ -69,7 +81,17 @@ export const close_codes = {
   revoked: 4004,
   no_hello: 4005,
   bad_key: 4006,
+  // The first message was not a hello.
+  not_hello: 4007,
+  // A message before login was larger than a hello can be.
+  too_large: 1009,
 } as const;
+
+// Hooks the route gives a socket it hands over, for what it set up around the upgrade.
+export interface AcceptHooks {
+  // Runs once, when the agent's hello is accepted.
+  on_login?: () => void;
+}
 
 const default_connection: ConnectionOptions = {
   window_in_bytes: 1024 * 1024,
@@ -85,6 +107,11 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
   private readonly tokens: AgentTokenLookup | null;
   private readonly on_message: HubOptions<Task>["on_message"] | null;
   private readonly hello_timeout: number;
+  private readonly most_pending_logins: number;
+  private readonly most_pending_logins_per_address: number;
+  // How many sockets are waiting to log in, in all and by address.
+  private pending_logins = 0;
+  private readonly pending_logins_by_address = new Map<string, number>();
   private readonly connection_options: ConnectionOptions;
   private readonly connections = new Map<string, AgentConnection<Task>>();
   private readonly logins = new WeakMap<AgentConnection<Task>, AgentLogin>();
@@ -98,6 +125,8 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
     this.tokens = options.tokens ?? null;
     this.on_message = options.on_message ?? null;
     this.hello_timeout = options.hello_timeout_in_milliseconds ?? 10_000;
+    this.most_pending_logins = options.most_pending_logins ?? 64;
+    this.most_pending_logins_per_address = options.most_pending_logins_per_address ?? 8;
     this.connection_options = { ...default_connection, ...options.connection };
   }
 
@@ -145,23 +174,44 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
     const header = key_host_header(this.app.name);
     const named = headers[header];
     if (typeof named === "string" && named !== "") {
-      if (named === this.local?.host) return { error: `'${named}' is the server's own host, which needs no agent.` };
-      if (!this.agent_keys.has(named)) return { error: `Host '${named}' has no declared agent key.` };
+      if (named === this.local?.host) return refused("The key login named the server's own host, which needs no agent.");
+      if (!this.agent_keys.has(named)) return refused("The key login named a host with no declared agent key.");
       return { host: named, login: "key" };
     }
-    if (this.tokens === null) return { error: `Name the host in the ${header} header.` };
+    if (this.tokens === null) return refused(`The upgrade named no host in the ${header} header.`);
     const host = this.authenticate(headers.authorization);
-    if (host === null) return { error: "This agent token is not enrolled." };
-    if (this.agent_keys.has(host)) return { error: `Host '${host}' has a declared agent key, so it logs in with that key, not a token.` };
+    if (host === null) return refused("The agent token is not enrolled.");
+    if (this.agent_keys.has(host)) return refused(`The token belongs to ${host}, which has a declared agent key and logs in with that key.`);
     return { host, login: "token" };
+  }
+
+  // Holds a place for a socket that has not logged in yet, or gives null when every place, or every one for its address, is taken; the release may be called more than once.
+  hold_pending_login(address: string): (() => void) | null {
+    const from_address = this.pending_logins_by_address.get(address) ?? 0;
+    if (this.pending_logins >= this.most_pending_logins || from_address >= this.most_pending_logins_per_address) return null;
+    this.pending_logins++;
+    this.pending_logins_by_address.set(address, from_address + 1);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.pending_logins--;
+      const left = (this.pending_logins_by_address.get(address) ?? 1) - 1;
+      if (left > 0) this.pending_logins_by_address.set(address, left);
+      else this.pending_logins_by_address.delete(address);
+    };
   }
 
   // ── Connections ──────────────────────────────────────────────────────────
 
-  // Takes a socket whose upgrade named the host, and waits for its hello before using it; one logging in with its key
-  // is sent a nonce first, which its hello must carry signed.
-  accept(socket: ServerSocket, host: string, login: AgentLogin): void {
+  // Takes a socket whose upgrade named the host and waits for its hello, closing it on anything else; a key login is sent a nonce first, which its hello must carry signed.
+  accept(socket: ServerSocket, host: string, login: AgentLogin, hooks: AcceptHooks = {}): void {
     let connection: AgentConnection<Task> | null = null;
+    let turned_away = false;
+    const turn_away = (code: number, reason: string) => {
+      turned_away = true;
+      socket.close(code, reason);
+    };
     const hello_timer = setTimeout(() => socket.close(close_codes.no_hello, "No hello came."), this.hello_timeout);
     const nonce = login === "key" ? randomBytes(32).toString("base64url") : null;
     if (nonce !== null) socket.send(encode_message({ type: "challenge", nonce }, this.app));
@@ -172,16 +222,25 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
         connection.receive(data, is_binary);
         return;
       }
-      const hello = is_binary ? null : parse_agent_message(data.toString("utf8"), this.app as AgentApp<unknown>);
-      if (hello === null || !is_agent_message(hello) || hello.type !== "hello") return;
+      if (turned_away) return;
       clearTimeout(hello_timer);
+      if (data.length > pre_login_message_limit_in_bytes) {
+        turn_away(close_codes.too_large, "The message before login was too large.");
+        return;
+      }
+      const parsed = is_binary ? null : parse_agent_message(data.toString("utf8"), this.app as AgentApp<unknown>);
+      if (parsed === null || !is_agent_message(parsed) || parsed.type !== "hello") {
+        turn_away(close_codes.not_hello, "The first message was not a hello.");
+        return;
+      }
+      const hello = clip_hello(parsed);
       if (hello.protocol !== this.app.protocol_version) {
-        socket.close(close_codes.protocol, `This server speaks agent protocol ${this.app.protocol_version}, not ${hello.protocol}.`);
+        turn_away(close_codes.protocol, `This server speaks agent protocol ${this.app.protocol_version}, not ${hello.protocol}.`);
         return;
       }
       const { signature, ...greeting } = hello;
       if (nonce !== null && !this.proves_key(host, nonce, signature)) {
-        socket.close(close_codes.bad_key, `The agent's key is not the one declared for ${host}.`);
+        turn_away(close_codes.bad_key, `The agent's key is not the one declared for ${host}.`);
         return;
       }
       this.connections.get(host)?.close(close_codes.replaced, "A newer connection from the same host replaced this one.");
@@ -190,6 +249,7 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
       connection = current;
       this.connections.set(host, current);
       this.logins.set(current, login);
+      hooks.on_login?.();
       this.emit("connect", this.status_of(current));
     });
     socket.on("error", () => {});
@@ -300,6 +360,10 @@ export class AgentHub<Task> extends EventEmitter<HubEvents> {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function refused(reason: string): Admission {
+  return { error: admission_refused, reason };
+}
 
 function not_connected(host: string): string {
   return `No agent is connected for ${host}.`;
