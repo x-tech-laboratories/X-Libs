@@ -4,7 +4,19 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { input_schema, positional_args } from "../src/api_spec.ts";
 import { create_history } from "../src/history.ts";
-import { clip_snippet, history_item_changes, item_calls, item_link, item_method_names, parse_item_link, type ItemFields, type ItemSource } from "../src/items.ts";
+import {
+  clip_item_text,
+  clip_snippet,
+  history_item_changes,
+  item_calls,
+  item_link,
+  item_method_names,
+  item_text_max_bytes,
+  item_text_method_name,
+  parse_item_link,
+  type ItemFields,
+  type ItemSource,
+} from "../src/items.ts";
 import type { SqlDatabase } from "../src/sql.ts";
 
 afterEach(() => vi.useRealTimers());
@@ -134,6 +146,63 @@ test("changes come oldest first after since, deleted ones as their id and kind, 
 
 test("a scheme a link cannot carry is refused when the calls are made", () => {
   expect(() => item_calls(source(), { scheme: "x_tasks" })).toThrow("not a link scheme");
+});
+
+test("without text the calls stay four and kinds carry no has_text", async () => {
+  const { methods, api } = item_calls(source({ kinds: [{ kind: "task", label: "Task", has_text: true }] }), { scheme: "x-tasks" });
+  expect(item_text_method_name in methods).toBe(false);
+  expect(item_text_method_name in api).toBe(false);
+  expect(await methods.list_item_kinds()).toEqual([{ kind: "task", label: "Task" }]);
+});
+
+// ── Texts ────────────────────────────────────────────────────────────────────
+
+test("an item's text is cut to its bytes at the end of a character", () => {
+  expect(clip_item_text("short")).toEqual({ text: "short", is_truncated: false });
+  expect(clip_item_text("a".repeat(item_text_max_bytes))).toEqual({ text: "a".repeat(item_text_max_bytes), is_truncated: false });
+  expect(clip_item_text("a😀b", 3)).toEqual({ text: "a", is_truncated: true });
+  expect(clip_item_text("éé", 3)).toEqual({ text: "é", is_truncated: true });
+  const long = clip_item_text("é".repeat(item_text_max_bytes));
+  expect(long.is_truncated).toBe(true);
+  expect(new TextEncoder().encode(long.text).length).toBe(item_text_max_bytes);
+});
+
+test("a source with text adds get_item_texts with its spec, and kinds say has_text", async () => {
+  const asked: string[][] = [];
+  const { methods, api } = item_calls(
+    {
+      ...source({ kinds: [{ kind: "task", label: "Task", has_text: true }, { kind: "list", label: "List" }] }),
+      text: (ids: string[]) => (
+        asked.push(ids),
+        [
+          { id: "a", text: "# Notes", format: "markdown", changed_at: "2026-11-01T00:00:00.000Z" },
+          { id: "a", text: "again", changed_at: "2026-11-01T00:00:00.000Z" },
+          { id: "b", text: "", changed_at: "2026-11-01T00:00:00.000Z" },
+          { id: "c", text: "x".repeat(item_text_max_bytes + 1), format: "html" as "plain", changed_at: "2026-11-02T00:00:00.000Z" },
+          { id: "stranger", text: "not asked", changed_at: "2026-11-01T00:00:00.000Z" },
+        ]
+      ),
+    },
+    { scheme: "x-tasks", max_limit: 3 },
+  );
+  expect(Object.keys(methods)).toEqual([...item_method_names, item_text_method_name]);
+  expect(Object.keys(api)).toEqual([...item_method_names, item_text_method_name]);
+  expect(input_schema(api.get_item_texts).required).toEqual(["ids"]);
+  expect(api.get_item_texts.params[0]!.schema.maxItems).toBe(3);
+  expect(api.list_item_kinds.description).toContain("has_text");
+  expect(await methods.list_item_kinds()).toEqual([
+    { kind: "task", label: "Task", has_text: true },
+    { kind: "list", label: "List", has_text: false },
+  ]);
+
+  const texts = await methods.get_item_texts(["a", "b", "c", "a"]);
+  expect(asked).toEqual([["a", "b", "c"]]);
+  expect(texts.map((each) => each.id)).toEqual(["a", "c"]);
+  expect(texts[0]).toEqual({ id: "a", text: "# Notes", format: "markdown", changed_at: "2026-11-01T00:00:00.000Z", is_truncated: false });
+  expect(texts[1]).toMatchObject({ format: "plain", is_truncated: true });
+  expect(texts[1]!.text).toHaveLength(item_text_max_bytes);
+  expect(await methods.get_item_texts([])).toEqual([]);
+  await expect(methods.get_item_texts(["a", "b", "c", "d"])).rejects.toThrow("at most 3 ids");
 });
 
 // ── From history ─────────────────────────────────────────────────────────────

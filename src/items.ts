@@ -1,7 +1,8 @@
 // The four calls every app answers about the items it holds, so another program, such as an assistant gathering a
 // user's tasks, notes and bookmarks, reads every app with one piece of code: list_item_kinds, search_items, get_items
-// and list_item_changes, all read-only and all answering with one item shape. An item's link is
-// <scheme>://<kind>/<id>, such as x-tasks://task/a1, with the id percent-encoded.
+// and list_item_changes, all read-only and all answering with one item shape, and get_item_texts, the optional fifth,
+// for the full text of items that have more than their snippet. An item's link is <scheme>://<kind>/<id>, such as
+// x-tasks://task/a1, with the id percent-encoded.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -11,10 +12,12 @@ import type { SqlDatabase } from "./sql.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
-// A kind of item the app holds, such as { kind: "task", label: "Task" }.
+// A kind of item the app holds, such as { kind: "task", label: "Task", has_text: true }.
 export interface ItemKind {
   kind: string;
   label: string;
+  // Whether items of this kind can have text beyond their snippet, for get_item_texts; left out, it is false.
+  has_text?: boolean;
 }
 
 export interface Item {
@@ -48,6 +51,24 @@ export type ItemChange = (Item & { is_deleted: false }) | DeletedItem;
 // An item as the app hands it over: the link is made from its kind and id, and the rest may be left out.
 export type ItemFields = Pick<Item, "id" | "kind" | "title" | "changed_at"> & Partial<Pick<Item, "snippet" | "link" | "status" | "detail">>;
 
+// An item's full text, as get_item_texts gives it.
+export interface ItemText {
+  id: string;
+  text: string;
+  format: ItemTextFormat;
+  changed_at: string;
+  // Whether the text was cut to item_text_max_bytes.
+  is_truncated: boolean;
+}
+
+// The app turns its own HTML or rich text into one of these, so a caller never reads an app's own format.
+export type ItemTextFormat = "plain" | "markdown";
+
+export const item_text_formats: readonly ItemTextFormat[] = ["plain", "markdown"];
+
+// An item's text as the app hands it over: plain unless a format is given, cut by item_calls.
+export type ItemTextFields = Pick<ItemText, "id" | "text" | "changed_at"> & { format?: ItemTextFormat };
+
 type MaybePromise<Value> = Value | Promise<Value>;
 
 // The app's own answers, which item_calls shapes, cuts and orders.
@@ -60,14 +81,20 @@ export interface ItemSource {
   // The items changed after since, an ISO time, or every item when it is null, deleted ones included, in any order;
   // at least the limit oldest of them, and any more changed at the same moment as the last.
   changes: (since: string | null, limit: number) => MaybePromise<readonly (ItemFields | DeletedItem)[]>;
+  // The full text of the items with these ids, leaving out any that are gone or have none; given only by an app whose
+  // items have text beyond their snippet, which then answers get_item_texts.
+  text?: (ids: string[]) => MaybePromise<readonly ItemTextFields[]>;
 }
+
+// A source that has text, for which item_calls adds get_item_texts.
+export type ItemTextSource = ItemSource & Required<Pick<ItemSource, "text">>;
 
 export interface ItemCallOptions {
   // The app's link scheme without "://", such as "x-tasks".
   scheme: string;
   // How many items a call gives when it is not told; 20 unless set.
   default_limit?: number;
-  // The most a call gives, and the most ids get_items takes; 100 unless set.
+  // The most a call gives, and the most ids get_items and get_item_texts take; 100 unless set.
   max_limit?: number;
 }
 
@@ -78,9 +105,18 @@ export interface ItemMethods {
   list_item_changes: (since?: string | null, limit?: number) => Promise<ItemChange[]>;
 }
 
+export interface ItemTextMethods {
+  get_item_texts: (ids: string[]) => Promise<ItemText[]>;
+}
+
 export const item_method_names = ["list_item_kinds", "search_items", "get_items", "list_item_changes"] as const;
 
+export const item_text_method_name = "get_item_texts";
+
 export const snippet_length = 200;
+
+// The most text one item gives through get_item_texts, in bytes of UTF-8.
+export const item_text_max_bytes = 256 * 1024;
 
 // ── Links ────────────────────────────────────────────────────────────────────
 
@@ -135,6 +171,18 @@ function to_item(fields: ItemFields, scheme: string): Item {
   };
 }
 
+// The text cut to at most max_bytes of UTF-8 at the end of a character, and whether it was cut.
+export function clip_item_text(text: string, max_bytes = item_text_max_bytes): { text: string; is_truncated: boolean } {
+  // Each character takes at most four bytes, so a short text needs no encoding.
+  if (text.length * 3 <= max_bytes) return { text, is_truncated: false };
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= max_bytes) return { text, is_truncated: false };
+  let end = max_bytes;
+  // A byte 10xxxxxx continues a character, so the cut moves back to where one starts.
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+  return { text: new TextDecoder().decode(bytes.subarray(0, end)), is_truncated: true };
+}
+
 const is_deleted = (change: ItemFields | DeletedItem): change is DeletedItem => "is_deleted" in change && change.is_deleted === true;
 
 function time_of(text: string, name: string): number {
@@ -147,8 +195,11 @@ function time_of(text: string, name: string): number {
 
 const limit_schema = (max: number, what: string): JsonSchema => ({ type: "integer", minimum: 1, maximum: max, description: `How many ${what} at most.` });
 
-// The four item calls on the app's own answers, with their api_spec entries, to spread into its method table and spec.
-export function item_calls(source: ItemSource, options: ItemCallOptions): { methods: ItemMethods; api: ApiSpec<ItemMethods> } {
+// The four item calls on the app's own answers, with their api_spec entries, to spread into its method table and spec;
+// and get_item_texts as well for a source that has text.
+export function item_calls(source: ItemTextSource, options: ItemCallOptions): { methods: ItemMethods & ItemTextMethods; api: ApiSpec<ItemMethods & ItemTextMethods> };
+export function item_calls(source: ItemSource, options: ItemCallOptions): { methods: ItemMethods; api: ApiSpec<ItemMethods> };
+export function item_calls(source: ItemSource, options: ItemCallOptions): { methods: ItemMethods & Partial<ItemTextMethods>; api: ApiSpec<ItemMethods> & Partial<ApiSpec<ItemTextMethods>> } {
   const { scheme } = options;
   const max_limit = options.max_limit ?? 100;
   const default_limit = Math.min(options.default_limit ?? 20, max_limit);
@@ -156,8 +207,18 @@ export function item_calls(source: ItemSource, options: ItemCallOptions): { meth
   const limit_of = (limit: number | undefined) =>
     limit === undefined || limit === null || !Number.isFinite(limit) ? default_limit : Math.min(max_limit, Math.max(1, Math.floor(limit)));
 
-  const methods: ItemMethods = {
-    list_item_kinds: async () => [...(typeof source.kinds === "function" ? await source.kinds() : source.kinds)].map(({ kind, label }) => ({ kind, label })),
+  const { text } = source;
+  const checked_ids = (ids: string[]) => {
+    const unique = [...new Set(ids)];
+    if (unique.length > max_limit) throw new Error(`ask for at most ${max_limit} ids at once`);
+    return unique;
+  };
+
+  const methods: ItemMethods & Partial<ItemTextMethods> = {
+    list_item_kinds: async () =>
+      [...(typeof source.kinds === "function" ? await source.kinds() : source.kinds)].map(({ kind, label, has_text }) =>
+        text ? { kind, label, has_text: has_text === true } : { kind, label },
+      ),
 
     search_items: async (query, limit) => {
       const wanted = limit_of(limit);
@@ -167,8 +228,7 @@ export function item_calls(source: ItemSource, options: ItemCallOptions): { meth
     },
 
     get_items: async (ids) => {
-      const unique = [...new Set(ids)];
-      if (unique.length > max_limit) throw new Error(`ask for at most ${max_limit} ids at once`);
+      const unique = checked_ids(ids);
       if (unique.length === 0) return [];
       const asked = new Set(unique);
       return (await source.get(unique)).filter((fields) => asked.has(fields.id)).map((fields) => to_item(fields, scheme));
@@ -192,9 +252,29 @@ export function item_calls(source: ItemSource, options: ItemCallOptions): { meth
     },
   };
 
-  const api: ApiSpec<ItemMethods> = {
+  if (text) {
+    methods.get_item_texts = async (ids) => {
+      const unique = checked_ids(ids);
+      if (unique.length === 0) return [];
+      const asked = new Set(unique);
+      const given = new Set<string>();
+      const texts: ItemText[] = [];
+      for (const fields of await text(unique)) {
+        if (!asked.has(fields.id) || given.has(fields.id) || typeof fields.text !== "string" || fields.text === "") continue;
+        given.add(fields.id);
+        const format = fields.format === "markdown" ? "markdown" : "plain";
+        const clipped = clip_item_text(fields.text);
+        texts.push({ id: fields.id, text: clipped.text, format, changed_at: fields.changed_at, is_truncated: clipped.is_truncated });
+      }
+      return texts;
+    };
+  }
+
+  const api: ApiSpec<ItemMethods> & Partial<ApiSpec<ItemTextMethods>> = {
     list_item_kinds: {
-      description: "Lists the kinds of item this app holds, each with its label, such as task and Task.",
+      description: text
+        ? "Lists the kinds of item this app holds, each with its label, such as task and Task, and has_text, true when items of that kind can have text beyond their snippet, read with get_item_texts."
+        : "Lists the kinds of item this app holds, each with its label, such as task and Task.",
       params: [],
     },
     search_items: {
@@ -218,6 +298,12 @@ export function item_calls(source: ItemSource, options: ItemCallOptions): { meth
       ],
     },
   };
+  if (text) {
+    api.get_item_texts = {
+      description: `Gives the full text of the items with these ids, each as its id, text, format (plain or markdown), changed_at and is_truncated, true when the text was cut to ${item_text_max_bytes / 1024} KB. An id that is gone, unknown or has no text is left out. Ask only for items of a kind with has_text whose changed_at moved since the text was last read.`,
+      params: [{ name: "ids", schema: { type: "array", items: { type: "string" }, maxItems: max_limit, description: "The items' ids." } }],
+    };
+  }
 
   return { methods, api };
 }
