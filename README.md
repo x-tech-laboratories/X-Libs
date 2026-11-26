@@ -41,7 +41,8 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `phone_notices`                          | `keep_phone_notices`: notices handed to a phone ahead of time through Capacitor's local notifications, the app passing its own `LocalNotifications`, since a phone has no daemon; `refresh` takes back every pending notice and sets the soonest 64 of the next 14 days again, `ask_permission` asks once, `show` puts a notice up at once with no alarm (`isExactNotification: false`), so a notice for now never needs Android's exact-alarm leave or opens its settings screen, `exact: false` lets the notices set ahead ring inexactly too, and a tap hands the notice's `extra` back, such as a link to open. `notice_id` names a key as Android's number. |
 | `phone_service`                          | `phone_service`: work a phone app keeps doing while it is closed, such as staying reachable, in an Android foreground service run by X-Libs' plugin `XLibsForegroundService`, which `cap sync` adds by itself: the service loads the app's own worker page (such as `worker.html` from its page files) in a WebView it owns, so the work outlives the app's window, a killed process (Android starts it again) and, with `start_at_boot`, a reboot; `start`, `stop`, `is_running`, `post` and `on_message` for the page, and `worker_host` for the worker's side, the messages crossing as JSON. The app declares the service and the boot receiver in its own manifest, with the `connectedDevice` foreground service permissions, as the module's opening comment shows, so no other app gets them. |
 | `phone_sockets`                          | `phone_sockets()`: UDP and TCP sockets for a `phone_service` worker, answered by X-Libs' Android side: `udp_open` (with `broadcast`, holding Android's multicast lock), `tcp_listen`, `tcp_connect` and `list_interfaces`; a TCP socket reads nothing until `read_line` takes one line or `start_reading` everything after, so `start_tls` can follow plain text in either TLS role, as KDE Connect's identity line does, with the app's PEM certificate and key, letting any peer through and handing back its certificate for the worker to pin; `pause` and `resume` for a slow reader, and `write` settling once sent. Events that arrive before a listener are kept for it. Needs `CHANGE_WIFI_MULTICAST_STATE` and `WAKE_LOCK` in the app's manifest; each event keeps the phone awake a few seconds so the worker can answer. |
-| `history`                                | Every change to an app's items kept as versions in SQLite: `create_history` sets triggers on the tables that change an item, `record` saves one version of each item touched, and `restore` brings a version back, a deleted item with what was deleted under it; the versions table syncs, and `history_methods` are the page's calls. Its tables are made only where missing, so an app with its own older versions table keeps it, naming its item column with `item_column`. A table that reaches its item only through another, such as a workout's sets through its exercises, names it with `item_lookup`, a query from the row. |
+| `history`                                | Every change to an app's items kept as versions in SQLite: `create_history` sets triggers on the tables that change an item, `record` saves one version of each item touched, and `restore` brings a version back, a deleted item with what was deleted under it; the versions table syncs, `read_changed_since` gives the newest version of each item changed after a moment, oldest first, and `history_methods` are the page's calls. Its tables are made only where missing, so an app with its own older versions table keeps it, naming its item column with `item_column`. A table that reaches its item only through another, such as a workout's sets through its exercises, names it with `item_lookup`, a query from the row. |
+| `items`                                  | The four read-only calls every app answers about its items for other apps ([Items for other apps](#items-for-other-apps)): `item_calls` turns the app's own kinds, search, get and changes into `list_item_kinds`, `search_items`, `get_items` and `list_item_changes` with their `api_spec` entries, every item in one shape (`Item`, `DeletedItem`, `ItemChange`) with its snippet clipped to 200 characters, limits defaulted and capped, and changes oldest first; `item_link` and `parse_item_link` for `x-<app>://<kind>/<id>` links with the id percent-encoded; `history_item_changes` answers the changes from `create_history` versions. |
 | `plugins`                                | `create_plugin_host`: plugins bundled with the app or loaded at run time, each a manifest and a `start(context)`, started in the order their `requires` need and refused when meant for another app or app version; through the context a plugin adds hooks the app calls (on hookable, chosen for its typed, ordered and parallel calls with nothing of its own to style), providers the app picks one of by id, commands with keys, slot contents and settings fields, all taken back when it stops, is turned off or fails to start; one plugin's failing hook is reported and the rest still run; on/off and settings kept through `json_plugin_storage`, stored values that no longer fit falling back to their defaults; a text field marked `secret`, such as an API key, drawn hidden, replaced by `hidden_secret` in what `hide_secrets` gives other programs and given back its stored value by `keep_secrets` when those records are written; versions checked with semver. |
 | `plugin_folder`                          | `load_plugin_folder`: the plugins in a folder's subfolders, each `package.json` naming its built entry per side under `"x-plugin"`, refused when it leads outside its subfolder, with a problem per broken subfolder instead of a throw; `plugin_index` is the page's list of entries, and `read_plugin_file` answers a page that reaches the folder over IPC, as a desktop app's does, with that list or a plugin's own file and nothing outside it. |
 | `server/plugin_files`                    | `register_plugin_files`: `/plugins/index.json` lists the folder's web entries, read afresh on each request, and each plugin's own files are served from its subfolder and nowhere else. |
@@ -214,6 +215,42 @@ await app.register(async (scope) => register_mcp_route(scope, { name: "x-nix", v
 
 An app with its own sessions, such as one logging in by name and password, uses `register_sign_in_guard` with its
 own `is_signed_in`, `login_path: null` so its page loads and logs in itself, and `refusal: "json"`.
+
+## Items for other apps
+
+Every app answers the same four read-only calls about the items it holds, as the Application Standard asks, so a
+program such as an assistant reads every app with one piece of code. `item_calls` takes the app's own answers and
+gives the four methods and their `api_spec` entries, to spread into the method table and the spec, so they are served
+over the API, OpenAPI and MCP like every other call; their names start with `list_`, `search_` and `get_`, so an
+`is_read_only` that goes by the name marks them read-only.
+
+```ts
+import { history_item_changes, item_calls } from "@x-tech-laboratories/x-libs/items";
+
+const items = item_calls(
+  {
+    kinds: [{ kind: "task", label: "Task" }],
+    search: (query, limit) => search_tasks(database(), query, limit).map(task_item), // best first
+    get: (ids) => tasks_by_id(database(), ids).map(task_item),                       // gone ones left out
+    changes: history_item_changes([{ kind: "task", history: task_history, item: (task) => ({ title: task.title, snippet: task.notes, status: task.done ? "done" : "open" }) }], database),
+  },
+  { scheme: "x-tasks" },
+);
+const methods = { ...task_methods, ...items.methods };
+const api: ApiSpec<typeof methods> = { ...task_api, ...items.api };
+```
+
+An item the app hands over needs its `id`, `kind`, `title` and `changed_at`; its `link` is made from the scheme, kind
+and id unless given, its `snippet` is put on one line and cut to 200 characters, and `status` and `detail` are empty
+unless given. A search or a change list takes 20 items unless told (`default_limit`) and never more than 100
+(`max_limit`), and `get_items` takes at most that many ids. `list_item_changes(since, limit)` gives the items changed
+after `since`, oldest first, and every change at the same moment as the last one given, so a caller that keeps the last
+`changed_at` and passes it next time misses nothing. From history, each item comes once, as its newest version has it,
+and a deleted one as its `id`, `kind`, `is_deleted` and `changed_at`; an item whose versions are pruned is no longer
+listed. An app whose ids are only its own within a kind sets `id` on the kind, such as ``(item_id) => `book:${item_id}` ``.
+
+`item_link("x-tasks", "task", "a/1")` is `x-tasks://task/a%2F1`, and `parse_item_link(link, "x-tasks")` gives back
+`{ scheme, kind, id }`, or null for a link of another app or anything that is not an item link.
 
 ## Accounts
 
