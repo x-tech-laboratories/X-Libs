@@ -284,7 +284,8 @@ assistant's conversation, on Halon's `.side-pane` markup. Its head, the `title` 
 such as a checkbox and an editable title), the app's `tools` and a close button, sits in the top bar above the pane
 on wide screens. Given `width`, shaped as `sidebar_width`, its left edge drags or takes the arrow keys, and the width
 is kept under `storage_key` or by the app. Below 700px, where the sidebar becomes the phone menu, the pane covers main
-instead of squeezing it, with its head at its top.
+instead of squeezing it, with its head at its top: it takes the screen's height below the top bar, main hidden behind
+it, so a part pinned to its foot, such as an assistant's message box, stays in sight while the rest of it scrolls.
 
 ```tsx
 const [assistant_open, set_assistant_open] = use_side_pane("x-codex-assistant-open");

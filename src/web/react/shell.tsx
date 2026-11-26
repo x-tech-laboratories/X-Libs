@@ -286,6 +286,12 @@ export interface ShellSidePane {
 const narrow_query = "(max-width: 700px)";
 
 // The title takes the head's room and is cut short with an ellipsis, keeping the close button at the end.
+// On a phone the pane takes the screen below the top bar, its own height rather than main's, so a part pinned to its
+// foot, such as a message box, stays in sight; main is hidden behind it, so the window has nothing else to scroll.
+function phone_pane_style(has_status_bar: boolean): CSSProperties {
+  return { position: "relative", inset: "auto", height: `calc(100dvh - var(--frame-height)${has_status_bar ? " - var(--row-height)" : ""})` };
+}
+
 const pane_title_style: CSSProperties = { flex: 1, minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 // Whether the side pane is open, kept in a pref such as "x-codex-assistant-open" so it stays as it was left.
@@ -552,9 +558,9 @@ export function Shell({
             // Closed, the pane's column takes no room, so main's children keep their place and their state.
             style={{ "--side-pane-width": pane_open ? (pane_width === undefined ? undefined : `${pane_width}px`) : "0px" } as CSSProperties}
           >
-            <div className="main-pane">{children}</div>
+            <div className="main-pane" hidden={narrow && pane_open && !logged_out}>{children}</div>
             {pane_open && !logged_out && (
-              <aside className="side-pane" aria-label={side_pane.title} onKeyDown={escape_pane}>
+              <aside className="side-pane" aria-label={side_pane.title} onKeyDown={escape_pane} style={narrow ? phone_pane_style(status_bar !== undefined) : undefined}>
                 {side_pane.width && pane_width !== undefined && (
                   <ResizeHandle
                     side="right"

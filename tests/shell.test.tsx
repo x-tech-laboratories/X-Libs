@@ -376,10 +376,16 @@ describe("shell side pane", () => {
       fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
       expect(screen.getByRole("button", { name: "Close Assistant" }).closest("aside")).toBe(pane());
       expect(document.querySelector(".topbar .side-pane-head")).toBeNull();
+      // It is the screen's height, not main's, with main hidden behind it, so its foot stays in sight.
+      expect(pane()!.style.height).toBe("calc(100dvh - var(--frame-height))");
+      expect(pane()!.style.position).toBe("relative");
+      expect(document.querySelector<HTMLElement>(".main-pane")!.hidden).toBe(true);
 
       narrow = false;
       act(() => listeners.forEach((listener) => listener()));
       expect(screen.getByRole("button", { name: "Close Assistant" }).closest(".topbar")).toBeTruthy();
+      expect(pane()!.style.height).toBe("");
+      expect(document.querySelector<HTMLElement>(".main-pane")!.hidden).toBe(false);
     } finally {
       window.matchMedia = original;
     }
