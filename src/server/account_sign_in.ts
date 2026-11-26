@@ -1,7 +1,7 @@
 // Signing in to an app with accounts: a name and password (with a second factor when the user has one), a single sign-on
 // provider or a trusted proxy's header opens a session kept in the database, a device or script sends a token instead,
 // and every API call is checked against the role it needs, judged by the path as the router reads it and the route it
-// matched.
+// matched. Given `prefs`, each user also keeps their own preferences.
 //
 // "Keep me signed in" unticked gives a cookie that ends with the browser; ticked, one that lasts until the session is
 // revoked. Both lifetimes can be bounded. An app can require a second factor from its higher roles, which then only read
@@ -14,6 +14,7 @@ import fastify_rate_limit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { PageOnlyCalls } from "../api_spec.ts";
+import { register_account_pref_routes, type AccountPrefsOptions } from "./account_prefs.ts";
 import { AccountError, type AccountStore, type TokenKind, type TokenScopeInfo, type User } from "./account_store.ts";
 import { AttemptLimit, default_address_tries_allowed, default_address_try_window_seconds, too_many_tries_text } from "./attempt_limit.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
@@ -100,6 +101,8 @@ export interface AccountSignInOptions {
   address_try_window_seconds?: number;
   // The lowest role that must sign in with a second factor; null, the default, leaves it to each user.
   second_factor_from?: string | null;
+  // The preferences each signed-in user may keep for themself at <api>/account/prefs/<key>; none unless set.
+  prefs?: AccountPrefsOptions | null;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -131,7 +134,7 @@ export function token_refusal(viewer: Pick<Viewer, "scope">, call: string | null
 export async function register_accounts(app: FastifyInstance, options: AccountSignInOptions): Promise<void> {
   const {
     accounts, cookie_name, oidc = null, proxy = null, needed = () => "any" as const, call_of = () => null, is_read_only = () => false,
-    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null, page_only = null,
+    session_seconds = null, remembered_seconds = null, tries_allowed = 5, try_window = "5 minutes", second_factor_from = null, page_only = null, prefs = null,
     address_tries_allowed = default_address_tries_allowed, address_try_window_seconds = default_address_try_window_seconds,
   } = options;
   const address_tries = new AttemptLimit({ tries_allowed: address_tries_allowed, window_seconds: address_try_window_seconds });
@@ -140,7 +143,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
   const routes = {
     info: `${prefix}/auth/info`, login: `${prefix}/login`, logout: `${prefix}/logout`, me: `${prefix}/me`,
     oidc_start: `${prefix}/auth/oidc/start`, oidc_callback: `${prefix}/auth/oidc/callback`,
-    account: `${prefix}/account`, users: `${prefix}/users`, tokens: `${prefix}/tokens`,
+    account: `${prefix}/account`, users: `${prefix}/users`, tokens: `${prefix}/tokens`, prefs: `${prefix}/account/prefs`,
   };
   const open_prefixes = [...(options.open_prefixes ?? [])];
   const guarded_paths = new Set(options.guarded_paths ?? []);
@@ -227,8 +230,9 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     if (need === "open") return;
     // The guard answers for the API; a guarded path outside it is turned away here.
     if (viewer === null) return is_under(request, path, `${prefix}/`) ? undefined : reply.code(401).send({ error: sign_in_first });
-    // A token cannot manage the account that owns it, so a lost device cannot lock its owner out.
-    const manages_accounts = is_under(request, path, `${routes.account}/`) || is_within(request, path, routes.users) || is_within(request, path, routes.tokens);
+    // A token cannot manage the account that owns it, so a lost device cannot lock its owner out, though it may reach the preferences.
+    const is_pref = prefs !== null && route_of(request) === `${routes.prefs}/:key` && path.startsWith(`${routes.prefs}/`);
+    const manages_accounts = (is_under(request, path, `${routes.account}/`) && !is_pref) || is_within(request, path, routes.users) || is_within(request, path, routes.tokens);
     if (viewer.via === "token" && manages_accounts) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
@@ -423,6 +427,8 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
       accounts.delete_token(Number(request.params.id), request.viewer!.name);
       return reply.code(204).send();
     });
+
+    if (prefs !== null) register_account_pref_routes(scope, accounts, prefs, routes.prefs);
 
     // ── Users and tokens ─────────────────────────────────────────────────────
 

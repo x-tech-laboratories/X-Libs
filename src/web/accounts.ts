@@ -1,9 +1,9 @@
-// The page's side of server/account_sign_in: signing in and out, the signed-in user's own account, and an admin's users
-// and tokens. A desktop or phone app gives the server's address and signs in as a device to get a token of its own.
+// The page's side of server/account_sign_in: signing in and out, the signed-in user's own account and preferences, and an
+// admin's users and tokens. A desktop or phone app gives the server's address and signs in as a device to get a token of its own.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import { ApiError, create_api, type ApiOptions } from "./api.ts";
+import { ApiError, create_api, type ApiOptions, type CallOptions } from "./api.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -77,6 +77,13 @@ export interface AccountTokenScope {
   label: string;
   hint: string;
   calls: string[];
+}
+
+// One of the signed-in user's preferences: its value and when it changed, or a null value and time when none is kept.
+export interface AccountPref<Value = unknown> {
+  key: string;
+  value: Value | null;
+  changed_epoch: number | null;
 }
 
 export interface UserFields {
@@ -157,6 +164,9 @@ export function create_accounts_client(options: AccountsClientOptions = {}) {
       api<{ token: string; id: number; expires_epoch?: number | null }>(`${base}/account/tokens`, "POST", { name, read_only, ...(scope === null ? {} : { scope }), ...(days === null ? {} : { days }) }),
     token_scopes: () => api<AccountTokenScope[]>(`${base}/account/token_scopes`),
     delete_own_token: (id: number) => api<void>(`${base}/account/tokens/${segment(id)}`, "DELETE"),
+    // The signed-in user's own preferences, by a key the app allows; `keepalive` lets a last save outlive the page.
+    pref: <Value = unknown>(key: string) => api<AccountPref<Value>>(`${base}/account/prefs/${segment(key)}`),
+    set_pref: <Value = unknown>(key: string, value: Value, call: CallOptions = {}) => api<AccountPref<Value>>(`${base}/account/prefs/${segment(key)}`, "PUT", { value }, call),
 
     users: () => api<AccountUser[]>(`${base}/users`),
     create_user: (fields: UserFields) => api<AccountUser>(`${base}/users`, "POST", fields),
