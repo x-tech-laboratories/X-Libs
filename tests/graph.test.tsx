@@ -219,6 +219,11 @@ test("zooms, pans, fits and centres on a node asked for, from buttons and keys",
   graph.scale = 3;
   fireEvent.click(screen.getByRole("button", { name: "Fit" }));
   expect(graph.calls.zoomToFit).toHaveLength(1);
+  // The zoom is held to a comfortable one once the fit has moved.
+  expect(graph.scale).toBe(3);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  });
   expect(graph.scale).toBe(2);
   (graph.last("onEngineStop")![0] as () => void)();
   expect(graph.calls.zoomToFit).toHaveLength(2);
@@ -258,4 +263,27 @@ test("keeps a node's place when the data changes", async () => {
   const second = graph.last("graphData")![0] as { nodes: { id: string; x?: number }[] };
   expect(second.nodes.find((node) => node.id === "t1")!.x).toBe(42);
   expect(second.nodes).toHaveLength(4);
+});
+
+test("fits again when the drawing changes width, such as when a pane beside it opens", async () => {
+  const watched: (() => void)[] = [];
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) {
+      watched.push(callback);
+    }
+    observe() {}
+    disconnect() {}
+  });
+  render(<GraphView label="Graph" nodes={nodes} links={links} kinds={kinds} />);
+  const graph = await settle();
+  const placed = graph.last("graphData")![0] as { nodes: { x?: number; y?: number }[] };
+  for (const node of placed.nodes) Object.assign(node, { x: 1, y: 1 });
+  const box = screen.getByRole("img", { name: "Graph" });
+  Object.defineProperty(box, "clientWidth", { value: 380, configurable: true });
+  graph.scale = 5;
+  watched[0]!();
+  expect(graph.last("width")).toEqual([380]);
+  expect(graph.calls.zoomToFit).toHaveLength(1);
+  expect(graph.scale).toBe(2);
+  vi.unstubAllGlobals();
 });

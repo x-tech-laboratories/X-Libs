@@ -377,7 +377,15 @@ export function GraphView({
       };
       const theme = new MutationObserver(repaint);
       theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
-      const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => element.clientWidth > 0 && chain("width", element.clientWidth));
+      // A drawing that changes width, such as when a pane beside it opens or a phone turns, is fitted to it again.
+      const sizes =
+        typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver(() => {
+              if (element.clientWidth <= 0 || element.clientWidth === Number(graph.width?.())) return;
+              chain("width", element.clientWidth);
+              fit(drawing.current, 0);
+            });
       sizes?.observe(element);
       const scheme = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
       scheme?.addEventListener?.("change", repaint);
@@ -539,10 +547,15 @@ export function GraphView({
   );
 }
 
-// Brings every node into view, no closer than a comfortable zoom.
-function fit(current: Drawing | null): void {
+// Brings every node into view, no closer than a comfortable zoom: the zoom is checked once the fit has moved, since a
+// few nodes alone would fill the drawing.
+function fit(current: Drawing | null, duration_ms = 300): void {
   const graph = current?.graph;
   if (!graph || ![...(current?.nodes.values() ?? [])].some((node) => Number.isFinite(node.x))) return;
-  graph.zoomToFit?.(300, fit_padding);
-  if ((Number(graph.zoom?.()) || 0) > most_fit_zoom) graph.zoom?.(most_fit_zoom);
+  graph.zoomToFit?.(duration_ms, fit_padding);
+  const cap = () => {
+    if ((Number(graph.zoom?.()) || 0) > most_fit_zoom) graph.zoom?.(most_fit_zoom, duration_ms ? 150 : 0);
+  };
+  if (duration_ms > 0) setTimeout(cap, duration_ms + 20);
+  else cap();
 }
