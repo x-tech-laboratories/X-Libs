@@ -222,6 +222,23 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
     return to_versions(database, database.prepare(`SELECT * FROM (SELECT ${columns} FROM ${versions}) ${newest_first} LIMIT ?`).all(limit));
   }
 
+  // The newest version of each item whose last change came after since, an ISO time, oldest first: the first limit of
+  // them, and any more changed at the same moment as the last, so a caller going on from that moment misses none.
+  function read_changed_since(database: SqlDatabase, since: string, limit: number): Version<Snapshot>[] {
+    const rows = database
+      .prepare(
+        `WITH latest AS (
+           SELECT * FROM (SELECT ${columns}, ROW_NUMBER() OVER (PARTITION BY ${item_column} ${newest_first}) AS rank FROM ${versions})
+           WHERE rank = 1 AND changed_at > ?
+         )
+         SELECT * FROM latest
+         WHERE changed_at <= COALESCE((SELECT changed_at FROM latest ORDER BY changed_at, id LIMIT 1 OFFSET ?), changed_at)
+         ORDER BY changed_at, id`,
+      )
+      .all(since, Math.max(0, limit - 1));
+    return to_versions(database, rows);
+  }
+
   // ── Restoring ────────────────────────────────────────────────────────────
 
   const exists = (database: SqlDatabase, item_id: string) => database.prepare(`SELECT 1 FROM ${item_table} WHERE ${item_key} = ?`).get(item_id) !== undefined;
@@ -264,7 +281,7 @@ export function create_history<Snapshot>(options: HistoryOptions<Snapshot>) {
     record(database, restored_from);
   }
 
-  return { schema, synced_table, install, drop_triggers, forget_touched, record, prune, read_versions, read_recent, restore };
+  return { schema, synced_table, install, drop_triggers, forget_touched, record, prune, read_versions, read_recent, read_changed_since, restore };
 }
 
 // ── Device calls ─────────────────────────────────────────────────────────────
