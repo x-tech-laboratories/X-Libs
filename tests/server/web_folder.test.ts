@@ -62,6 +62,7 @@ describe("web folder", () => {
     const call = await app.inject({ method: "GET", url: "/api/nothing" });
     expect(call.statusCode).toBe(404);
     expect(call.json()).toEqual({ error: "Not found" });
+    expect((await app.inject({ method: "GET", url: "/%61pi/nothing" })).json()).toEqual({ error: "Not found" });
     expect((await app.inject({ method: "POST", url: "/somewhere" })).statusCode).toBe(404);
   });
 });

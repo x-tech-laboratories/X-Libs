@@ -8,6 +8,7 @@ import { register_accounts, calls_under, device_label, is_user_or_device, type A
 import { AccountStore } from "../src/server/account_store.ts";
 import { hash_password } from "../src/server/passwords.ts";
 import { code_at } from "../src/server/totp.ts";
+import { send_raw } from "./server/raw_request.ts";
 
 const password = "a long enough password";
 let app: FastifyInstance;
@@ -422,5 +423,84 @@ describe("token kinds", () => {
     const accounts = new AccountStore({ database, app_name: "X-Test" });
 
     expect(accounts.tokens().map((token) => [token.name, token.kind])).toEqual([["phone", "device"], ["reader", "program"], ["adder", "program"]]);
+  });
+});
+
+describe("spelling of the path", () => {
+  // A viewer's session cookie, as a header for a request sent byte for byte.
+  async function viewer_cookie(accounts: AccountStore): Promise<Record<string, string>> {
+    accounts.create_user({ name: "vera", role: "viewer", access: null, password });
+    return { cookie: `x_test_session=${cookie_of(await sign_in({ name: "vera", password })).value}` };
+  }
+
+  it("refuses a signed-out call to an API route spelled with escapes", async () => {
+    await serve();
+
+    expect(await send_raw(app, "GET", "/%61pi/things")).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "POST", "/%61pi/things")).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "GET", "/api/things#")).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "GET", "http://localhost/api/things")).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "GET", "/api/things")).toMatchObject({ status: 401 });
+  });
+
+  it("keeps a viewer from the users and tokens however they are spelled", async () => {
+    const headers = await viewer_cookie(await serve());
+
+    expect(await send_raw(app, "GET", "/api/users", headers)).toMatchObject({ status: 403 });
+    for (const target of ["/api/%75sers", "/api/%74okens", "/api/user%73", "/%61pi/tokens", "/api//users", "/api/./users", "/api/me/../users"]) {
+      expect((await send_raw(app, "GET", target, headers)).status, target).toBe(400);
+    }
+    for (const target of ["/api/users/", "/api/Users", "/api;x=1/users", "/api/users;x=1"]) {
+      expect((await send_raw(app, "GET", target, headers)).status, target).toBeGreaterThanOrEqual(400);
+    }
+    expect(await send_raw(app, "GET", "/api/me", headers)).toMatchObject({ status: 200 });
+  });
+
+  it("hands the app's rule the path as routed and the route's pattern", async () => {
+    const seen: (string | null)[][] = [];
+    const accounts = await serve({
+      needed: (_method, path, route) => {
+        seen.push([path, route]);
+        return /^\/api\/builds\/\d+\/products\/\d+$/.test(path) ? { role: "admin" } : "any";
+      },
+    });
+    app.get("/api/builds/:id/products/:index", async () => "product");
+    app.get("/api/hosts/:name/events", async (request) => (request.params as { name: string }).name);
+    const headers = await viewer_cookie(accounts);
+
+    expect(await send_raw(app, "GET", "/api/builds/1/products/0", headers)).toMatchObject({ status: 403 });
+    expect(seen.at(-1)).toEqual(["/api/builds/1/products/0", "/api/builds/:id/products/:index"]);
+    for (const target of ["/api/builds/1/%70roducts/0", "/api/builds/%31/products/0", "/api/builds/1/products/0#", "/api/builds/1//products/0", "/api/builds/1/x/../products/0"]) {
+      expect((await send_raw(app, "GET", target, headers)).status, target).toBe(400);
+    }
+    expect((await send_raw(app, "GET", "/api/builds/1/products/0/", headers)).status).not.toBe(200);
+    expect(await send_raw(app, "GET", "/api/hosts/my%20host/events?since=%25", headers)).toMatchObject({ status: 200, body: "my host" });
+    expect(seen.at(-1)).toEqual(["/api/hosts/my host/events", "/api/hosts/:name/events"]);
+  });
+
+  it("keeps open paths and the read-only token's exceptions to their own spelling", async () => {
+    const accounts = await serve({ open_paths: ["/api/health"], read_only_paths: ["/api/mcp"] });
+    app.get("/api/health", async () => "healthy");
+    app.post("/api/mcp", async () => "mcp");
+    accounts.create_user({ name: "otto", role: "operator", access: null, password });
+    const { token } = accounts.create_token("otto", { name: "script", read_only: true });
+    const headers = { authorization: `Bearer ${token}` };
+
+    expect(await send_raw(app, "GET", "/api/health")).toMatchObject({ status: 200, body: "healthy" });
+    expect(await send_raw(app, "GET", "/api/%68ealth")).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "POST", "/api/mcp", headers)).toMatchObject({ status: 200, body: "mcp" });
+    expect(await send_raw(app, "POST", "/api/%6Dcp", headers)).toMatchObject({ status: 400 });
+    expect(await send_raw(app, "POST", "/api/thing%73", headers)).toMatchObject({ status: 400 });
+    expect((await send_raw(app, "POST", "/api/things", headers)).status).toBe(403);
+  });
+
+  it("keeps a token from managing accounts whatever the spelling", async () => {
+    const accounts = await serve();
+    const { token } = accounts.create_token("root", { name: "script", read_only: false });
+    const headers = { authorization: `Bearer ${token}` };
+
+    expect(await send_raw(app, "GET", "/api/users", headers)).toMatchObject({ status: 403 });
+    expect(await send_raw(app, "GET", "/api/account/sessions", headers)).toMatchObject({ status: 403 });
+    expect(await send_raw(app, "GET", "/api/%61ccount/sessions", headers)).toMatchObject({ status: 400 });
   });
 });

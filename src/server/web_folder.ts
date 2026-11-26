@@ -10,6 +10,8 @@ import { resolve } from "node:path";
 import fastify_static from "@fastify/static";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { path_of } from "./request_path.ts";
+
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
 export interface WebFolderOptions {
@@ -56,8 +58,7 @@ export async function register_web_folder(app: FastifyInstance, options: WebFold
   if (options.page_fallback) {
     const api_not_found = options.api_not_found ?? ((_request, reply) => reply.code(404).type("text/plain; charset=utf-8").send("not found"));
     app.setNotFoundHandler((request, reply) => {
-      const path = request.url.split("?")[0] ?? "";
-      if (path.startsWith(api_prefix) || (request.method !== "GET" && request.method !== "HEAD")) return api_not_found(request, reply);
+      if (path_of(request).startsWith(api_prefix) || (request.method !== "GET" && request.method !== "HEAD")) return api_not_found(request, reply);
       return reply.header("cache-control", page_cache_control).sendFile("index.html");
     });
   }
