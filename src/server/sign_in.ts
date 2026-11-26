@@ -11,6 +11,7 @@ import fastify_cookie from "@fastify/cookie";
 import fastify_formbody from "@fastify/formbody";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { AttemptLimit, default_address_tries_allowed, default_address_try_window_seconds, too_many_tries_text } from "./attempt_limit.ts";
 import { render_login_page } from "./login_page.ts";
 import { is_plain_path, is_under, path_of } from "./request_path.ts";
 
@@ -46,6 +47,9 @@ export interface TokenSignInOptions extends Omit<SignInGuardOptions, "is_signed_
   session_seconds?: number;
   // How long a wrong token waits before being refused; a second unless set.
   failed_login_delay_ms?: number;
+  // How many wrong tokens one address may send on the login page in the window before it waits; 20 in 300 seconds unless set.
+  address_tries_allowed?: number;
+  address_try_window_seconds?: number;
   // The login route, which also names where the guard sends page loads; "/login" unless set.
   login_path?: string;
   // The logout route; "/logout" unless set.
@@ -131,7 +135,9 @@ export async function register_token_sign_in(app: FastifyInstance, options: Toke
   const {
     secret, title, login_path = "/login", logout_path = "/logout", home_path = "/",
     session_seconds = default_session_seconds, failed_login_delay_ms = default_failed_login_delay_ms,
+    address_tries_allowed = default_address_tries_allowed, address_try_window_seconds = default_address_try_window_seconds,
   } = options;
+  const address_tries = new AttemptLimit({ tries_allowed: address_tries_allowed, window_seconds: address_try_window_seconds });
   const cookie_name = options.cookie_name ?? cookie_name_for(title);
   const render = options.render_login_page ?? ((has_failed: boolean) => render_login_page({ title, has_failed, action: login_path }));
 
@@ -147,9 +153,13 @@ export async function register_token_sign_in(app: FastifyInstance, options: Toke
 
   app.get(login_path, async (_request, reply) => reply.type("text/html; charset=utf-8").send(render(false)));
 
+  // A try counts against the address while it waits and once it fails, so tries sent side by side cannot outrun the delay.
   app.post<{ Body: { token?: string } }>(login_path, async (request, reply) => {
+    const address_wait = address_tries.take(request.ip);
+    if (address_wait > 0) return reply.code(429).header("retry-after", String(address_wait)).type("text/plain; charset=utf-8").send(too_many_tries_text);
     const token = request.body?.token ?? "";
     if (secret === "" || same_secret(token, secret)) {
+      address_tries.give_back(request.ip);
       set_session_cookie(request, reply, cookie_name, session_value(secret, cookie_name), session_seconds);
       return reply.redirect(home_path, 303);
     }

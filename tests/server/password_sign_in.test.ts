@@ -1,12 +1,12 @@
 import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import { hash_password } from "../../src/server/passwords.ts";
+import { hash_password, PasswordHashSlots, verify_password_async, type PasswordHasher } from "../../src/server/passwords.ts";
 import { register_password_sign_in } from "../../src/server/password_sign_in.ts";
 import { register_error_replies } from "../../src/server/replies.ts";
 
 let app: FastifyInstance;
 
-async function build(options: { tries_allowed?: number } = {}): Promise<FastifyInstance> {
+async function build(options: { tries_allowed?: number; password_hashes?: PasswordHashSlots } = {}): Promise<FastifyInstance> {
   app = fastify();
   register_error_replies(app, { format: "json" });
   await register_password_sign_in(app, {
@@ -83,5 +83,38 @@ describe("password sign-in", () => {
 
     expect(third.statusCode).toBe(429);
     expect(third.json()).toEqual({ error: "Too many tries; wait a few minutes." });
+  });
+
+  it("makes an address that gives a new name each time wait, whatever the names", async () => {
+    await build({ tries_allowed: 3 });
+    const from = (name: string, remoteAddress = "10.0.0.1") => app.inject({ method: "POST", url: "/api/login", payload: { name, password: "wrong" }, remoteAddress });
+
+    const statuses = [];
+    for (const name of ["one", "two", "three", "four"]) statuses.push((await from(name)).statusCode);
+
+    expect(statuses).toEqual([401, 401, 401, 429]);
+    expect((await from("five", "10.0.0.2")).statusCode).toBe(401);
+  });
+
+  it("answers 429 with Retry-After when every password slot is taken", async () => {
+    const finishers: Array<() => void> = [];
+    const hasher: PasswordHasher = {
+      hash: async () => "unused",
+      verify: async (given, stored) => {
+        await new Promise<void>((finish) => finishers.push(finish));
+        return verify_password_async(given, stored);
+      },
+    };
+    await build({ password_hashes: new PasswordHashSlots({ at_once: 1, waiting: 0, hasher }) });
+
+    const running = log_in("ada", "right");
+    while (finishers.length === 0) await new Promise((settle) => setTimeout(settle, 5));
+    const refused = await log_in("bob", "wrong");
+    finishers.shift()!();
+
+    expect(refused.statusCode).toBe(429);
+    expect(refused.headers["retry-after"]).toBe("1");
+    expect(refused.json()).toEqual({ error: "The server is busy checking passwords; try again in a moment." });
+    expect((await running).statusCode).toBe(204);
   });
 });

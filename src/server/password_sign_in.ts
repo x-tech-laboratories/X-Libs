@@ -1,6 +1,7 @@
 // Signing in by name and password: the names and hashes come from an accounts file, a right pair opens a session the
 // server keeps, and every API path but the open ones needs it. A wrong name takes as long to refuse as a wrong password,
-// an address gets a few tries before it waits, and a restart signs everyone out.
+// an address gets a few tries whatever names it gives before it waits, passwords are hashed off the main thread a few at
+// a time, and a restart signs everyone out.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -11,7 +12,8 @@ import fastify_rate_limit from "@fastify/rate-limit";
 import fastify_session from "@fastify/session";
 import type { FastifyInstance } from "fastify";
 
-import { hash_password, verify_password, type Accounts } from "./passwords.ts";
+import { too_many_tries_text } from "./attempt_limit.ts";
+import { hash_password, PasswordHashesBusy, shared_password_hashes, type Accounts, type PasswordHashSlots } from "./passwords.ts";
 import { register_sign_in_guard } from "./sign_in.ts";
 
 declare module "fastify" {
@@ -36,6 +38,8 @@ export interface PasswordSignInOptions {
   // How many tries one address gets in the window before it waits; 5 in "5 minutes" unless set.
   tries_allowed?: number;
   try_window?: string;
+  // Where the password hashes run; the process's `shared_password_hashes` unless set.
+  password_hashes?: PasswordHashSlots;
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -51,6 +55,7 @@ const stand_in_hash = hash_password(randomBytes(16).toString("hex"));
 export async function register_password_sign_in(app: FastifyInstance, options: PasswordSignInOptions): Promise<void> {
   const prefix = options.api_prefix ?? "/api";
   const login_path = `${prefix}/login`;
+  const password_hashes = options.password_hashes ?? shared_password_hashes;
 
   await app.register(fastify_cookie);
   await app.register(fastify_session, {
@@ -61,7 +66,7 @@ export async function register_password_sign_in(app: FastifyInstance, options: P
   });
   await app.register(fastify_rate_limit, {
     global: false,
-    errorResponseBuilder: () => Object.assign(new Error("Too many tries; wait a few minutes."), { statusCode: 429 }),
+    errorResponseBuilder: () => Object.assign(new Error(too_many_tries_text), { statusCode: 429 }),
   });
 
   // The page loads without a session and signs in itself, so only API calls are turned away.
@@ -80,7 +85,13 @@ export async function register_password_sign_in(app: FastifyInstance, options: P
     const name = typeof request.body?.name === "string" ? request.body.name.trim().toLowerCase() : "";
     const password = request.body?.password;
     const stored = options.accounts.get(name);
-    const matches = typeof password === "string" && verify_password(password, stored ?? stand_in_hash);
+    let matches = false;
+    try {
+      matches = typeof password === "string" && await password_hashes.verify(password, stored ?? stand_in_hash);
+    } catch (error) {
+      if (!(error instanceof PasswordHashesBusy)) throw error;
+      return reply.code(429).header("retry-after", String(error.retry_after_seconds)).send({ error: error.message });
+    }
     if (stored === undefined || !matches) return reply.code(401).send({ error: "Wrong name or password." });
     // A fresh session id at login, so one handed out before it cannot ride along.
     await request.session.regenerate();
