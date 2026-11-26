@@ -1,6 +1,7 @@
 // Signing in to an app with accounts: a name and password (with a second factor when the user has one), a single sign-on
 // provider or a trusted proxy's header opens a session kept in the database, a device or script sends a token instead,
-// and every API call is checked against the role it needs.
+// and every API call is checked against the role it needs, judged by the path as the router reads it and the route it
+// matched.
 //
 // "Keep me signed in" unticked gives a cookie that ends with the browser; ticked, one that lasts until the session is
 // revoked. Both lifetimes can be bounded. An app can require a second factor from its higher roles, which then only read
@@ -16,7 +17,8 @@ import type { PageOnlyCalls } from "../api_spec.ts";
 import { AccountError, type AccountStore, type TokenKind, type TokenScopeInfo, type User } from "./account_store.ts";
 import type { DeclaredToken } from "./declared_tokens.ts";
 import type { OidcClient } from "./oidc.ts";
-import { path_of, register_sign_in_guard } from "./sign_in.ts";
+import { is_under, path_of, route_of } from "./request_path.ts";
+import { register_sign_in_guard } from "./sign_in.ts";
 
 export { is_user_or_device } from "./viewers.ts";
 
@@ -72,8 +74,8 @@ export interface AccountSignInOptions {
   guarded_paths?: Iterable<string>;
   // Paths a read-only token may send any method to, as the route itself keeps such a token to reading, such as /api/mcp.
   read_only_paths?: Iterable<string>;
-  // What each of the app's own API routes needs; anyone signed in unless set.
-  needed?: (method: string, path: string) => Need;
+  // What each app route needs, from the routed path and the matched route's pattern or null; anyone signed in unless set.
+  needed?: (method: string, path: string, route: string | null) => Need;
   // The call a request makes, such as "add_item" for POST /api/call/add_item, or null for a route that is no call;
   // `calls_under` reads it from a call table's path. A read-only or scoped token is let through to a call that only
   // reads, and a scoped token to its scope's calls; none is named unless set, so such tokens only GET.
@@ -188,13 +190,18 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
     return null;
   };
 
+  // Whether the path, or the matched route's pattern, is the account route given or lies below it.
+  const is_within = (request: FastifyRequest, path: string, route_path: string) =>
+    path === route_path || route_of(request) === route_path || is_under(request, path, `${route_path}/`);
+
   // What a request needs, with the account routes' own needs first.
-  const need_of = (method: string, path: string): Need => {
+  const need_of = (request: FastifyRequest, path: string): Need => {
+    const route = route_of(request);
     if (open_paths.has(path) || open_prefixes.some((open_prefix) => path.startsWith(open_prefix))) return "open";
-    if (!path.startsWith(`${prefix}/`)) return guarded_paths.has(path) ? needed(method, path) : "open";
-    if (path === routes.me || path === routes.logout || path.startsWith(`${routes.account}/`)) return "any";
-    if (path === routes.users || path.startsWith(`${routes.users}/`) || path === routes.tokens || path.startsWith(`${routes.tokens}/`)) return admin;
-    return needed(method, path);
+    if (!is_under(request, path, `${prefix}/`)) return guarded_paths.has(path) ? needed(request.method, path, route) : "open";
+    if (is_within(request, path, routes.users) || is_within(request, path, routes.tokens)) return admin;
+    if (path === routes.me || path === routes.logout || is_under(request, path, `${routes.account}/`)) return "any";
+    return needed(request.method, path, route);
   };
 
   // Added before the guard, so the guard and the routes both see who is asking.
@@ -209,13 +216,14 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
   app.addHook("onRequest", async (request, reply) => {
     const path = path_of(request);
-    const need = need_of(request.method, path);
+    const need = need_of(request, path);
     const viewer = request.viewer;
     if (need === "open") return;
     // The guard answers for the API; a guarded path outside it is turned away here.
-    if (viewer === null) return path.startsWith(`${prefix}/`) ? undefined : reply.code(401).send({ error: sign_in_first });
+    if (viewer === null) return is_under(request, path, `${prefix}/`) ? undefined : reply.code(401).send({ error: sign_in_first });
     // A token cannot manage the account that owns it, so a lost device cannot lock its owner out.
-    if (viewer.via === "token" && (path.startsWith(`${routes.account}/`) || typeof need === "object" && (path.startsWith(routes.users) || path.startsWith(routes.tokens)))) {
+    const manages_accounts = is_under(request, path, `${routes.account}/`) || is_within(request, path, routes.users) || is_within(request, path, routes.tokens);
+    if (viewer.via === "token" && manages_accounts) {
       return reply.code(403).send({ error: "A token cannot manage accounts; sign in on the page." });
     }
     if (page_only !== null && viewer.via === "token") {

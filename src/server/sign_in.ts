@@ -1,6 +1,7 @@
 // Signing in to a server that has one secret: a browser posts it on the login page and keeps a cookie derived from it,
 // other programs send it as a bearer header, and the guard turns away every request that carries neither. The guard
-// alone also serves servers with their own sessions, which hand it the check.
+// alone also serves servers with their own sessions, which hand it the check. It judges the path as the router reads it,
+// treats any route matched under the API prefix as part of the API, and refuses with 400 a path that reads two ways.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,9 @@ import fastify_formbody from "@fastify/formbody";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { render_login_page } from "./login_page.ts";
+import { is_plain_path, is_under, path_of } from "./request_path.ts";
+
+export { path_of } from "./request_path.ts";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +60,7 @@ export interface TokenSignInOptions extends Omit<SignInGuardOptions, "is_signed_
 
 const default_session_seconds = 90 * 24 * 60 * 60;
 const default_failed_login_delay_ms = 1000;
+const unplain_path_text = "Spell the path plainly, without escaped letters or digits, empty or dot segments, or a fragment.";
 
 // ── Secrets ──────────────────────────────────────────────────────────────────
 
@@ -93,28 +98,29 @@ function set_session_cookie(request: FastifyRequest, reply: FastifyReply, cookie
 
 // ── Guard ────────────────────────────────────────────────────────────────────
 
-export function path_of(request: FastifyRequest): string {
-  return request.url.split("?")[0] ?? "";
-}
-
 // Turns away every request that is not signed in: a page load goes to the login page, while a call gets a refusal it can act on.
 export function register_sign_in_guard(app: FastifyInstance, options: SignInGuardOptions): void {
   const { is_signed_in, api_prefix = "/api/", login_path = "/login", refusal = "text", refusal_text = "sign in first" } = options;
   const open_paths = new Set(options.open_paths ?? []);
   const open_prefixes = [...(options.open_prefixes ?? [])];
 
+  const refuse = (reply: FastifyReply, status: number, text: string) => {
+    void reply.code(status).header("cache-control", "no-store");
+    if (refusal === "json") return reply.send({ error: text });
+    return reply.type("text/plain; charset=utf-8").send(text);
+  };
+
   app.addHook("onRequest", async (request, reply) => {
+    if (!is_plain_path(request)) return refuse(reply, 400, unplain_path_text);
     const path = path_of(request);
     // Preflight checks carry no credentials, and the sign-in routes are open by nature.
     if (request.method === "OPTIONS" || open_paths.has(path) || open_prefixes.some((prefix) => path.startsWith(prefix))) return;
     if (is_signed_in(request)) return;
-    if (!path.startsWith(api_prefix)) {
+    if (!is_under(request, path, api_prefix)) {
       if (login_path === null) return;
       return reply.redirect(login_path, 303);
     }
-    void reply.code(401).header("cache-control", "no-store");
-    if (refusal === "json") return reply.send({ error: refusal_text });
-    return reply.type("text/plain; charset=utf-8").send(refusal_text);
+    return refuse(reply, 401, refusal_text);
   });
 }
 
