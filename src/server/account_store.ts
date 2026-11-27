@@ -1,5 +1,6 @@
 // Who may sign in and what each may do, kept in the app's SQLite database: users with a role and the app's own access
-// rules, their second factor, the sessions they are signed in with, and the tokens their devices and scripts use.
+// rules, their second factor, the sessions they are signed in with, the tokens their devices and scripts use, and each
+// user's own preferences as JSON text by key.
 //
 // Users named in the accounts file are declared: they hold the highest role, and the page cannot change their role or
 // password, only their second factor. Every other user lives in the database and is managed from the page.
@@ -76,6 +77,13 @@ export interface TokenScopeInfo {
   label: string;
   hint: string;
   calls: string[];
+}
+
+// One of a user's preferences as stored, its value still JSON text.
+export interface StoredPref {
+  key: string;
+  value: string;
+  changed_epoch: number;
 }
 
 export class AccountError extends Error {
@@ -187,7 +195,15 @@ const schema = [`
 [
   "ALTER TABLE account_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'program'",
   "UPDATE account_tokens SET kind = 'device' WHERE read_only = 0 AND scope IS NULL",
-]];
+], `
+  CREATE TABLE account_prefs (
+    name TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    changed_epoch INTEGER NOT NULL,
+    PRIMARY KEY (name, key)
+  );
+`];
 
 type Row = Record<string, SqlValue>;
 
@@ -350,13 +366,14 @@ export class AccountStore {
     return this.user(name)!;
   }
 
-  // Removes the user with their sessions and tokens.
+  // Removes the user with their sessions, tokens and preferences.
   delete_user(name: string): void {
     this.refuse_declared(name, "it is in the accounts file");
     if (this.user(name) === null) throw new AccountError(`No user named '${name}'.`, 404);
     this.run("DELETE FROM account_users WHERE name = ?", name);
     this.run("DELETE FROM account_sessions WHERE name = ?", name);
     this.run("DELETE FROM account_tokens WHERE owner = ?", name);
+    this.run("DELETE FROM account_prefs WHERE name = ?", name);
   }
 
   // This hashes on the thread, so a request handler uses `change_password_async`.
@@ -569,6 +586,24 @@ export class AccountStore {
   // The config's token the presented one matches, or null.
   check_declared_token(token: string): DeclaredToken | null {
     return match_declared_token(this.declared_token_list, token);
+  }
+
+  // ── Preferences ──────────────────────────────────────────────────────────
+
+  // The user's preference under the key, or null when none is stored.
+  pref(name: string, key: string): StoredPref | null {
+    const row = this.get("SELECT key, value, changed_epoch FROM account_prefs WHERE name = ? AND key = ?", name, key);
+    return row ? { key: String(row.key), value: String(row.value), changed_epoch: Number(row.changed_epoch) } : null;
+  }
+
+  // Keeps the user's preference under the key as the JSON text given, replacing any before it.
+  set_pref(name: string, key: string, value: string): StoredPref {
+    const changed_epoch = now_seconds();
+    this.run(
+      "INSERT INTO account_prefs (name, key, value, changed_epoch) VALUES (?, ?, ?, ?) ON CONFLICT (name, key) DO UPDATE SET value = excluded.value, changed_epoch = excluded.changed_epoch",
+      name, key, value, changed_epoch,
+    );
+    return { key, value, changed_epoch };
   }
 
   // ── Checks ───────────────────────────────────────────────────────────────

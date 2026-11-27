@@ -39,7 +39,11 @@ export function read_pref<Value>(storage: StorageLike | undefined, key: string, 
   } catch {
     return initial;
   }
+  return checked_pref(parsed, initial, validate);
+}
 
+// The value read from anywhere, such as the server, or the initial one when it fails the validator or the initial one's shape.
+export function checked_pref<Value>(parsed: unknown, initial: Value, validate?: Validator<Value>): Value {
   if (validate) return validate(parsed) ? parsed : initial;
 
   // Without a validator the stored value must at least have the initial value's shape.
