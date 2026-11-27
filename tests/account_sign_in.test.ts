@@ -560,6 +560,29 @@ describe("sign-in limits", () => {
     expect((await sign_in({ name: "vera", password: "wrong" })).statusCode).toBe(401);
   });
 
+  it("counts wrong bearer tokens against the address, not right ones or calls without one", async () => {
+    const accounts = await serve({ address_tries_allowed: 2, open_paths: ["/api/hook"] });
+    app.get("/api/hook", async () => "open");
+    const { token } = accounts.create_token("root", { name: "script", read_only: false });
+    const call = (authorization: string | undefined, address = "10.0.0.1", url = "/api/things") =>
+      app.inject({ url, remoteAddress: address, headers: authorization === undefined ? {} : { authorization } });
+
+    const statuses = [];
+    for (const authorization of [undefined, undefined, undefined, `Bearer ${token}`, `Bearer ${token}`, "Bearer xt_fake_guess_one"]) {
+      statuses.push((await call(authorization)).statusCode);
+    }
+    statuses.push((await call("Bearer xt_fake_guess_two", "10.0.0.1", "/api/hook")).statusCode);
+    statuses.push((await call("Bearer xt_fake_guess_three")).statusCode);
+    const refused = await call(`Bearer ${token}`);
+
+    expect(statuses).toEqual([401, 401, 401, 200, 200, 401, 200, 401]);
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json()).toEqual(too_many);
+    expect(Number(refused.headers["retry-after"])).toBeGreaterThan(0);
+    expect((await sign_in_from("10.0.0.1", { name: "root", password })).statusCode).toBe(429);
+    expect((await call(`Bearer ${token}`, "10.0.0.2")).statusCode).toBe(200);
+  });
+
   it("lets a right password in after a few wrong ones, without counting the sign-ins that worked", async () => {
     await serve({ address_tries_allowed: 3, tries_allowed: 100 });
 
