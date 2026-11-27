@@ -20,7 +20,12 @@ export class ApiError extends Error {
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-export type Api = <Answer>(path: string, method?: ApiMethod, body?: unknown) => Promise<Answer>;
+export interface CallOptions {
+  // Lets the request outlive the page, such as a last save as it is hidden or closed.
+  keepalive?: boolean;
+}
+
+export type Api = <Answer>(path: string, method?: ApiMethod, body?: unknown, call?: CallOptions) => Promise<Answer>;
 
 export interface ApiOptions {
   // Paths whose 401 is their answer rather than a lapsed session, such as the login itself.
@@ -33,6 +38,9 @@ export interface ApiOptions {
 }
 
 // ── Requests ─────────────────────────────────────────────────────────────────
+
+// Browsers refuse a keepalive request whose body passes 64 KiB, so a larger one goes as a plain request.
+const largest_keepalive_bytes = 64 * 1024;
 
 // What a proxy's own error page means, since its HTML is no message for a person.
 const proxy_messages: Record<number, string> = {
@@ -66,10 +74,12 @@ export function create_api(options: ApiOptions = {}): Api {
   const open_paths = new Set(options.open_paths ?? []);
   const login_needed_text = options.login_needed_text ?? "Sign in first.";
 
-  return async <Answer>(path: string, method: ApiMethod = "GET", body: unknown = undefined): Promise<Answer> => {
+  return async <Answer>(path: string, method: ApiMethod = "GET", body: unknown = undefined, call: CallOptions = {}): Promise<Answer> => {
     const headers: Record<string, string> = { accept: "application/json", ...options.headers?.() };
     if (body !== undefined) headers["content-type"] = "application/json";
-    const request: RequestInit = { method, headers, body: body === undefined ? undefined : JSON.stringify(body) };
+    const text_body = body === undefined ? undefined : JSON.stringify(body);
+    const request: RequestInit = { method, headers, body: text_body };
+    if (call.keepalive && new TextEncoder().encode(text_body ?? "").length <= largest_keepalive_bytes) request.keepalive = true;
     let response: Response;
     try {
       response = await (options.fetch ?? fetch)(path, request);

@@ -24,6 +24,17 @@ describe("api", () => {
     expect(seen[0].headers).toEqual({ accept: "application/json", "x-client-id": "page-1", "content-type": "application/json" });
   });
 
+  it("lets a request outlive the page when asked, unless its body is too large for that", async () => {
+    const seen: RequestInit[] = [];
+    const api = create_api({ fetch: answering(200, "{}", seen) });
+
+    await api("/api/x", "PUT", { value: "small" }, { keepalive: true });
+    await api("/api/x", "PUT", { value: "x".repeat(70 * 1024) }, { keepalive: true });
+    await api("/api/x", "PUT", { value: "small" });
+
+    expect(seen.map((init) => init.keepalive)).toEqual([true, undefined, undefined]);
+  });
+
   it("answers nothing for a 204", async () => {
     expect(await create_api({ fetch: answering(204, "") })("/api/logout", "POST")).toBeUndefined();
   });
