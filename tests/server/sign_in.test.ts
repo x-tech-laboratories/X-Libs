@@ -83,6 +83,26 @@ describe("token sign-in", () => {
     expect((await app.inject({ method: "GET", url: "/api/things", headers: { authorization: "Bearer wrong" } })).statusCode).toBe(401);
   });
 
+  it("makes an address that sends too many wrong bearer tokens wait, sharing the login page's limit", async () => {
+    await build({ address_tries_allowed: 2 });
+    const call = (authorization: string | undefined, remoteAddress = "10.0.0.1") =>
+      app.inject({ method: "GET", url: "/api/things", remoteAddress, headers: authorization === undefined ? {} : { authorization } });
+
+    const statuses = [];
+    for (const authorization of [undefined, undefined, undefined, `Bearer ${secret}`, `Bearer ${secret}`, "Bearer fake-guess-one", "Bearer fake-guess-two"]) {
+      statuses.push((await call(authorization)).statusCode);
+    }
+    const refused = await call(`Bearer ${secret}`);
+    const login = await app.inject({ method: "POST", url: "/login", payload: `token=${secret}`, headers: { "content-type": "application/x-www-form-urlencoded" }, remoteAddress: "10.0.0.1" });
+
+    expect(statuses).toEqual([401, 401, 401, 200, 200, 401, 401]);
+    expect(refused.statusCode).toBe(429);
+    expect(refused.body).toBe("Too many tries; wait a few minutes.");
+    expect(Number(refused.headers["retry-after"])).toBeGreaterThan(0);
+    expect(login.statusCode).toBe(429);
+    expect((await call(`Bearer ${secret}`, "10.0.0.2")).statusCode).toBe(200);
+  });
+
   it("signs out by clearing the cookie", async () => {
     await build();
     const logout = await app.inject({ method: "GET", url: "/logout" });

@@ -34,9 +34,11 @@ export interface SignInGuardOptions {
   refusal?: "text" | "json";
   // What a refused call says.
   refusal_text?: string;
+  // The limit a bearer header that does not sign in counts against, per address, answering 429 once used up; none unless set.
+  address_tries?: AttemptLimit;
 }
 
-export interface TokenSignInOptions extends Omit<SignInGuardOptions, "is_signed_in"> {
+export interface TokenSignInOptions extends Omit<SignInGuardOptions, "is_signed_in" | "address_tries"> {
   // The secret browsers sign in with; empty leaves the server open.
   secret: string;
   // The app's name, for the login page.
@@ -47,7 +49,7 @@ export interface TokenSignInOptions extends Omit<SignInGuardOptions, "is_signed_
   session_seconds?: number;
   // How long a wrong token waits before being refused; a second unless set.
   failed_login_delay_ms?: number;
-  // How many wrong tokens one address may send on the login page in the window before it waits; 20 in 300 seconds unless set.
+  // How many wrong tokens one address may send, on the login page or as a bearer header, in the window before it waits; 20 in 300 seconds unless set.
   address_tries_allowed?: number;
   address_try_window_seconds?: number;
   // The login route, which also names where the guard sends page loads; "/login" unless set.
@@ -104,7 +106,7 @@ function set_session_cookie(request: FastifyRequest, reply: FastifyReply, cookie
 
 // Turns away every request that is not signed in: a page load goes to the login page, while a call gets a refusal it can act on.
 export function register_sign_in_guard(app: FastifyInstance, options: SignInGuardOptions): void {
-  const { is_signed_in, api_prefix = "/api/", login_path = "/login", refusal = "text", refusal_text = "sign in first" } = options;
+  const { is_signed_in, api_prefix = "/api/", login_path = "/login", refusal = "text", refusal_text = "sign in first", address_tries } = options;
   const open_paths = new Set(options.open_paths ?? []);
   const open_prefixes = [...(options.open_prefixes ?? [])];
 
@@ -119,7 +121,14 @@ export function register_sign_in_guard(app: FastifyInstance, options: SignInGuar
     const path = path_of(request);
     // Preflight checks carry no credentials, and the sign-in routes are open by nature.
     if (request.method === "OPTIONS" || open_paths.has(path) || open_prefixes.some((prefix) => path.startsWith(prefix))) return;
-    if (is_signed_in(request)) return;
+    // A bearer header counts against the address before it is judged, and is given back once it signs in, so only wrong ones count.
+    const bearer_tries = /^Bearer ./.test(request.headers.authorization ?? "") ? address_tries : undefined;
+    const address_wait = bearer_tries?.take(request.ip) ?? 0;
+    if (address_wait > 0) return refuse(reply.header("retry-after", String(address_wait)), 429, too_many_tries_text);
+    if (is_signed_in(request)) {
+      bearer_tries?.give_back(request.ip);
+      return;
+    }
     if (!is_under(request, path, api_prefix)) {
       if (login_path === null) return;
       return reply.redirect(login_path, 303);
@@ -147,6 +156,7 @@ export async function register_token_sign_in(app: FastifyInstance, options: Toke
   register_sign_in_guard(app, {
     ...options,
     login_path,
+    address_tries,
     open_paths: [login_path, logout_path, ...(options.open_paths ?? [])],
     is_signed_in: (request) => is_token_signed_in(request, secret, cookie_name),
   });

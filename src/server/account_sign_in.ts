@@ -96,7 +96,7 @@ export interface AccountSignInOptions {
   // How many tries one name gets from one address in the window before it waits; 5 in "5 minutes" unless set.
   tries_allowed?: number;
   try_window?: string;
-  // How many sign-ins one address may have failing or running in the window, whatever names they give; 20 in 300 seconds unless set.
+  // How many sign-ins and bearer tokens one address may have failing or running in the window, whatever names they give; 20 in 300 seconds unless set.
   address_tries_allowed?: number;
   address_try_window_seconds?: number;
   // The lowest role that must sign in with a second factor; null, the default, leaves it to each user.
@@ -220,7 +220,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
 
   // Every API call needs a viewer; the page loads without one and signs in itself.
   register_sign_in_guard(app, {
-    is_signed_in: (request) => request.viewer !== null, api_prefix: `${prefix}/`, login_path: null, refusal: "json", refusal_text: sign_in_first, open_paths, open_prefixes,
+    is_signed_in: (request) => request.viewer !== null, api_prefix: `${prefix}/`, login_path: null, refusal: "json", refusal_text: sign_in_first, open_paths, open_prefixes, address_tries,
   });
 
   app.addHook("onRequest", async (request, reply) => {
