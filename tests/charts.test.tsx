@@ -88,6 +88,22 @@ test("a bar chart draws a bar per value with its label and value as its title", 
 
   const titles = [...screen.getByRole("img").querySelectorAll("rect title")].map((title) => title.textContent);
   expect(titles).toEqual(["Monday: 2 GB", "Tuesday: 4 GB"]);
+  expect(screen.queryByText("Monday")).toBeNull();
+});
+
+test("a bar chart asked for labels names each bar, cut to its width, or only the ends when the bars are narrow", () => {
+  const bar = (label: string) => ({ label, value: 1, color: "red" });
+  const { rerender } = render(<BarChart title="Freed" format={format} labels bars={[bar("Monday"), bar("Tuesday")]} />);
+  expect(screen.getByText("Monday")).toBeTruthy();
+  expect(screen.getByText("Tuesday")).toBeTruthy();
+
+  rerender(<BarChart title="Freed" format={format} labels bars={Array.from({ length: 12 }, (_, index) => bar(`a-long-host-name-${index}`))} />);
+  expect(screen.getAllByText("a-long…")).toHaveLength(12);
+
+  rerender(<BarChart title="Freed" format={format} labels bars={Array.from({ length: 40 }, (_, index) => bar(`day ${index}`))} />);
+  expect(screen.getByText("day 0")).toBeTruthy();
+  expect(screen.getByText("day 39")).toBeTruthy();
+  expect(screen.queryByText("day 5")).toBeNull();
 });
 
 test("stacked bars skip empty parts and say when nothing ran", () => {
