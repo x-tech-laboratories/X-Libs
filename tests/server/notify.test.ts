@@ -86,6 +86,29 @@ describe("webhook", () => {
     expect(() => webhook_settings({ url: "u", method: "get" })).toThrow("`method` must be POST, PUT or PATCH, not \"GET\"");
     expect(() => webhook_settings({ url: "u", headers: ["x"] })).toThrow("`headers` must be a mapping");
   });
+
+  it("reads headers_file at each send, its headers in place of inline ones of any case", async () => {
+    const path = temp_file(JSON.stringify({ "x-api-key": "fake-file-key", "X-Two": 2 }));
+    const settings = webhook_settings({ url: "http://hook", headers: { "X-One": "1", "X-Api-Key": "fake-inline-key" }, headers_file: path });
+    const { fetch, sent } = recording_fetch();
+    await send_webhook(settings, { values: {}, default_body: {}, fetch });
+    writeFileSync(path, JSON.stringify({ "X-Api-Key": "fake-rotated-key" }));
+    await send_webhook(settings, { values: {}, default_body: {}, fetch });
+    expect(sent[0]!.headers).toEqual({ "Content-Type": "application/json", "X-One": "1", "x-api-key": "fake-file-key", "X-Two": "2" });
+    expect(sent[1]!.headers).toEqual({ "Content-Type": "application/json", "X-One": "1", "X-Api-Key": "fake-rotated-key" });
+  });
+
+  it("fails a send whose headers_file is missing or not a JSON object, naming the path but not the contents", async () => {
+    const { fetch, sent } = recording_fetch();
+    const send = (headers_file: string) => send_webhook(webhook_settings({ url: "http://hook", headers_file }), { values: {}, default_body: {}, fetch });
+    await expect(send("/no/such/headers")).rejects.toThrow("could not read headers_file /no/such/headers: ENOENT");
+    for (const text of ["X-Api-Key: fake-leaked-key", "[\"fake-leaked-key\"]", "null"]) {
+      const path = temp_file(text);
+      const failure = await send(path).catch((error: Error) => error);
+      expect((failure as Error).message).toBe(`headers_file ${path} must hold a JSON object of header names to values`);
+    }
+    expect(sent).toEqual([]);
+  });
 });
 
 describe("ntfy", () => {
