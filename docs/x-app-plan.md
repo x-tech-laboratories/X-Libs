@@ -21,15 +21,17 @@ means one home for every shared piece, no re-export layer and one release step.
 ## The rename
 
 - The GitHub repo X-Libs is renamed X-App; GitHub redirects the old links and git remotes.
-- The package publishes as `@x-tech-laboratories/x-app` from CI with provenance, which needs a trusted publisher set up for
-  the new name on npm first.
+- The package publishes as `@x-tech-laboratories/x-app` from 0.98.0, from CI with provenance through npm's trusted
+  publishing.
 - Module paths stay the same: `@x-tech-laboratories/x-libs/web/react/shell` becomes
-  `@x-tech-laboratories/x-app/web/react/shell`. An app switches with a search and replace of the package name in its
-  adoption pull request. The `x-libs-*` commands become `x-app-*`.
-- Apps not yet switched keep working on the last `x-libs` release. Once every app has switched, `x-libs` is marked
-  deprecated on npm.
-- The local folder, every repo's `AGENTS.md`, the Application Standard, the site framework's docs and the session hooks
-  and memories that name X-Libs follow the new name.
+  `@x-tech-laboratories/x-app/web/react/shell`. An app switches with a search and replace of the package name, and its
+  `x-libs-*` commands become `x-app-*`.
+- `@x-tech-laboratories/x-libs` stays at 0.97.0, its last release. An app on it keeps working but takes nothing newer
+  until it switches.
+- The Android plugin and Java names (`XLibsBackupFolder`, `com.xtechlaboratories.xlibs`) and the names phones store
+  data under keep their old spelling, since apps register them and installed phones hold data under them.
+- The local folder, every repo's `AGENTS.md`, the site's pages and the session hooks and memories that name X-Libs
+  follow the new name.
 
 ## What X-App adds
 
@@ -114,7 +116,7 @@ When an app needs a hook that does not exist, X-App gains it; an app never forks
    presets and `x-app-new` join the layout and checklist, and the deduplication rule above. It lands once the user
    approves the wording.
 2. **Rename.** The npm trusted publisher for the new name, the repo rename, the package name, the `x-app-*` commands, and
-   the first `@x-tech-laboratories/x-app` release with no other change.
+   the first `@x-tech-laboratories/x-app` release, 0.98.0, with no other change.
 3. **Wait for the local-daemon move.** Another session is moving the desktop apps onto `daemon_router`, a
    `src/daemon/main.ts` and `sync_peer` (X-Budget first, then X-Media-Tracker). The base runtime builds on that layout,
    so X-Budget's extraction starts once that work merges. Steps 4 and 6 do not wait.
@@ -129,8 +131,8 @@ When an app needs a hook that does not exist, X-App gains it; an app never forks
 8. **Pilot on X-Budget.** Its shell replaced by X-App, its duplicates moved in, the `nix/` and `tsconfig/` layout, and
    TechNet's X-Budget input pointed at `?dir=nix`, coordinated with the other sessions before the switch.
 9. **Rollout.** X-Fitness, X-Media-Tracker, X-Dev and X-Control, one pull request each, then the apps that differ more
-   (X-Backups, X-Nix and X-Monitor with their agents, X-Tasks, X-Music, X-Stream, CODEX, X-Mail). `x-libs` is deprecated
-   once the last one switches.
+   (X-Backups, X-Nix and X-Monitor with their agents, X-Tasks, X-Music, X-Stream, CODEX, X-Mail), each switching from
+   `x-libs` to `x-app` as it moves.
 
 ## Open questions
 

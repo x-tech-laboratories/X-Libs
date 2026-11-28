@@ -17,7 +17,7 @@ export interface CallTableOptions {
   is_read_only: (method: string) => boolean;
   // Runs after a call that changes data, with the client id of the page that made it, or "" for none.
   on_change?: (client_id: string, method: string, request: FastifyRequest) => void;
-  // The header a page sends its client id in; X-Libs' event stream's unless set.
+  // The header a page sends its client id in; X-App's event stream's unless set.
   client_id_header?: string;
   // The largest body taken, such as for an import arriving as one call's argument; Fastify's own unless set.
   body_limit?: number;

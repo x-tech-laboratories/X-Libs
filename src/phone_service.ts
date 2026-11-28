@@ -1,5 +1,5 @@
 // Work a phone app keeps doing while it is closed, such as staying reachable by the user's computers, run in an
-// Android foreground service by X-Libs' XLibsForegroundService plugin. The work is the worker, a page of the app's own
+// Android foreground service by X-App's XLibsForegroundService plugin. The work is the worker, a page of the app's own
 // that the service loads in a WebView of its own, so it outlives the app's window; the page and the worker talk in
 // messages, each carried across as JSON.
 //
@@ -118,7 +118,7 @@ export function worker_host<Message = unknown>(target: WorkerWindow = globalThis
 
 // ── Native modules ───────────────────────────────────────────────────────────
 
-// Where the service hands the worker the events of X-Libs' native modules, such as phone_sockets'.
+// Where the service hands the worker the events of X-App's native modules, such as phone_sockets'.
 export interface NativeWindow {
   x_libs_native_event?: (module: string, json: string) => void;
   x_libs_native_modules?: Map<string, (json: string) => void>;

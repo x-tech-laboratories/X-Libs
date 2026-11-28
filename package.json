@@ -1,11 +1,11 @@
 {
-  "name": "@x-tech-laboratories/x-libs",
-  "version": "0.97.0",
+  "name": "@x-tech-laboratories/x-app",
+  "version": "0.98.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/x-tech-laboratories/X-Libs.git"
+    "url": "git+https://github.com/x-tech-laboratories/X-App.git"
   },
   "type": "module",
   "engines": {
@@ -17,10 +17,10 @@
     "android/src/main/"
   ],
   "bin": {
-    "x-libs-bundle-migrations": "dist/drizzle_migrations.js",
-    "x-libs-check": "dist/change_checks_cli.js",
-    "x-libs-icons": "dist/app_icons.js",
-    "x-libs-site": "dist/site/cli.js"
+    "x-app-bundle-migrations": "dist/drizzle_migrations.js",
+    "x-app-check": "dist/change_checks_cli.js",
+    "x-app-icons": "dist/app_icons.js",
+    "x-app-site": "dist/site/cli.js"
   },
   "exports": {
     "./*": {

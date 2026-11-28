@@ -72,7 +72,7 @@ describe("scheduled notices", () => {
     expect(shown).toEqual([`at-${start + 10_000}`]);
   });
 
-  test("take X-Libs' Notifier as it is", () => {
+  test("take X-App's Notifier as it is", () => {
     const notifier = new Notifier({ app_name: "X-Fitness", start: () => Promise.reject(new Error("no notify-send")) });
 
     keep_giving_scheduled_notices({ notifier, due: () => [] })();

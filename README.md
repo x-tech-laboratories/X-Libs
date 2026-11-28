@@ -1,8 +1,9 @@
-# X-Libs
+# X-App
 
 <a href="https://liberapay.com/BeatLink/donate"><img alt="Donate using Liberapay" src="https://liberapay.com/assets/widgets/donate.svg"></a> <a href="https://ko-fi.com/I4V52ANK6N"><img alt="Support me on Ko-fi" src="https://ko-fi.com/img/githubbutton_sm.svg"></a>
 
-Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-libs`, with a subpath per module.
+Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-app`, with a subpath per module. It was X-Libs (`@x-tech-laboratories/x-libs`) until 0.97.0, the last release under that name;
+an app moves over by changing the package name in its imports and its `x-libs-*` commands to `x-app-*`.
 
 ## Modules
 
@@ -34,20 +35,20 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `format_strings`                         | `format_string` and `format_record`: text the user sets made from an item's fields, `{title}`, `{album_artist\|artist}` for the first one not empty, `[{disc}.]` left out when a field in it is empty, `{track:%02d}`, `{length:m:ss}`, `{genre:join(", ")}`, `count`, `first`, `basename`, `dirname`, `ext`, `upper`, `lower` and `title`, and the app's own `formats`, such as stars for a rating; values from any source, `compile_format` to read a template once, `template_fields` for what to fetch. |
 | `email_links`                            | `bare_message_id` and `email_uri`: an email linked by its Message-ID as an RFC 2392 `mid:` link, which mail programs such as Thunderbird open wherever the message was filed. |
 | `snippets`                               | `shorten(text, length = 200)`: text put on one line and cut with an ellipsis, for an excerpt under a title. |
-| `drizzle`, `drizzle_migrations`          | Typed SQLite on Drizzle ORM 1.0.0-rc.5, chosen over Kysely and hand-written SQL because it types rows from one schema in TypeScript, writes the migration SQL from it with drizzle-kit and runs synchronously: `open_drizzle` over any `SqlDatabase`, and `drizzle_of`, which the stores call, making it once per connection, so the same queries run on node:sqlite and in a phone's page, `synced_tables` reading the sync list from the schema's primary keys, `migrate_drizzle` per owner, the schema builders and query operators so an app never imports Drizzle, with `AnySQLiteColumn` for a table whose rows point at its own, and `x-libs-bundle-migrations <folder>`, which turns drizzle-kit's migration folders into an `index.ts` a server running .ts files can import. |
+| `drizzle`, `drizzle_migrations`          | Typed SQLite on Drizzle ORM 1.0.0-rc.5, chosen over Kysely and hand-written SQL because it types rows from one schema in TypeScript, writes the migration SQL from it with drizzle-kit and runs synchronously: `open_drizzle` over any `SqlDatabase`, and `drizzle_of`, which the stores call, making it once per connection, so the same queries run on node:sqlite and in a phone's page, `synced_tables` reading the sync list from the schema's primary keys, `migrate_drizzle` per owner, the schema builders and query operators so an app never imports Drizzle, with `AnySQLiteColumn` for a table whose rows point at its own, and `x-app-bundle-migrations <folder>`, which turns drizzle-kit's migration folders into an `index.ts` a server running .ts files can import. |
 | `sync_engine`, `sync_peer`, `sync_protocol`, `sync_seal`, `server/sync_peer_routes`, `sync_peer_discovery`, `sync_peer_listening` | SQLite kept alike on every device with no server: `create_sync_engine` stamps each value of the tables it is given through triggers, so the app's own writes need no change, and the newest write of each value wins, each key of a table's `map_columns` (JSON objects such as ids from many sources) counting as a value of its own so two devices adding different keys keep both. Every copy is a peer: `create_sync_peer` pairs with another device through a one-time code (`create_pairing_code`, `pair_device`), the two copies merging with nothing asked, then sends each paired device its changes within seconds, takes theirs in the same round trip, holds a waiting call open to hear of theirs at once, and passes on what it took from the others, so devices that never reach each other still end up alike; the group's list of devices travels too, so a new device is introduced to the rest and a removed one (`remove_device`) is refused by all. Each call is sealed with both devices' keys on tweetnacl's box (`sync_seal`), chosen over TLS with pinned certificates because it runs alike on Node and in a phone's page and needs no certificate, so a call may travel over plain http on a home network. After a restore (`forget_history`) each peer is made to match the restored copy once, keeping a copy of its own first. `register_sync_peer_routes` answers other devices at `sync/peer` under a daemon's prefix, `listen_for_peers` opens a desktop daemon's own port for them, `discover_peers` finds paired devices on the local network by mDNS, on bonjour-service, and `keep_listening_for_peers` (`sync_peer_listening`) is a desktop daemon's "Let other devices connect" setting, kept in a file beside the database, whose `PeerListeningMethods` the page shows with `PeerListeningSettings`. |
 | `sync_files`, `node_file_store`, `electron/file_protocol` | Files that sync beside the rows that name them, such as covers or photos, so a large picture never travels with every change: each is named by the sha256 of its bytes (`hash_bytes`, `put_file`, `is_file_name`) and kept in a `SyncFileStore`, a folder on Node (`folder_file_store`, written through a rename) or IndexedDB on a phone (`indexed_db_files`); given `files: { store, referenced }`, the sync peer sends each paired device the named files it lacks and fetches those this device lacks after each exchange, a few at a time, trying a file neither has yet again next round, and keeps the ones it is sent, refusing bytes that do not match their name; `register_file_scheme` and `serve_files` show them in a desktop page as `<scheme>://<name>`. |
-| `app_icons`                              | `x-libs-icons [app folder]`: every icon an app ships generated from its `resources/icon.svg`, as the Design Guidelines ask: `resources/icon.png` for the desktop, the Android launcher icons at each density with an adaptive icon on white when there is an `android/` project, and `icon.svg`, `icon-192.png` and `icon-512.png` in `src/web/public` when there is one. Drawn with `@resvg/resvg-js`, an optional peer the app installs as a dev dependency. |
-| `change_checks`, `change_checks_git`, `change_checks_cli` | Checks on a change that any repository's CI runs, as `x-libs-check` (see [Change checks](#change-checks)): `commits` (Conventional Commits, the `Assisted-by` trailer in the organisation's repositories and nowhere else, no AI mention outside it), `secrets` (keys and tokens in added lines, commit messages and added `.env` files, naming only the kind and place, never the value), `leftovers` (console logging, `debugger`, code commented out, a TODO without an issue), `comments` (a comment longer than one line, but for a file's overview), `coverage` (a floor lowered or code newly left out), `x-libs` (an import of a library X-Libs wraps) and `dependencies` (each new one named with its licence, failing a licence not allowed, read as SPDX by `spdx-satisfies`); each a pure function on a described `Change` giving `{ gate, outcome, findings }` with file:line, reading only the code around strings and regular expressions; `create_check_registry` for an app's own checks, `x_tech_options` the defaults, and `read_change` reading a change from git, its `base` resolved to a commit; `run_check_command` runs the command for an app with its own checks, defaults and name. |
+| `app_icons`                              | `x-app-icons [app folder]`: every icon an app ships generated from its `resources/icon.svg`, as the Design Guidelines ask: `resources/icon.png` for the desktop, the Android launcher icons at each density with an adaptive icon on white when there is an `android/` project, and `icon.svg`, `icon-192.png` and `icon-512.png` in `src/web/public` when there is one. Drawn with `@resvg/resvg-js`, an optional peer the app installs as a dev dependency. |
+| `change_checks`, `change_checks_git`, `change_checks_cli` | Checks on a change that any repository's CI runs, as `x-app-check` (see [Change checks](#change-checks)): `commits` (Conventional Commits, the `Assisted-by` trailer in the organisation's repositories and nowhere else, no AI mention outside it), `secrets` (keys and tokens in added lines, commit messages and added `.env` files, naming only the kind and place, never the value), `leftovers` (console logging, `debugger`, code commented out, a TODO without an issue), `comments` (a comment longer than one line, but for a file's overview), `coverage` (a floor lowered or code newly left out), `x-libs` (an import of a library X-App wraps) and `dependencies` (each new one named with its licence, failing a licence not allowed, read as SPDX by `spdx-satisfies`); each a pure function on a described `Change` giving `{ gate, outcome, findings }` with file:line, reading only the code around strings and regular expressions; `create_check_registry` for an app's own checks, `x_tech_options` the defaults, and `read_change` reading a change from git, its `base` resolved to a commit; `run_check_command` runs the command for an app with its own checks, defaults and name. |
 | `certificates`, `certificate_protocol`, `electron/certificates` | Servers whose https certificate the device refuses, such as a home server's self-signed one: `check_certificate` reads the certificate and what is wrong with it (self-signed, unknown authority, wrong name, expired, not yet valid), `create_certificate_trust` keeps the ones the user trusts in a JSON file, each for its own host and exact fingerprint, re-checked before it is saved, and its `methods` are the page's calls; `trust_in_session` makes Chromium accept them in a session, the window's from the next start, and `trusting_fetch` sends the main process's requests, such as the sync client's, through a Chromium session made fresh each time the list changes, so a new choice holds at once; `use_in_node` also hands them to Node's own https, which then accepts a self-signed server whose name matches. |
 | `sync_file_storage`                      | `file_sync_storage({ file, back_up_before_replace })`: a sync peer's keys and paired devices in a JSON file on Node, written only its owner can read (mode 0600, tightened on an existing file too), a missing or unreadable file read as none. |
 | `web/sync_storage`                       | `local_sync_storage({ key, back_up_before_replace })`: the same in a phone page's own local storage. `SyncDeviceMethods` and `sync_device_methods(peer)` in `sync_protocol` and `sync_peer` are the calls every app's bridge answers for its page. |
 | `backups`                                | Named backups of an app's data in any store, newest first, with daily automatic ones kept to a set number; `keep_backing_up` takes them on a schedule the app keeps, and `BackupMethods` are the calls a page makes to whatever holds them. |
-| `phone_certificates`                     | `phone_certificates()`: the page's certificate calls on a phone, answered by X-Libs' Android plugin `XLibsCertificates`, which `cap sync` adds by itself: it reads a server's certificate and what is wrong with it, keeps the ones the user trusts for their own host and fingerprint, and installs a WebView client that lets the page's requests through to them, so `SyncSettings`, `SyncCertificatePrompt` and `TrustedCertificates` work on a phone as on the desktop. Forgetting one holds from the app's next start, since the WebView keeps a connection it already opened. An app that sets its own WebView client replaces that one. |
-| `phone_backups`                          | `phone_backups`: a phone app's `backups` in a folder the user picks once in its storage, where file managers and sync apps reach them, through X-Libs' Android plugin `XLibsBackupFolder`, which `cap sync` adds by itself; `restore` backs up first, swaps the phone database's bytes and saves, `folder_name` and `choose_folder` for the settings row, and daily backups wait quietly until a folder is picked. |
+| `phone_certificates`                     | `phone_certificates()`: the page's certificate calls on a phone, answered by X-App's Android plugin `XLibsCertificates`, which `cap sync` adds by itself: it reads a server's certificate and what is wrong with it, keeps the ones the user trusts for their own host and fingerprint, and installs a WebView client that lets the page's requests through to them, so `SyncSettings`, `SyncCertificatePrompt` and `TrustedCertificates` work on a phone as on the desktop. Forgetting one holds from the app's next start, since the WebView keeps a connection it already opened. An app that sets its own WebView client replaces that one. |
+| `phone_backups`                          | `phone_backups`: a phone app's `backups` in a folder the user picks once in its storage, where file managers and sync apps reach them, through X-App's Android plugin `XLibsBackupFolder`, which `cap sync` adds by itself; `restore` backs up first, swaps the phone database's bytes and saves, `folder_name` and `choose_folder` for the settings row, and daily backups wait quietly until a folder is picked. |
 | `phone_notices`                          | `keep_phone_notices`: notices handed to a phone ahead of time through Capacitor's local notifications, the app passing its own `LocalNotifications`, since a phone has no daemon; `refresh` takes back every pending notice and sets the soonest 64 of the next 14 days again, `ask_permission` asks once, `show` puts a notice up at once with no alarm (`isExactNotification: false`), so a notice for now never needs Android's exact-alarm leave or opens its settings screen, `exact: false` lets the notices set ahead ring inexactly too, and a tap hands the notice's `extra` back, such as a link to open. `notice_id` names a key as Android's number. |
-| `phone_service`                          | `phone_service`: work a phone app keeps doing while it is closed, such as staying reachable, in an Android foreground service run by X-Libs' plugin `XLibsForegroundService`, which `cap sync` adds by itself: the service loads the app's own worker page (such as `worker.html` from its page files) in a WebView it owns, so the work outlives the app's window, a killed process (Android starts it again) and, with `start_at_boot`, a reboot; `start`, `stop`, `is_running`, `post` and `on_message` for the page, and `worker_host` for the worker's side, the messages crossing as JSON. The app declares the service and the boot receiver in its own manifest, with the `connectedDevice` foreground service permissions, as the module's opening comment shows, so no other app gets them. |
-| `phone_sockets`                          | `phone_sockets()`: UDP and TCP sockets for a `phone_service` worker, answered by X-Libs' Android side: `udp_open` (with `broadcast`, holding Android's multicast lock), `tcp_listen`, `tcp_connect` and `list_interfaces`; a TCP socket reads nothing until `read_line` takes one line or `start_reading` everything after, so `start_tls` can follow plain text in either TLS role, as KDE Connect's identity line does, with the app's PEM certificate and key, letting any peer through and handing back its certificate for the worker to pin; `pause` and `resume` for a slow reader, and `write` settling once sent. Events that arrive before a listener are kept for it. Needs `CHANGE_WIFI_MULTICAST_STATE` and `WAKE_LOCK` in the app's manifest; each event keeps the phone awake a few seconds so the worker can answer. |
+| `phone_service`                          | `phone_service`: work a phone app keeps doing while it is closed, such as staying reachable, in an Android foreground service run by X-App's plugin `XLibsForegroundService`, which `cap sync` adds by itself: the service loads the app's own worker page (such as `worker.html` from its page files) in a WebView it owns, so the work outlives the app's window, a killed process (Android starts it again) and, with `start_at_boot`, a reboot; `start`, `stop`, `is_running`, `post` and `on_message` for the page, and `worker_host` for the worker's side, the messages crossing as JSON. The app declares the service and the boot receiver in its own manifest, with the `connectedDevice` foreground service permissions, as the module's opening comment shows, so no other app gets them. |
+| `phone_sockets`                          | `phone_sockets()`: UDP and TCP sockets for a `phone_service` worker, answered by X-App's Android side: `udp_open` (with `broadcast`, holding Android's multicast lock), `tcp_listen`, `tcp_connect` and `list_interfaces`; a TCP socket reads nothing until `read_line` takes one line or `start_reading` everything after, so `start_tls` can follow plain text in either TLS role, as KDE Connect's identity line does, with the app's PEM certificate and key, letting any peer through and handing back its certificate for the worker to pin; `pause` and `resume` for a slow reader, and `write` settling once sent. Events that arrive before a listener are kept for it. Needs `CHANGE_WIFI_MULTICAST_STATE` and `WAKE_LOCK` in the app's manifest; each event keeps the phone awake a few seconds so the worker can answer. |
 | `history`                                | Every change to an app's items kept as versions in SQLite: `create_history` sets triggers on the tables that change an item, `record` saves one version of each item touched, and `restore` brings a version back, a deleted item with what was deleted under it; the versions table syncs, `read_changed_since` gives the newest version of each item changed after a moment, oldest first, and `history_methods` are the page's calls. Its tables are made only where missing, so an app with its own older versions table keeps it, naming its item column with `item_column`. A table that reaches its item only through another, such as a workout's sets through its exercises, names it with `item_lookup`, a query from the row. |
 | `items`                                  | The four read-only calls every app answers about its items for other apps ([Items for other apps](#items-for-other-apps)): `item_calls` turns the app's own kinds, search, get and changes into `list_item_kinds`, `search_items`, `get_items` and `list_item_changes` with their `api_spec` entries, every item in one shape (`Item`, `DeletedItem`, `ItemChange`) with its snippet clipped to 200 characters, limits defaulted and capped, and changes oldest first; `item_link` and `parse_item_link` for `x-<app>://<kind>/<id>` links with the id percent-encoded; `history_item_changes` answers the changes from `create_history` versions; a source with `text` adds the optional `get_item_texts`, each item's full text (`ItemText`) as plain text or Markdown cut to 256 KB by `clip_item_text`, and `has_text` on each kind. |
 | `item_client`                            | Reading another app through its item calls: `item_client(app)` makes `list_item_kinds`, `search_items`, `get_items`, `list_item_changes` and `get_item_texts` at `POST /api/call/<method>`, falling back to the older `/api/<method>` and remembering which answered, ids sent a page at a time, `get_item_texts` null for an app that does not answer it (`ItemCallMissing`), and failures in plain words that never hold the token. |
@@ -145,7 +146,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/controls`, `table`            | Segmented choices, button groups, switches with their label beside them on `show_label`, search boxes that hand on typing as it pauses, submit on Enter or a button, clear on Escape, can take a paste whole, take focus and follow a value cleared from outside, selects with option groups, `CommitInput`, `NumberField` stepped with − and + or the arrow keys, typed with a phone's number keys and kept within its limits, `DateTimeField`, `PeriodStepper` stepping a day or month back and forward, picking one or returning to the current one, `PathInput` with a Browse button on the app's picker, `ColorPicker`, `TreeSelect` opening an indented card that shows the picked path, `TreePicker` searching a tree as it is typed into, matches shown under their parents, offering the typed text as a new item with `on_create`; `DataTable` on TanStack Table, sorting by several columns, filtering by typed words, grouping by a column's values and hiding columns from a Columns button on its own unless the app takes them over (`column_hiding={false}` leaves the button out), with columns to move, resize, hide and filter from buttons pinned over the heading band, a `header` such as an icon shown in place of a column's label, tree rows, groups under headings, rows the app drags and styles, rows that come sorted from a database, rows worked by keyboard, rows that draw again only when they change, `virtual` rows drawn only where they show, spaced by a drawn row's measured height when the app gives none, a last column that fills the room left, group headings that hide when the filter empties them, a `wrap_class` for Halon's `scroll`, `fit` and `sticky-head`, `single_line` rows one line high with an ellipsis, and cards on phones, under the table's buttons on a line of their own; a pager. |
 | `web/react/facet_pane`                   | `FacetPane`: the values of one field with how many items hold each and an All row, picked to narrow a list by plain, Ctrl and Shift clicks or by keyboard as a listbox (arrows, Home, End and pages walk it, Space or Enter picks, Shift stretches from the anchor, Ctrl+A takes every value, Escape goes back to All), one at a time unless `multiple`, its loading, failure and empty states, and `virtual` rows for long lists such as every artist, laid out as Halon's `scroll-pane` filling the height it is given with the head kept in view; `facet_pick` is the picking rule alone. |
 | `web/react/board`, `phone`              | `Board`: a board of fixed-width columns under small caps heads with their counts, plain like a kanban or split into `lanes`, each with a head that stays in view sideways and an outlined `current` column, grouped by `group_items` under headings that fold; each cell holds the app's `render_cell` content or its `cards` (many per cell, opened by a click or Enter, with the app's class, style and context menu), moved between columns by dragging (the card lifting for the browser's picture, a dashed outline only where `can_move` and the column's `accepts_drop` allow) or with Alt and the arrow keys; worked as a grid by keyboard (arrows walk heads, cells and cards, Home and End, Ctrl for the board's ends, Enter opens, Left and Right fold a group), a skeleton, failure with Retry or empty state in place of an empty board, and on phones a list of lanes with their filled cells under the column names, or a plain board's columns one under another, those holding nothing left out with `phone_hide_empty`, whose cards still drag onto the columns or cells that take them (an empty one showing while a card is dragged) or out of the board, and move to the previous or next column with Alt and any arrow key; a `class_name` for its box, such as Halon's `fills`, or `inset` for a board that is its own surface. Drag and drop is the browser's own, as in `Tree` and `DataTable`, so a phone's touch does not drag cards. `use_phone`: whether the page is phone-sized, as the widgets' phone layouts go by, and `use_media_query` for any other media query, both read again as the window changes. |
-| `web/react/card_grid`                    | `CardGrid`: cards in a grid the reader arranges, each dragged by its handle or moved with the arrow keys on it and resized from its corner or with Shift and the arrows, the others moving out of the way and every card floating up to fill the gaps; the places are plain data (`CardPlace`: column, row, width and height in cells) the app saves from `on_places_change`, a card without one placed in rows below the rest by `place_cards`, and a phone shows the cards in a column in reading order. On react-grid-layout (MIT), chosen over Gridstack because it is React through and through and keeps the layout as plain data, matching dragging, resizing and compacting feature by feature; X-Libs adds the keyboard path (`step_card`, `step_of_key`), the phone layout, placing new cards and Halon's markup. |
+| `web/react/card_grid`                    | `CardGrid`: cards in a grid the reader arranges, each dragged by its handle or moved with the arrow keys on it and resized from its corner or with Shift and the arrows, the others moving out of the way and every card floating up to fill the gaps; the places are plain data (`CardPlace`: column, row, width and height in cells) the app saves from `on_places_change`, a card without one placed in rows below the rest by `place_cards`, and a phone shows the cards in a column in reading order. On react-grid-layout (MIT), chosen over Gridstack because it is React through and through and keeps the layout as plain data, matching dragging, resizing and compacting feature by feature; X-App adds the keyboard path (`step_card`, `step_of_key`), the phone layout, placing new cards and Halon's markup. |
 | `dashboard`, `web/react/dashboard`      | Dashboards a person builds from the data an app offers, like a small Grafana: the app describes its data sets (`DataSet`, plain rows with text, number and time fields, their order, names, colours and number formats) and `run_card` works a `ChartCard` out in memory, narrowed by a `filter` tree and a period, grouped by a field or by hours, days, weeks or months, split by a second field and measured as a count, sum, average, lowest, highest, distinct count or latest value; `fitting_views`, `card_problem`, `settle_card`, `flat_filter` and `clean_dashboards` for saved ones read back from anywhere. `Dashboards` draws them: named dashboards as tabs that are added, renamed, copied, reset to the app's `new_dashboard` and deleted; each a `CardGrid` arranged once Arrange is on, with an Add card menu of a chart and the app's ready-made cards (`ReadyCardKind`), each card's menu to edit, copy, remove and on a phone move it up or down; a chart editor with plain conditions joined by all or any of them, grouping, measure, order and only the views that fit, over a live preview; a chart drawn as a number, bars, stacked bars, lines, a donut, meters (each a share of the largest group), a treemap or a table, in a field's own colours or Halon's series; each data set (`DataSource`) loaded once from the earliest moment its cards need and again on `refresh`, each card with its own loading, empty, failed and problem states and a card that throws kept in its place. The dashboards are plain JSON the app saves from `on_change`. |
 | `web/react/merge_grid`                   | `MergeGrid`: records to merge into one side by side, a column each with its heading, a Survivor button and Take all from this, a row per field and a Result column; the survivor's column marked with Halon's `picked-column`; where the records disagree each value is a `cell-button` that wins the field, a field with `combine` offers Keep all and keeps all by default, the rest go to the survivor, the arrow keys move between the buttons and `only_differences` hides the fields that agree; `merged_values` gives what each field ends up with for the app to save. |
 | `web/react/outcome_log`                  | `OutcomeLog`: what happened to each item of a run, such as each file of a scan or each row of an import, on `DataTable` with `virtual` rows: a `StateBadge` per outcome, the item and why on one line each, cut off with an ellipsis and whole in their hover text, a filter of the outcomes that happened with their tallies, held by the log or the app, and a Follow switch keeping the newest in view while entries arrive until the reader scrolls up; its scrolling box takes Halon's `following-output` height unless `wrap_class` gives another. |
@@ -154,7 +155,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed, `undoable` actions that commit or undo exactly once, and `attempt`, which shows a failed call's words as a bad toast; modal dialogs with a subtitle, header actions, a full-window size and a `form` whose submit button sends it, and confirm and text dialogs, openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere, their keep-open items ticking at once; resize handles and splits. `SettingsDialogRow` is a settings row with a name, a short status and an Open button whose dialog holds that group's settings. |
 | `web/react/page_view`                    | `PageView`: a full-window page over the app on the Dialog, such as Settings or an item's properties, with a Close button, actions beside it and section tabs that stay put while the body scrolls. |
 | `web/react/charts`                       | `LineChart` of readings over time as lines or dots, with dashed limits such as a goal, a scale from zero or fitted around the readings, and dots from a single reading; `moving_average` for its trend line; `BarChart`, naming each bar under it when asked, `StackedBarChart`, `Meters` with ticks and a lighter fill behind, `Donut` with its headline in the middle, `Timeline` of spans and instants per lane, `Sparkline` from zero or fitted to its readings, a pass/fail `Strip`, a `Gauge` ring beside a stat's value that can link like a `Tile`, a `DonutTile`, a stat tile drawn as a full ring with its value in the middle, a `ShareBar` with each part's value in its legend, and a `Treemap` of tiles sized by value on `squarify` that hands back the one clicked: small charts colored from Halon's tokens. |
-| `web/react/graph`                        | `GraphView`: a graph of nodes and links drawn by force, such as a knowledge graph: each node a shape and colour role by its `kind` (`GraphKind`: Halon's accent, a status or a `--series-*` token, read again when the theme changes), with an optional glyph and drawn faded when asked; each link solid or `dashed`, with an arrow when `directed` and a label shown near the selection or zoomed in. Selecting a node rings it and lights its neighbours; a click selects, a double-click opens (`on_activate`), a link click calls `on_link_select`; dragging pans, the wheel zooms, Fit, + and − in the toolbar beside the app's own `tools`; `focus_id` centres on a node, such as one a search found; a legend of kinds and link styles, an empty state, and every node with its links as a `Tree` under the drawing, so it is all reachable from the keyboard (arrow keys pan the drawing, + and − zoom, 0 fits, Enter opens the selection). On force-graph (MIT), loaded only when a graph is shown, which keeps a few thousand nodes moving on a canvas; X-Libs adds Halon's colours, the list, the keyboard path and selection. |
+| `web/react/graph`                        | `GraphView`: a graph of nodes and links drawn by force, such as a knowledge graph: each node a shape and colour role by its `kind` (`GraphKind`: Halon's accent, a status or a `--series-*` token, read again when the theme changes), with an optional glyph and drawn faded when asked; each link solid or `dashed`, with an arrow when `directed` and a label shown near the selection or zoomed in. Selecting a node rings it and lights its neighbours; a click selects, a double-click opens (`on_activate`), a link click calls `on_link_select`; dragging pans, the wheel zooms, Fit, + and − in the toolbar beside the app's own `tools`; `focus_id` centres on a node, such as one a search found; a legend of kinds and link styles, an empty state, and every node with its links as a `Tree` under the drawing, so it is all reachable from the keyboard (arrow keys pan the drawing, + and − zoom, 0 fits, Enter opens the selection). On force-graph (MIT), loaded only when a graph is shown, which keeps a few thousand nodes moving on a canvas; X-App adds Halon's colours, the list, the keyboard path and selection. |
 | `web/react/flow_map`                     | `FlowMap`: how things flow across columns, such as folders through jobs to repositories or flakes through caches to hosts: boxes in columns, optionally inside group boxes such as a host, joined by curved lines colored by tone, each column ordered by where its lines come from; hovering or focusing a box lights everything upstream and downstream of it, dragging pans and Ctrl or ⌘ with the wheel zooms; `use_flow_map` keeps the zoom across a remount and `FlowMapZoom` draws the zoom and Fit buttons for a section heading. |
 | `web/react/progress`                     | `ProgressBar`: a bar with its value out of a max, busy while the amount of work is unknown, and words or the percentage beside it. |
 | `web/react/rating`                       | `Rating`: stars that show a rating or take one by click or keyboard, with unrated kept apart from none. |
@@ -172,8 +173,8 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/recurrence`                   | `RecurrenceField`: a rule or its iCalendar lines edited as Halon fields, with a Repeats switch, every N seconds to years, weekdays, months, several days of the month and weekday entries such as "the last Friday", "only the last of those", several times of day or minutes past, an end after a count or on a date, dates to skip and add, and every `BY` part and `WKST` under More options; `features` from `simple` to `full` with names added or taken away, read by `read_features`; it describes the rule below, keeps what it cannot edit as written, and blocks its form while a field or the value cannot be read. |
 
 ```ts
-import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
-import { parse_duration } from "@x-tech-laboratories/x-libs/durations";
+import { AgentHub } from "@x-tech-laboratories/x-app/server/agents/hub";
+import { parse_duration } from "@x-tech-laboratories/x-app/durations";
 ```
 
 ## The base app
@@ -268,7 +269,7 @@ over the API, OpenAPI and MCP like every other call; their names start with `lis
 `is_read_only` that goes by the name marks them read-only.
 
 ```ts
-import { history_item_changes, item_calls } from "@x-tech-laboratories/x-libs/items";
+import { history_item_changes, item_calls } from "@x-tech-laboratories/x-app/items";
 
 const items = item_calls(
   {
@@ -315,7 +316,7 @@ passwords for other services, like everything else the API returns.
 Another app reads these calls with `item_client`:
 
 ```ts
-import { item_client } from "@x-tech-laboratories/x-libs/item_client";
+import { item_client } from "@x-tech-laboratories/x-app/item_client";
 
 const tasks = item_client({ name: "X-Tasks", address: "https://tasks.example.org", token });
 const kinds = await tasks.list_item_kinds();
@@ -453,15 +454,15 @@ which an app imports once:
 ```ts
 import "@x-tech-laboratories/halon/halon-tokens.css";
 import "@x-tech-laboratories/halon/halon.css";
-import { DataTable } from "@x-tech-laboratories/x-libs/web/react/table";
-import { toast } from "@x-tech-laboratories/x-libs/web/react/toasts";
+import { DataTable } from "@x-tech-laboratories/x-app/web/react/table";
+import { toast } from "@x-tech-laboratories/x-app/web/react/toasts";
 ```
 
 The widgets are React components, so a page renders with React through `createRoot` from `react-dom/client`; `Shell`
 holds the toasts, dialogs and menus that `toast`, `confirm_dialog` and `open_context_menu` open from anywhere. `DataTable`
 is drawn on `@tanstack/react-table` with Halon's markup; its sorting, column order, widths, hidden columns and open rows
 are props with change callbacks, so the app keeps them in its own settings, and a column's filter is the app's own
-content in a popover X-Libs opens from the column's funnel. A table left to itself still sorts by a click, filters each
+content in a popover X-App opens from the column's funnel. A table left to itself still sorts by a click, filters each
 column whose cells are text by the words typed into its funnel, and groups the rows by a column picked from its Group rows
 button; a column's `text` names what it shows when its cell is not plain text, and `sortable`, `filterable` and
 `groupable` set false leave a column out. A request whose session has lapsed
@@ -471,8 +472,8 @@ login listens for.
 ## Shortcuts and trees
 
 ```tsx
-import { use_shortcuts } from "@x-tech-laboratories/x-libs/web/react/shortcuts";
-import { Tree } from "@x-tech-laboratories/x-libs/web/react/tree";
+import { use_shortcuts } from "@x-tech-laboratories/x-app/web/react/shortcuts";
+import { Tree } from "@x-tech-laboratories/x-app/web/react/tree";
 
 use_shortcuts([
   { keys: "mod+z", run: undo },
@@ -490,7 +491,7 @@ beside it, and onto its middle inside it.
 ## Plugins
 
 ```ts
-import { create_plugin_host, define_plugin, json_plugin_storage } from "@x-tech-laboratories/x-libs/plugins";
+import { create_plugin_host, define_plugin, json_plugin_storage } from "@x-tech-laboratories/x-app/plugins";
 
 // The app says what plugins may reach, once, in its shared types.
 interface TasksApi {
@@ -548,7 +549,7 @@ install only ones you trust.
 ## Electron apps
 
 The bridge and window helpers describe the few parts of Electron they use, so the app passes Electron's own objects in
-and X-Libs does not depend on Electron.
+and X-App does not depend on Electron.
 
 ```ts
 // shared
@@ -670,7 +671,7 @@ its stdin and its output, can drop the connection, and can change what the agent
 
 ## A static site
 
-`x-libs-site` builds a documentation or project site from a folder of Markdown and MDX, drawn in the same `Shell`, widgets and
+`x-app-site` builds a documentation or project site from a folder of Markdown and MDX, drawn in the same `Shell`, widgets and
 Halon look as the apps, and served as plain files from GitHub Pages. It stands on established tools: Vite bundles and serves
 it, MDX's own compiler reads the pages (with GitHub's tables and task lists), Shiki colours code through Halon's tokens and
 Pagefind indexes the built pages for search. Each page is drawn to HTML at build time and picked up again in the browser,
@@ -704,7 +705,7 @@ so it reads without JavaScript and its search, outline, menus and theme work wit
 
 ```ts
 // site.config.ts
-import { define_site } from "@x-tech-laboratories/x-libs/site/model";
+import { define_site } from "@x-tech-laboratories/x-app/site/model";
 
 export default define_site({
   title: "X-Example",
@@ -717,8 +718,8 @@ export default define_site({
 });
 ```
 
-`x-libs-site dev` serves it with live reloading (search needs a build), `x-libs-site build` writes `dist/` and
-`x-libs-site preview` serves that. The site installs `react`, `react-dom`, `vite`, `@mdx-js/rollup`, `remark-gfm`,
+`x-app-site dev` serves it with live reloading (search needs a build), `x-app-site build` writes `dist/` and
+`x-app-site preview` serves that. The site installs `react`, `react-dom`, `vite`, `@mdx-js/rollup`, `remark-gfm`,
 `remark-frontmatter`, `rehype-raw`, `rehype-slug`, `rehype-autolink-headings`, `shiki`, `@shikijs/rehype`, `unist-util-visit`, `yaml` and
 `pagefind`, the optional peers the build uses, and ignores the `.x-site/` folder the build writes its entries to. A GitHub
 Actions job runs `npm ci` and `npm run build` with `fetch-depth: 0`, for the dates, and uploads `dist/` with
@@ -726,26 +727,26 @@ Actions job runs `npm ci` and `npm run build` with `fetch-depth: 0`, for the dat
 
 ## Change checks
 
-`x-libs-check` runs the change checks on what changed since a base and exits 1 when any fails, printing each check's
+`x-app-check` runs the change checks on what changed since a base and exits 1 when any fails, printing each check's
 outcome and its findings one per line:
 
 ```sh
-npx x-libs-check [--base <ref>] [--repository <owner/name>] [--working-tree] [check...]
+npx x-app-check [--base <ref>] [--repository <owner/name>] [--working-tree] [check...]
 ```
 
-With no checks named it runs `commits`, `secrets`, `leftovers`, `comments`, `coverage`, `x-libs` and `dependencies`. The
+With no checks named it runs `commits`, `secrets`, `leftovers`, `comments`, `coverage`, `x-app` and `dependencies`. The
 base is the branch point from `origin/main` unless given; the repository comes from `GITHUB_REPOSITORY` or the `origin`
 remote; `--working-tree` counts uncommitted and untracked files too. `dependencies` reads licences from `node_modules`,
-so it runs after `npm ci`. The rules default to X-Tech's and change under an `"x-libs-check"` key in `package.json`,
+so it runs after `npm ci`. The rules default to X-Tech's and change under an `"x-app-check"` key in `package.json`,
 read as it was at the base so a change cannot loosen its own checks:
 
 ```json
-"x-libs-check": {
+"x-app-check": {
   "commit_trailer": "Assisted-by",
   "trailer_organisations": ["x-tech-laboratories"],
   "ai_mention": "\\b(claude|copilot)\\b",
   "wrapped_libraries": ["drizzle-orm", "@tiptap/"],
-  "wrapping_repositories": ["x-tech-laboratories/X-Libs"],
+  "wrapping_repositories": ["x-tech-laboratories/X-App"],
   "allowed_licences": ["MIT", "ISC", "Apache-2.0"]
 }
 ```
@@ -765,15 +766,15 @@ A job in an app's `.github/workflows/ci.yml`:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx x-libs-check --base origin/${{ github.base_ref }}
+      - run: npx x-app-check --base origin/${{ github.base_ref }}
 ```
 
 An app with checks of its own, such as a firmware build, adds them to a registry and runs the same command from its
 own script:
 
 ```ts
-import { create_check_registry } from "@x-tech-laboratories/x-libs/change_checks";
-import { run_check_command } from "@x-tech-laboratories/x-libs/change_checks_cli";
+import { create_check_registry } from "@x-tech-laboratories/x-app/change_checks";
+import { run_check_command } from "@x-tech-laboratories/x-app/change_checks_cli";
 
 const registry = create_check_registry();
 registry.add("firmware", async (change) => ({ gate: "firmware", outcome: "passed", findings: [`built since ${change.base}`] }));

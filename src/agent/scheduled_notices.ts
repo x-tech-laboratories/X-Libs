@@ -15,7 +15,7 @@ export interface DueNotice {
   icon?: string;
 }
 
-// What shows notices: X-Libs' Notifier, or a stand-in in a test.
+// What shows notices: X-App's Notifier, or a stand-in in a test.
 export interface NoticeShower {
   show(notice: DueNotice): unknown;
 }

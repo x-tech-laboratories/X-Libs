@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The `x-libs-bundle-migrations <folder>` command: turns the migrations drizzle-kit wrote into a folder, one
+// The `x-app-bundle-migrations <folder>` command: turns the migrations drizzle-kit wrote into a folder, one
 // `<time>_<name>/migration.sql` each, into `<folder>/index.ts`, so a server that runs .ts files and a page alike import them.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
@@ -32,9 +32,9 @@ export function read_migrations(folder: string): DrizzleMigration[] {
 
 export function migrations_module(migrations: readonly DrizzleMigration[]): string {
   return [
-    "// Written by x-libs-bundle-migrations from the migration folders beside it; run it again after drizzle-kit generate.",
+    "// Written by x-app-bundle-migrations from the migration folders beside it; run it again after drizzle-kit generate.",
     "",
-    'import type { DrizzleMigration } from "@x-tech-laboratories/x-libs/drizzle";',
+    'import type { DrizzleMigration } from "@x-tech-laboratories/x-app/drizzle";',
     "",
     `export const migrations: DrizzleMigration[] = ${JSON.stringify(migrations, null, 2)};`,
     "",
@@ -52,7 +52,7 @@ export function bundle_migrations(folder: string): string {
 if (import.meta.main) {
   const [folder] = process.argv.slice(2);
   if (!folder) {
-    console.error("Usage: x-libs-bundle-migrations <folder drizzle-kit wrote the migrations to>");
+    console.error("Usage: x-app-bundle-migrations <folder drizzle-kit wrote the migrations to>");
     process.exit(2);
   }
   console.info(`Wrote ${bundle_migrations(resolve(folder))}`);

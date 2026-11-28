@@ -1,7 +1,7 @@
 // Filters as one JSON tree of conditions joined by and, or and not, over fields the app describes in a catalogue: each
 // field a column of the app's table, an SQL expression over a row, a related table matched when any of its rows
 // matches, or a set of values in a link table. The same tree runs as parameterised SQL through `filter_sql` and here as
-// a check of one record held in memory, and the two give the same answer, which X-Libs' property test holds them to.
+// a check of one record held in memory, and the two give the same answer, which X-App's property test holds them to.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ export type DateOp = "before" | "after" | "in_last" | "not_in_last";
 // Another saved filter, by id, as part of this one.
 export type ReferenceOp = "in_filter";
 
-// The operators X-Libs knows, and any the catalogue adds by name.
+// The operators X-App knows, and any the catalogue adds by name.
 export type LeafOp = ScalarOp | SetOp | DateOp | ReferenceOp | (string & {});
 
 export type DateUnit = "hour" | "day" | "week" | "month" | "year";

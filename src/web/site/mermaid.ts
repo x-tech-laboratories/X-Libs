@@ -1,5 +1,5 @@
 // Draws a site's ```mermaid blocks with mermaid, coloured by Halon's tokens for the scheme the page shows. The site's
-// browser entry hands in its own import of mermaid, so X-Libs never needs it and sites without diagrams never load it.
+// browser entry hands in its own import of mermaid, so X-App never needs it and sites without diagrams never load it.
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
