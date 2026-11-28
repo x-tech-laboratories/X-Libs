@@ -10,7 +10,9 @@ import { BackupSettings } from "../../web/react/backup_settings.tsx";
 import { TrustedCertificates } from "../../web/react/certificates.tsx";
 import { ConnectionSettings } from "../../web/react/connections.tsx";
 import { Switch } from "../../web/react/controls.tsx";
+import type { IconGlyph } from "../../web/react/icons.tsx";
 import { PageHeading, SettingRow, SettingsPage, type SettingsCategory, type SettingsSection } from "../../web/react/layout.tsx";
+import type { ShellSidePane } from "../../web/react/shell.tsx";
 import { Loaded } from "../../web/react/states.tsx";
 import { PeerListeningSettings, SyncSettings } from "../../web/react/sync_settings.tsx";
 import { attempt } from "../../web/react/toasts.tsx";
@@ -32,6 +34,21 @@ export interface AppPage {
   label: string;
   view: (parts: string[]) => React.ReactNode;
   settings?: (props: PageSettingsProps) => SettingsSection[];
+  // Its sidebar row's icon; once any page has one, the sidebar shows every row with its icon.
+  icon?: IconGlyph;
+  // A hook giving what the row shows beside its label, such as how many things wait; nothing while null or 0.
+  use_badge?: () => number | string | null;
+  // False for a page reached only by its route, such as one item's page, which lights up `active_as` instead.
+  in_sidebar?: boolean;
+  active_as?: string;
+}
+
+// What the app shows around its pages, worked out by a hook from the route: content under the sidebar's rows, such as
+// a tree of items, tools in the header, and a pane beside the page, such as an assistant.
+export interface AppChrome {
+  sidebar?: React.ReactNode;
+  tools?: React.ReactNode;
+  side_pane?: ShellSidePane;
 }
 
 // What the page side of the base app is given: the app, its pages, and its own sections under General.
@@ -41,6 +58,10 @@ export interface AppPages {
   general_settings?: (props: PageSettingsProps) => SettingsSection[];
   // The icon the sidebar and sign-in show, an image URL beside the page; "icon.svg" unless set.
   brand_icon?: string;
+  // The page an empty route opens; the first page unless set.
+  default_page?: string;
+  // A hook, called on every render with the route's parts, for what the app shows around its pages.
+  use_chrome?: (parts: readonly string[]) => AppChrome;
 }
 
 // ── Sections ─────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { AppView, render_app } from "../src/app/web/app_page.tsx";
 import type { AppPages } from "../src/app/web/settings_page.tsx";
 import { set_page_api } from "../src/app/web/page.ts";
 import type { PageApi } from "../src/app/protocol.ts";
+import { HomeIcon } from "../src/web/react/icons.tsx";
 import { sample_app } from "./app/sample_app.ts";
 
 afterEach(() => {
@@ -71,6 +72,32 @@ describe("app page", () => {
     act(() => void (window.location.hash = "/settings"));
     window.dispatchEvent(new HashChangeEvent("hashchange"));
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("shows rows with icons and badges, opens the default page, lights a hidden page's row and draws the app's chrome", async () => {
+    device_page();
+    const own: AppPages = {
+      ...pages,
+      default_page: "inbox",
+      pages: [
+        { id: "notes", label: "Notes", icon: HomeIcon, view: () => <p>Every note</p> },
+        { id: "inbox", label: "Inbox", icon: HomeIcon, use_badge: () => 3, view: () => <p>Waiting</p> },
+        { id: "note", label: "Note", in_sidebar: false, active_as: "notes", view: (parts) => <p>One note {parts[0]}</p> },
+      ],
+      use_chrome: (parts) => ({ sidebar: <p>Tree at {parts.join("/") || "home"}</p>, tools: <button type="button">Assistant</button>, side_pane: { title: "Assistant", open: true, on_open_change: () => undefined, content: <p>Pane</p> } }),
+    };
+    render(<AppView pages={own} />);
+
+    expect(await screen.findByText("Waiting")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Inbox · 3/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /^Note$/ })).toBeNull();
+    expect(screen.getByText("Tree at home")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Assistant" })).toBeTruthy();
+    expect(screen.getByText("Pane")).toBeTruthy();
+
+    act(() => void (window.location.hash = "#/note/n1"));
+    expect(await screen.findByText("One note n1")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("link", { name: /Notes/ }).getAttribute("aria-current")).toBe("page"));
   });
 
   it("asks a browser to sign in to the server first", async () => {
