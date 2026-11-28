@@ -2,7 +2,16 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { HelpRequested, read_secret_file, read_server_config } from "../../src/server/config.ts";
+import {
+  HelpRequested,
+  command_words,
+  max_secret_chars,
+  read_secret_command,
+  read_secret_file,
+  read_server_config,
+  secret_command_reader,
+  secret_from_command,
+} from "../../src/server/config.ts";
 
 const spec = {
   program: "x-test-server",
@@ -66,5 +75,38 @@ describe("server config", () => {
     expect(config).toMatchObject({ host: "0.0.0.0", port: 8000, secret: "", web_folder: "", values: { state_dir: "state" } });
     expect(config.usage).not.toContain("sign in with");
     expect(config.usage).toContain("--state-dir  X_NIX_STATE_DIR  where state lives (default state)");
+  });
+});
+
+describe("secret commands", () => {
+  it("splits a command line as a shell would, without expanding anything", () => {
+    expect(command_words(`print-key  --name 'my key' "a \\"b\\"" c\\ d $HOME`)).toEqual(["print-key", "--name", "my key", 'a "b"', "c d", "$HOME"]);
+    expect(command_words("   ")).toEqual([]);
+    expect(command_words(`x ''`)).toEqual(["x", ""]);
+    expect(() => command_words(`x 'open`)).toThrow("The secret command has a quote that is never closed.");
+    expect(() => command_words(`x "open`, { what: "API key command" })).toThrow("The API key command has a quote");
+  });
+
+  it("takes the first line the program prints, and refuses in its own words", async () => {
+    expect(await read_secret_command(["printf", "first\r\nsecond\n"])).toBe("first");
+    await expect(read_secret_command(["printf", ""])).rejects.toThrow("The secret command printf printed no usable secret.");
+    await expect(read_secret_command(["printf", "x".repeat(max_secret_chars + 1)])).rejects.toThrow("no usable secret");
+    await expect(read_secret_command(["false"])).rejects.toThrow("The secret command false failed with exit code 1.");
+    await expect(read_secret_command(["/nonexistent/print-key"])).rejects.toThrow("The secret command /nonexistent/print-key failed.");
+    await expect(read_secret_command([])).rejects.toThrow("The secret command is empty.");
+  });
+
+  it("says what the command and its secret are called", async () => {
+    const read = secret_command_reader({ what: "API key command", secret: "key" });
+    await expect(read(["printf", ""])).rejects.toThrow("The API key command printf printed no usable key.");
+    await expect(read(["false"])).rejects.toThrow("The API key command false failed with exit code 1.");
+  });
+
+  it("reads nothing when no command is set", async () => {
+    expect(await secret_from_command("")).toBe("");
+    expect(await secret_from_command("  printf made-up-key ")).toBe("made-up-key");
+    const seen: string[][] = [];
+    expect(await secret_from_command("print-key --name 'mail key'", async (words) => (seen.push(words), "s"))).toBe("s");
+    expect(seen).toEqual([["print-key", "--name", "mail key"]]);
   });
 });

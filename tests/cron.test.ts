@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CronSchedule } from "../src/cron.ts";
+import { CronSchedule, checked_schedule, describe_schedule, is_due, next_due, schedule_cron } from "../src/cron.ts";
 
 describe("CronSchedule", () => {
   it("runs a daily time next at that time, and strictly after the moment given", () => {
@@ -46,4 +46,45 @@ describe("CronSchedule", () => {
       expect(() => CronSchedule.parse(expression)).toThrow(Error);
     },
   );
+});
+
+describe("run schedules", () => {
+  const hour = 3_600_000;
+
+  it("are checked and said in plain words", () => {
+    expect(describe_schedule(checked_schedule({ kind: "every", every: 2, unit: "hours" }))).toBe("every 2 hours");
+    expect(describe_schedule(checked_schedule({ kind: "every", every: 1, unit: "days" }))).toBe("every day");
+    expect(describe_schedule(checked_schedule({ kind: "at", time: "7:30", weekdays: [5, 1, 1] }))).toBe("at 07:30 on Monday and Friday");
+    expect(describe_schedule(checked_schedule({ kind: "at", time: "7:30", weekdays: [3] }))).toBe("at 07:30 on Wednesday");
+    expect(describe_schedule(checked_schedule({ kind: "at", time: "18:00", weekdays: [1, 2, 3, 4, 5] }))).toBe("at 18:00 on weekdays");
+    expect(describe_schedule(checked_schedule({ kind: "at", time: "18:00", weekdays: [0, 1, 2, 3, 4, 5, 6] }))).toBe("at 18:00 every day");
+    expect(() => checked_schedule({ kind: "every", every: 2, unit: "weeks" })).toThrow("unit is");
+    expect(() => checked_schedule({ kind: "every", every: 2, unit: "constructor" })).toThrow("unit is");
+    expect(checked_schedule({ kind: "every", every: 1, unit: "minutes" })).toEqual({ kind: "every", every: 1, unit: "minutes" });
+    expect(() => checked_schedule({ kind: "every", every: 1, unit: "minutes" }, { min_minutes: 5 })).toThrow("A schedule runs at most every 5 minutes.");
+    expect(() => checked_schedule({ kind: "every", every: 1.5, unit: "hours" })).toThrow("whole number");
+    expect(() => checked_schedule({ kind: "at", time: "25:00", weekdays: [1] })).toThrow("24-hour time");
+    expect(() => checked_schedule({ kind: "at", time: "07:00", weekdays: [] })).toThrow("one weekday or more");
+    expect(() => checked_schedule({ kind: "at", time: "07:00" })).toThrow("one weekday or more");
+    expect(() => checked_schedule(null)).toThrow("A schedule is");
+  });
+
+  it("fall due once however many times they were missed", () => {
+    const every = checked_schedule({ kind: "every", every: 2, unit: "hours" });
+    const since = new Date(2026, 10, 26, 9).getTime();
+    expect(is_due(every, since, since + hour)).toBe(false);
+    expect(is_due(every, since, since + 2 * hour)).toBe(true);
+    expect(is_due(every, since, since + 20 * hour)).toBe(true);
+    expect(next_due(every, since)).toBe(since + 2 * hour);
+
+    // 2026-11-26 is a Thursday.
+    const thursdays = checked_schedule({ kind: "at", time: "08:00", weekdays: [4] });
+    expect(thursdays.kind === "at" && schedule_cron(thursdays).expression).toBe("0 8 * * 4");
+    expect(is_due(thursdays, new Date(2026, 10, 26, 7).getTime(), new Date(2026, 10, 26, 7, 59).getTime())).toBe(false);
+    expect(is_due(thursdays, new Date(2026, 10, 26, 7).getTime(), new Date(2026, 10, 26, 8).getTime())).toBe(true);
+    expect(is_due(thursdays, new Date(2026, 10, 26, 8).getTime(), new Date(2026, 10, 27, 12).getTime())).toBe(false);
+    expect(is_due(thursdays, new Date(2026, 10, 10, 8, 30).getTime(), new Date(2026, 10, 27, 12).getTime())).toBe(true);
+    expect(next_due(thursdays, new Date(2026, 10, 26, 8).getTime())).toBe(new Date(2026, 11, 3, 8).getTime());
+    expect(next_due(thursdays, new Date(2026, 10, 26, 7, 59, 30).getTime())).toBe(new Date(2026, 10, 26, 8).getTime());
+  });
 });

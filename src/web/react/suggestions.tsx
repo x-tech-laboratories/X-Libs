@@ -1,8 +1,10 @@
 // Completions listed under a text field as it is typed into, such as slash commands: arrow keys choose, Tab or Enter take, Escape dismisses.
 // With open_on_focus the list opens as soon as the field is entered, nothing lit until an arrow key picks one, so Enter
-// still hands on free text; ComboField is that mode over a list of known values, such as categories already in use.
+// still hands on free text; ComboField is that mode over a list of known values, such as categories already in use,
+// and ListedField a ComboField over values fetched from somewhere, such as the models a server offers.
 
 import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
+import { use_resource } from "./states.tsx";
 
 export interface FieldProps<Field extends HTMLElement> {
   "aria-autocomplete": "list";
@@ -217,5 +219,50 @@ export function ComboField({ label, value, options, on_change, on_take, on_enter
         />
       )}
     </Suggestions>
+  );
+}
+
+// ── Listed field ─────────────────────────────────────────────────────────────
+
+export interface ListedOption {
+  value: string;
+  // Said of it under the field, such as "qwen3 (loaded)"; the value unless given.
+  label?: string;
+}
+
+// What a source lists: the values to offer, and why there are none when it could not list them.
+export interface FieldListing {
+  options: ListedOption[];
+  problem?: string;
+}
+
+interface ListedFieldProps {
+  label: string;
+  value: string;
+  // Lists the values to offer, asked again when the value or `again` changes rather than on every keystroke.
+  load: () => Promise<FieldListing>;
+  again?: unknown[];
+  // The text kept, trimmed, on a pick, Enter or leaving the field, when it differs from the value.
+  on_choose: (value: string) => void;
+  placeholder?: string;
+}
+
+// A text field offering the values a source lists while still taking any text typed, with the listed values in their
+// own words under it, or why there are none.
+export function ListedField({ label, value, load, again = [], on_choose, placeholder }: ListedFieldProps) {
+  const listing = use_resource(load, [value, ...again]);
+  const [draft, set_draft] = useState(value);
+  useEffect(() => set_draft(value), [value]);
+  const keep = (chosen: string) => {
+    set_draft(chosen);
+    if (chosen.trim() !== value) on_choose(chosen.trim());
+  };
+  const options = listing.data?.options ?? [];
+  const note = options.length > 0 ? options.map((option) => option.label ?? option.value).join(", ") : (listing.data?.problem ?? "");
+  return (
+    <div className="listed-field">
+      <ComboField label={label} value={draft} options={options.map((option) => option.value)} placeholder={placeholder} on_change={set_draft} on_take={keep} on_enter={() => keep(draft)} on_blur={() => keep(draft)} />
+      {note && <div className="muted small">{note}</div>}
+    </div>
   );
 }
