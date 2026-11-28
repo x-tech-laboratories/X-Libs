@@ -42,6 +42,8 @@ describe("vite presets", () => {
     expect(load(core)).toContain("export function registerPlugin");
     expect(load(resolve_id("@capacitor/app")!)).toContain("export const App");
     expect(resolve_id("react")).toBeNull();
+    expect(load("react")).toBeNull();
+    expect((capacitor_stand_in().resolveId as (source: string) => string | null)("@capacitor/core")).toBeNull();
     expect(has_package(process.cwd(), "@capacitor/core")).toBe(true);
     expect((capacitor_stand_in(process.cwd()).resolveId as (source: string) => string | null)("@capacitor/core")).toBeNull();
     expect((web_vite_config({ port: 7740 }).plugins as Plugin[]).map((plugin) => plugin.name)).toContain("x-app-capacitor-stand-in");
