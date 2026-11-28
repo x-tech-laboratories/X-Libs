@@ -5,9 +5,10 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
-import type { ApiSpec } from "../api_spec.ts";
+import { page_only_calls, type ApiSpec, type PageOnlyCalls } from "../api_spec.ts";
 import { backup_naming, default_backup_schedule, type BackupMethods, type Backups, type BackupNaming } from "../backups.ts";
 import type { BackupSchedule } from "../backup_protocol.ts";
+import { as_caller, type Caller } from "../caller.ts";
 import { certificate_method_names, type CertificateMethods } from "../certificate_protocol.ts";
 import { connection_method_names, type ConnectionMethods } from "../connection_protocol.ts";
 import { define_bridge, type Bridge } from "../electron/bridge.ts";
@@ -42,6 +43,10 @@ export interface Feature<Methods extends Record<string, StoreMethod> = Record<st
   settings?: Record<string, SettingSpec>;
   // The versions kept of the feature's items, recorded after every write and synced with them.
   histories?: readonly KeptHistory[];
+  // Run each time the database opens, once it is up to date, such as to repair what an older version left.
+  on_open?: (database: SqlDatabase) => void;
+  // Run after every write, before its history is recorded, so the feature can catch up, such as on derived rows.
+  after_write?: (database: SqlDatabase) => void;
 }
 
 export function define_feature<Methods extends Record<string, StoreMethod>>(feature: Feature<Methods>): Feature<Methods> {
@@ -93,6 +98,10 @@ export interface AppOptions<Features extends readonly Feature[]> {
   settings?: Record<string, SettingSpec>;
   settings_descriptions?: SettingsStoreOptions["descriptions"];
   setting_key_example?: string;
+  // What a token or an MCP client is told when it makes a call only the user at the page may make.
+  page_only_refusal?: string;
+  // The start of the server's access tokens, such as "cx" for cx_…; "xt" when not given.
+  token_prefix?: string;
 }
 
 // The settings every app keeps: how long its history reaches back, and this device's backup schedule.
@@ -174,6 +183,7 @@ export function define_app<const Features extends readonly Feature[]>(options: A
     for (const feature of features) migrate(database, feature.migrations, { owner: feature.id });
     for (const history of histories) history.install(database);
     sync_engine.install(database);
+    for (const feature of features) feature.on_open?.(database);
     prune_history(database);
   }
 
@@ -193,14 +203,20 @@ export function define_app<const Features extends readonly Feature[]>(options: A
   // Every call described once, for MCP and OpenAPI.
   const api_spec = Object.assign({}, ...features.map((feature) => feature.api)) as ApiSpec<Methods>;
 
-  // The calls run on the database given, telling on_change after each write so the other pages and devices hear of it.
-  function bind_methods(database: () => SqlDatabase, on_change: () => void): Methods {
+  // The calls a spec marks page-only and the writes of settings only the user may change, which every host refuses a
+  // token and an MCP client.
+  const page_only: PageOnlyCalls = page_only_calls(api_spec, { rule: settings_store.is_user_only_call, ...(options.page_only_refusal ? { refusal: options.page_only_refusal } : {}) });
+
+  // The calls run on the database given as the caller given, telling on_change after each write so the other pages
+  // and devices hear of it.
+  function bind_methods(database: () => SqlDatabase, on_change: () => void, caller: Caller = "page"): Methods {
     const bound = method_names.map((name) => {
       const method = all_methods[name]!;
       const call = (...args: unknown[]): unknown => {
-        const result = method(database(), ...args);
+        const result = as_caller(caller, () => method(database(), ...args));
         if (is_read_only(name)) return result;
         const done = (value: unknown) => {
+          for (const feature of features) feature.after_write?.(database());
           for (const history of histories) history.record(database());
           on_change();
           return value;
@@ -270,6 +286,7 @@ export function define_app<const Features extends readonly Feature[]>(options: A
     method_names,
     api_spec,
     is_read_only,
+    page_only,
     bind_methods,
     backup_naming: naming,
     read_backup_schedule,
@@ -285,7 +302,7 @@ type ErasedCalls = any;
 // Any X-app as define_app made it, as the hosts that run one whatever its calls see it.
 export type App = Omit<ReturnType<typeof define_app<readonly Feature[]>>, "bridges" | "bind_methods" | "api_spec" | "method_names"> & {
   bridges: AppBridges<ErasedCalls>;
-  bind_methods: (database: () => SqlDatabase, on_change: () => void) => ErasedCalls;
+  bind_methods: (database: () => SqlDatabase, on_change: () => void, caller?: Caller) => ErasedCalls;
   api_spec: ApiSpec<ErasedCalls>;
   method_names: readonly string[];
 };

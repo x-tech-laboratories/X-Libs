@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,6 +149,33 @@ describe("app server", () => {
     expect(sealed.statusCode).not.toBe(401);
   });
 
+  it("refuses a token the calls, setting writes and backup calls only the user at the page may make", async () => {
+    await start();
+    const { token } = accounts.create_token("admin", { name: "script", read_only: false });
+    const as_token = (url: string, payload: unknown) => server!.inject({ method: "POST", url, payload: payload as never, headers: { authorization: `Bearer ${token}` } });
+
+    expect((await as_token("/api/call/clear_notes", [])).statusCode).toBe(403);
+    expect((await as_token("/api/call/set_setting", ["notes.locked", true])).statusCode).toBe(403);
+    expect((await as_token("/api/backups/restore_backup", ["sample-old.db"])).statusCode).toBe(403);
+    expect(backup_methods.restore_backup).not.toHaveBeenCalled();
+    expect((await as_token("/api/call/set_setting", ["currency", "EUR"])).statusCode).toBe(204);
+    expect((await as_token("/api/backups/list_backups", [])).statusCode).toBe(200);
+    expect((await as_token("/api/call/get_note_caller", [])).json()).toBe("program");
+
+    expect((await server!.inject({ method: "POST", url: "/api/call/clear_notes", payload: [], headers: { cookie } })).statusCode).toBe(204);
+    expect((await call("get_note_caller", [])).json()).toBe("page");
+  });
+
+  it("offers MCP no page-only call and refuses a user-only setting through it", async () => {
+    await start();
+    await mcp("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "tests", version: "1" } });
+    const { tools } = (await mcp("tools/list")) as { tools: { name: string }[] };
+
+    expect(tools.map((tool) => tool.name)).not.toContain("clear_notes");
+    expect(JSON.stringify(await mcp("tools/call", { name: "set_setting", arguments: { key: "notes.locked", value: true } }))).toContain(sample_app.page_only.refusal);
+    expect(await mcp("tools/call", { name: "get_note_caller", arguments: {} })).toMatchObject({ content: [{ text: expect.stringContaining("program") }] });
+  });
+
   it("names the session cookie after the app", async () => {
     await start();
     const signed_in = await server!.inject({ method: "POST", url: "/api/login", payload: { name: "admin", password: test_password } });
@@ -193,5 +220,31 @@ describe("run_server", { timeout: 30_000 }, () => {
 
     expect(running.address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(signed_in.statusCode).toBeLessThan(300);
+  });
+
+  it("moves accounts an older version kept in the data's own file into accounts.db, once, after a backup", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "x-libs-app-move-"));
+    mkdirSync(join(folder, "data"));
+    const old = new DatabaseSync(join(folder, "data", "sample.db"));
+    sample_app.open_store(old);
+    const old_accounts = new AccountStore({ database: old, app_name: "X-Sample" });
+    old_accounts.create_user({ name: "ana", role: "admin", access: null, password: "a made-up older password" });
+    const { token } = old_accounts.create_token("ana", { name: "laptop", read_only: false });
+    old.close();
+    const config = join(folder, "config.json");
+    writeFileSync(config, JSON.stringify({ database: join(folder, "data", "sample.db"), backups_folder: join(folder, "backups") }));
+    const password_file = join(folder, "password.hash");
+    writeFileSync(password_file, `admin:${hash_password(test_password)}\n`);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    running = await run_server(sample_app, {
+      web_folder: pathToFileURL(join(folder, "web")),
+      argv: ["--port", String(await free_port()), "--host", "127.0.0.1"],
+      env: { X_SAMPLE_CONFIG: config, X_SAMPLE_PASSWORD_HASH_FILE: password_file },
+    });
+    const listed = await running.server.inject({ method: "POST", url: "/api/call/list_notes", payload: [], headers: { authorization: `Bearer ${token}` } });
+
+    expect(listed.statusCode).toBe(200);
+    expect(readdirSync(join(folder, "backups")).length).toBeGreaterThan(0);
   });
 });
