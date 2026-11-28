@@ -7,6 +7,8 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { externalizeDepsPlugin, type UserConfig } from "electron-vite";
 
+import { capacitor_stand_in } from "./capacitor.ts";
+
 // ── Desktop ──────────────────────────────────────────────────────────────────
 
 export interface DesktopViteOptions {
@@ -27,7 +29,7 @@ export function desktop_vite_config(options: DesktopViteOptions = {}): UserConfi
     },
     renderer: {
       root: resolve("src/web"),
-      plugins: [react()],
+      plugins: [react(), capacitor_stand_in()],
       build: { rollupOptions: { input: { index: resolve("src/web/index.html") } } },
     },
   };
