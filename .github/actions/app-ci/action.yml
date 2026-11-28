@@ -1,0 +1,24 @@
+name: X-app CI
+description: Builds an X-app, checks its coverage against the floor committed in vitest.config.ts, and lints it, as the Application Standard asks.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci
+      shell: bash
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    - run: npm run build
+      shell: bash
+    - run: npm run coverage
+      shell: bash
+    # A run that raised the floor fails here until the new floor is committed.
+    - run: git diff --exit-code vitest.config.ts
+      shell: bash
+    - run: npm run lint
+      shell: bash

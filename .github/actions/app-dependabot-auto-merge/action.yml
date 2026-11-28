@@ -1,0 +1,25 @@
+name: X-app Dependabot auto-merge
+description: Turns on auto-merge for X-App and Halon at any version and for other packages' patch and minor updates; the required checks on main still decide when.
+
+inputs:
+  github-token:
+    description: The workflow's token, with contents and pull-requests write.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - id: meta
+      uses: dependabot/fetch-metadata@v3
+      with:
+        github-token: ${{ inputs.github-token }}
+    # Each 0.x minor of X-App and Halon breaks and CI with the nix build is the gate, so they merge at any version.
+    - if: >-
+        steps.meta.outputs.dependency-group == 'x-tech' ||
+        steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+        steps.meta.outputs.update-type == 'version-update:semver-minor'
+      run: gh pr merge --auto --merge "$PR_URL"
+      shell: bash
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ inputs.github-token }}

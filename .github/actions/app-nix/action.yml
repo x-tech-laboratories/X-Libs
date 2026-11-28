@@ -1,0 +1,17 @@
+name: X-app Nix build
+description: Builds an X-app's Nix packages, so a dependency bump that breaks what TechNet deploys fails in CI.
+
+inputs:
+  targets:
+    description: The flake outputs to build, such as "./nix#default ./nix#desktop".
+    default: ./nix#default
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - uses: cachix/install-nix-action@v31
+    - run: nix build $TARGETS
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
