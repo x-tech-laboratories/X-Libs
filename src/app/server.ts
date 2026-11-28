@@ -14,8 +14,9 @@ import fastify, { type FastifyInstance } from "fastify";
 
 import { openapi_document, positional_args } from "../api_spec.ts";
 import { keep_backing_up, type BackupMethods } from "../backups.ts";
-import { register_accounts } from "../server/account_sign_in.ts";
-import { AccountStore } from "../server/account_store.ts";
+import { calls_under, register_accounts } from "../server/account_sign_in.ts";
+import { caller_of } from "../caller.ts";
+import { AccountStore, holds_accounts, move_accounts } from "../server/account_store.ts";
 import { register_call_table } from "../server/call_table.ts";
 import { read_server_config } from "../server/config.ts";
 import { EventStream } from "../server/events.ts";
@@ -108,7 +109,7 @@ export function register_app_calls(api: FastifyInstance, app: App, database: () 
     } catch (error) {
       return send_text(reply, 400, (error as Error).message);
     }
-    const methods = app.bind_methods(database, () => changes.announce_change(changes.client_id_of(request)));
+    const methods = app.bind_methods(database, () => changes.announce_change(changes.client_id_of(request)), caller_of(request));
     const result = await app.bridges.calls.dispatch(methods, request.params.method, args);
     if (result === undefined) return reply.code(204).send();
     // Always JSON, since Fastify sends a bare string such as a new id as plain text the page cannot parse.
@@ -137,6 +138,9 @@ export interface ServerOptions {
 // The server's backups and its sync peer's pairings, which only an admin reaches.
 const admin_paths = ["/api/backups/", "/api/sync/"];
 
+// Backup calls only the user at the page may make, since a restored backup could undo what only the user may change.
+export const user_only_backup_calls: ReadonlySet<string> = new Set(["restore_backup", "remove_backup", "set_backup_schedule"]);
+
 export async function build_server(app: App, options: ServerOptions): Promise<FastifyInstance> {
   const server = fastify({ forceCloseConnections: true });
   register_lenient_json_body(server);
@@ -149,6 +153,10 @@ export async function build_server(app: App, options: ServerOptions): Promise<Fa
     // A read-only token may still list and read through MCP, which posts every request.
     read_only_paths: ["/api/mcp"],
     needed: (_method, path) => (admin_paths.some((admin_path) => path.startsWith(admin_path)) ? { role: options.accounts.top_role } : "any"),
+    // A token is refused the calls only the user at the page may make; a read-only one may make the calls that only read.
+    call_of: calls_under("/api/call"),
+    is_read_only: app.is_read_only,
+    page_only: app.page_only,
   });
 
   const { changes, database } = options;
@@ -168,11 +176,14 @@ export async function build_server(app: App, options: ServerOptions): Promise<Fa
         instructions: app.instructions,
         api: app.api_spec,
         is_read_only: app.is_read_only,
-        call: (method, args) => app.bridges.calls.dispatch(app.bind_methods(database, () => changes.announce_change()), method, args),
+        page_only: app.page_only,
+        call: (method, args) => app.bridges.calls.dispatch(app.bind_methods(database, () => changes.announce_change(), "program"), method, args),
       });
 
       // The server's backups, as the page's Settings reach them.
       api.post<{ Params: { method: string } }>("/backups/:method", async (request, reply) => {
+        const via = request.viewer?.via;
+        if (user_only_backup_calls.has(request.params.method) && via !== "session" && via !== "proxy") return send_text(reply, 403, app.page_only.refusal);
         const args: unknown = request.body ?? [];
         if (args === BAD_JSON || !Array.isArray(args)) return send_text(reply, 400, "send the arguments as a JSON list");
         const result = await app.bridges.backups.dispatch(options.backup_methods, request.params.method, args);
@@ -240,9 +251,15 @@ export async function run_server(app: App, options: RunServerOptions): Promise<R
 
   // Accounts are a file of their own beside the data, so restoring it never changes who can sign in.
   const accounts_database = new DatabaseSync(join(dirname(database_path), "accounts.db"));
+  // An older version kept them in the data's own file; they move out once, after a backup of the file as it was.
+  if (holds_accounts(opened.database()) && !holds_accounts(accounts_database)) {
+    await opened.back_up();
+    move_accounts(opened.database(), accounts_database);
+  }
   const accounts = new AccountStore({
     database: accounts_database,
     app_name: app.name,
+    ...(app.token_prefix ? { token_prefix: app.token_prefix } : {}),
     declared: load_accounts(`${prefix}_PASSWORD_HASH_FILE`, server_config.values.password_hash_file),
   });
 

@@ -207,6 +207,52 @@ const schema = [`
 
 type Row = Record<string, SqlValue>;
 
+// ── Moving ───────────────────────────────────────────────────────────────────
+
+function has_table(database: SqlDatabase, name: string): boolean {
+  return database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
+}
+
+// Whether a database keeps accounts, as an older version kept them in the app's own.
+export function holds_accounts(database: SqlDatabase): boolean {
+  return has_table(database, "account_users");
+}
+
+// Moves the accounts an older version kept in the app's own database into their own, once: their tables, indexes, rows
+// and schema version go across as they are and leave the app's database, so a restored backup no longer holds them.
+// Does nothing when the accounts database already has accounts or the app's has none; says whether it moved them.
+export function move_accounts(from: SqlDatabase, to: SqlDatabase): boolean {
+  if (!holds_accounts(from) || holds_accounts(to)) return false;
+  const objects = from.prepare("SELECT type, name, sql FROM sqlite_master WHERE name LIKE 'account\\_%' ESCAPE '\\' AND sql IS NOT NULL ORDER BY type = 'index', rowid").all() as { type: string; name: string; sql: string }[];
+  const versions = from.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schema_versions'").get() as { sql: string } | undefined;
+  to.exec("BEGIN");
+  try {
+    if (versions && !has_table(to, "schema_versions")) to.exec(versions.sql);
+    for (const object of objects) {
+      to.exec(object.sql);
+      if (object.type !== "table") continue;
+      for (const row of from.prepare(`SELECT * FROM "${object.name}"`).all() as Row[]) {
+        const columns = Object.keys(row);
+        to.prepare(`INSERT INTO "${object.name}" (${columns.map((column) => `"${column}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((column) => row[column]!));
+      }
+    }
+    const version = versions ? (from.prepare("SELECT * FROM schema_versions WHERE owner = 'accounts'").get() as Row | undefined) : undefined;
+    if (version) {
+      const columns = Object.keys(version);
+      to.prepare(`INSERT INTO schema_versions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((column) => version[column]!));
+    }
+    to.exec("COMMIT");
+  } catch (error) {
+    to.exec("ROLLBACK");
+    throw error;
+  }
+  from.exec("BEGIN");
+  for (const object of objects.filter((each) => each.type === "table")) from.exec(`DROP TABLE "${object.name}"`);
+  if (versions) from.prepare("DELETE FROM schema_versions WHERE owner = 'accounts'").run();
+  from.exec("COMMIT");
+  return true;
+}
+
 // ── Store ────────────────────────────────────────────────────────────────────
 
 export class AccountStore {

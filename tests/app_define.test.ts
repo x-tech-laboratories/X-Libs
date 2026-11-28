@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { is_backup_schedule, is_read_only } from "../src/app/define.ts";
 import { read_desktop_settings } from "../src/app/protocol.ts";
 import { open_app_database, type AppDatabase } from "../src/app/server.ts";
-import { note_history, sample_app } from "./app/sample_app.ts";
+import { note_history, notes_hooks, sample_app } from "./app/sample_app.ts";
 
 // ============================================================================
 // Helpers
@@ -126,6 +126,34 @@ describe("app store", () => {
 // ============================================================================
 // Desktop settings and schedules
 // ============================================================================
+
+describe("feature hooks and callers", () => {
+  it("tells a feature when the database opens and after every write, but not after a read", async () => {
+    const before = { ...notes_hooks };
+    const database = open_database();
+    const methods = sample_app.bind_methods(() => database, () => undefined);
+
+    methods.add_note("Groceries");
+    await methods.rename_note("note-x", "Shopping");
+    methods.list_notes();
+
+    expect(notes_hooks.opened).toBe(before.opened + 1);
+    expect(notes_hooks.writes).toBe(before.writes + 2);
+  });
+
+  it("runs each call as the caller it is bound for, the page unless told", () => {
+    const database = open_database();
+
+    expect(sample_app.bind_methods(() => database, () => undefined).get_note_caller()).toBe("page");
+    expect(sample_app.bind_methods(() => database, () => undefined, "engine").get_note_caller()).toBe("engine");
+  });
+
+  it("marks the specs' page-only calls and the user-only settings' writes as page-only", () => {
+    expect(sample_app.page_only.is_page_only("clear_notes")).toBe(true);
+    expect(sample_app.page_only.is_page_only_call("set_setting", ["notes.locked", true])).toBe(true);
+    expect(sample_app.page_only.is_page_only_call("set_setting", ["currency", "EUR"])).toBe(false);
+  });
+});
 
 describe("desktop settings", () => {
   it("fills in each default where a setting is missing or damaged", () => {
