@@ -113,6 +113,9 @@ Every app signs in through `server/account_sign_in`, `server/account_store` and 
 - A phone that answers other devices too: a listener in `XLibsForegroundService` that hands each sealed call to the worker page's `sync_peer.answer`, so two phones pair without a desktop between them. Until then a phone only reaches out.
 - A QR code beside the pairing code in `SyncSettings`, so a phone scans the desktop's code instead of copying it.
 
+- CODEX still syncs through the old client and server routes: move it onto `create_sync_peer` once its structure-cleanup session lands its host merge, filling the sync slot that session left.
+- Check that a phone trusts a desktop's self-signed certificate on X-Fitness, whose requests go through Capacitor's native HTTP rather than the page's fetch, and not only on apps using `phone_certificates`.
+
 ## Unrelated, for the owner
 
 - The X-Backups health check reports critical because the two Odin Borgmatic repositories (on-disk and Ragnarok) have a failed or overdue check and a failing poll. The Ragnarok repository needs `borg check --repair` run with Heimdall's credentials.
