@@ -273,7 +273,7 @@ describe("app desktop window", { timeout: 30_000 }, () => {
 
   it("passes the page's MCP endpoint calls to the daemon only for an app that serves one", async () => {
     const fake = fake_electron();
-    run_desktop(sample_app_with_mcp, fake.electron, { main_dir, argv: [], env: {}, cwd: profile, ...(({ calls, ...rest }) => rest)(fake_daemon()) });
+    run_desktop(sample_app_with_mcp, fake.electron, { main_dir, argv: [], env: {}, cwd: profile, ...(({ calls: _calls, ...rest }) => rest)(fake_daemon()) });
     await until(() => fake.handlers.size > 0);
     const plain = fake_electron();
     run(plain, fake_daemon());
