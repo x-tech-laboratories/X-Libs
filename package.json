@@ -1,6 +1,6 @@
 {
   "name": "@x-tech-laboratories/x-libs",
-  "version": "0.93.0",
+  "version": "0.94.0",
   "description": "Code the X-apps share: agents and their long runs, passwords and sign-in, the Fastify server pieces, durations, and the web page's helpers and widgets",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -211,6 +211,7 @@
     "@tiptap/pm": "^3.33.0",
     "@tiptap/react": "^3.33.0",
     "@tiptap/starter-kit": "^3.33.0",
+    "bonjour-service": "^1.4.4",
     "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
     "drizzle-orm": "1.0.0-rc.6",
@@ -230,7 +231,8 @@
     "rrule": "^2.8.1",
     "semver": "^7.8.6",
     "spdx-satisfies": "^6.0.1",
-    "sshpk": "^1.18.0"
+    "sshpk": "^1.18.0",
+    "tweetnacl": "^1.0.3"
   },
   "capacitor": {
     "android": {

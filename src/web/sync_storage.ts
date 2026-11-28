@@ -1,22 +1,36 @@
-// Where a phone's page keeps the sync server and its token: the app's own local storage, which no other app can read.
+// Where a phone's page keeps its sync keys and paired devices: the app's own local storage, which no other app can read.
 
-import type { SyncConfig, SyncStorage } from "../sync_protocol.ts";
+import type { PeerIdentity, PeerRecord, PeerStorage } from "../sync_protocol.ts";
 
 export interface LocalSyncStorageOptions {
-  // The local storage key, such as "x-tasks-sync".
+  // The local storage key, such as "x-tasks-sync-peers".
   key: string;
-  // Runs before the server's copy replaces the local one, such as to back the database up.
-  back_up_before_download: SyncStorage["back_up_before_download"];
+  // Runs before another device's changes replace this copy's data, such as to back the database up.
+  back_up_before_replace: PeerStorage["back_up_before_replace"];
 }
 
-export function local_sync_storage({ key, back_up_before_download }: LocalSyncStorageOptions): SyncStorage {
+interface SavedPeers {
+  identity?: PeerIdentity;
+  peers?: PeerRecord[];
+}
+
+export function local_sync_storage({ key, back_up_before_replace }: LocalSyncStorageOptions): PeerStorage {
+  function read(): SavedPeers {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) ?? "{}") as SavedPeers;
+      return saved && typeof saved === "object" ? saved : {};
+    } catch {
+      return {};
+    }
+  }
+
+  const write = (changes: SavedPeers) => localStorage.setItem(key, JSON.stringify({ ...read(), ...changes }));
+
   return {
-    read_config: () => {
-      const saved = localStorage.getItem(key);
-      return saved ? (JSON.parse(saved) as SyncConfig) : null;
-    },
-    write_config: (config) => localStorage.setItem(key, JSON.stringify(config)),
-    remove_config: () => localStorage.removeItem(key),
-    back_up_before_download,
+    read_identity: () => read().identity ?? null,
+    write_identity: (identity) => write({ identity }),
+    read_peers: () => (Array.isArray(read().peers) ? read().peers! : []),
+    write_peers: (peers) => write({ peers }),
+    back_up_before_replace,
   };
 }

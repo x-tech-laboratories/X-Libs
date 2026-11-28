@@ -31,17 +31,29 @@ export interface SyncEngineOptions {
 }
 
 export interface SyncStateRow {
-  // This device's id, stamped on every change it makes.
+  // The id stamped on every change this copy makes.
   site: string;
-  // The id of the data this database serves, when it is the server.
+  // The id of this copy's change counter; a restore or a replace starts a new one, so peers read it again from the start.
   generation: string;
-  // The server data this device follows, or empty when it follows none.
-  server_generation: string;
+  // The device whose copy this is, so a database copied to another device takes ids of its own there.
+  device: string;
+  // The generation a restore started, whose data wins over every peer's; empty when there was none.
+  claim_generation: string;
   last_seq: number;
-  // This device's own changes up to here have reached the server.
-  pushed_seq: number;
-  // The server's changes up to here have reached this device.
-  pulled_seq: number;
+}
+
+// What this copy knows of one paired device's copy.
+export interface SyncPeerRow {
+  device: string;
+  // The id the peer stamps its own changes with, so they are not sent back to it.
+  site: string;
+  // The peer's counter generation and how far along it this copy has taken its changes.
+  generation: string;
+  received_seq: number;
+  // This copy's changes up to here have reached the peer.
+  sent_seq: number;
+  // The restore whose data this peer has been made to match.
+  claimed: string;
 }
 
 export interface CollectedChanges {
@@ -69,16 +81,15 @@ function object_of(value: unknown): Record<string, unknown> {
   }
 }
 
-// Safe to run on every start; a new database gets fresh device and data ids.
+// Safe to run on every start; a new database gets fresh site and generation ids.
 export const sync_schema_sql = `
   CREATE TABLE IF NOT EXISTS sync_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     site TEXT NOT NULL,
     generation TEXT NOT NULL,
-    server_generation TEXT NOT NULL DEFAULT '',
+    device TEXT NOT NULL DEFAULT '',
+    claim_generation TEXT NOT NULL DEFAULT '',
     last_seq INTEGER NOT NULL DEFAULT 0,
-    pushed_seq INTEGER NOT NULL DEFAULT 0,
-    pulled_seq INTEGER NOT NULL DEFAULT 0,
     is_applying INTEGER NOT NULL DEFAULT 0
   );
   INSERT OR IGNORE INTO sync_state (id, site, generation) VALUES (1, lower(hex(randomblob(16))), lower(hex(randomblob(16))));
@@ -91,7 +102,28 @@ export const sync_schema_sql = `
     seq INTEGER NOT NULL,
     PRIMARY KEY (table_name, row_key, column_name)
   ) WITHOUT ROWID;
-  CREATE INDEX IF NOT EXISTS sync_cells_by_seq ON sync_cells (seq);`;
+  CREATE INDEX IF NOT EXISTS sync_cells_by_seq ON sync_cells (seq);
+  CREATE TABLE IF NOT EXISTS sync_peers (
+    device TEXT PRIMARY KEY,
+    site TEXT NOT NULL DEFAULT '',
+    generation TEXT NOT NULL DEFAULT '',
+    received_seq INTEGER NOT NULL DEFAULT 0,
+    sent_seq INTEGER NOT NULL DEFAULT 0,
+    claimed TEXT NOT NULL DEFAULT ''
+  ) WITHOUT ROWID;`;
+
+// Columns a database made before peers synced lacks.
+const added_state_columns = {
+  device: "TEXT NOT NULL DEFAULT ''",
+  claim_generation: "TEXT NOT NULL DEFAULT ''",
+};
+
+function add_missing_state_columns(database: SqlDatabase): void {
+  const present = (database.prepare("PRAGMA table_info(sync_state)").all() as { name: string }[]).map((column) => column.name);
+  for (const [column, type] of Object.entries(added_state_columns)) {
+    if (!present.includes(column)) database.exec(`ALTER TABLE sync_state ADD COLUMN ${column} ${type}`);
+  }
+}
 
 interface CellRow {
   table_name: string;
@@ -196,6 +228,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
   // Run after every schema change, since the triggers name each column.
   function install(database: SqlDatabase): void {
     database.exec(sync_schema_sql);
+    add_missing_state_columns(database);
     drop_triggers(database);
     const is_local = "(SELECT is_applying FROM sync_state) = 0";
 
@@ -257,7 +290,7 @@ export function create_sync_engine(options: SyncEngineOptions) {
     }
   }
 
-  // Rows a table held before it synced are sent as this device's own changes, so the server and other devices get them too.
+  // Rows a table held before it synced are sent as this device's own changes, so the other devices get them too.
   function stamp_existing_rows(database: SqlDatabase, table_name: string): void {
     database.exec("UPDATE sync_state SET last_seq = last_seq + 1");
     database
@@ -265,30 +298,70 @@ export function create_sync_engine(options: SyncEngineOptions) {
       .run(table_name);
   }
 
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── State ────────────────────────────────────────────────────────────
 
   function read_state(database: SqlDatabase): SyncStateRow {
-    return database.prepare("SELECT site, generation, server_generation, last_seq, pushed_seq, pulled_seq FROM sync_state").get() as SyncStateRow;
+    return database.prepare("SELECT site, generation, device, claim_generation, last_seq FROM sync_state").get() as SyncStateRow;
   }
 
   function write_state(database: SqlDatabase, changes: Partial<Omit<SyncStateRow, "last_seq">>): void {
     for (const [column, value] of Object.entries(changes)) database.prepare(`UPDATE sync_state SET "${column}" = ?`).run(value as string | number);
   }
 
-  function has_unpushed_changes(database: SqlDatabase): boolean {
-    const { site, pushed_seq } = read_state(database);
-    return database.prepare("SELECT 1 FROM sync_cells WHERE seq > ? AND site = ? LIMIT 1").get(pushed_seq, site) !== undefined;
+  // A database first opened by another device, such as a copied file, takes fresh ids and forgets that device's peers.
+  function claim_for_device(database: SqlDatabase, device: string): void {
+    if (read_state(database).device === device) return;
+    write_state(database, { device, site: crypto.randomUUID(), generation: crypto.randomUUID() });
+    database.exec("DELETE FROM sync_peers");
   }
 
-  function count_unpushed_rows(database: SqlDatabase): number {
-    const { site, pushed_seq } = read_state(database);
-    const row = database.prepare("SELECT count(DISTINCT table_name || char(0) || row_key) AS count FROM sync_cells WHERE seq > ? AND site = ?").get(pushed_seq, site);
-    return (row as { count: number }).count;
-  }
-
-  // A restored backup is no longer the data others have seen, so it starts a new generation and follows no server.
+  // A restore is a write made now: it starts a new generation, and each peer is made to match the restored data once.
   function forget_history(database: SqlDatabase): void {
-    write_state(database, { generation: crypto.randomUUID(), server_generation: "" });
+    const generation = crypto.randomUUID();
+    write_state(database, { generation, claim_generation: generation });
+  }
+
+  // Whether the peer still has to be made to match a restore.
+  function needs_claim(database: SqlDatabase, device: string): boolean {
+    const { claim_generation } = read_state(database);
+    return claim_generation !== "" && read_peer(database, device).claimed !== claim_generation;
+  }
+
+  // ── Peers ────────────────────────────────────────────────────────────────
+
+  function read_peer(database: SqlDatabase, device: string): SyncPeerRow {
+    const row = database.prepare("SELECT device, site, generation, received_seq, sent_seq, claimed FROM sync_peers WHERE device = ?").get(device) as SyncPeerRow | undefined;
+    return row ?? { device, site: "", generation: "", received_seq: 0, sent_seq: 0, claimed: "" };
+  }
+
+  function write_peer(database: SqlDatabase, device: string, changes: Partial<Omit<SyncPeerRow, "device">>): void {
+    const row = { ...read_peer(database, device), ...changes };
+    database
+      .prepare(
+        `INSERT INTO sync_peers (device, site, generation, received_seq, sent_seq, claimed) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (device) DO UPDATE SET site = excluded.site, generation = excluded.generation, received_seq = excluded.received_seq,
+           sent_seq = excluded.sent_seq, claimed = excluded.claimed`,
+      )
+      .run(device, row.site, row.generation, row.received_seq, row.sent_seq, row.claimed);
+  }
+
+  function remove_peer(database: SqlDatabase, device: string): void {
+    database.prepare("DELETE FROM sync_peers WHERE device = ?").run(device);
+  }
+
+  // Whether this copy holds changes the peer has not had, leaving out the ones it made itself.
+  function has_unsent_changes(database: SqlDatabase, device: string): boolean {
+    const peer = read_peer(database, device);
+    return database.prepare("SELECT 1 FROM sync_cells WHERE seq > ? AND site != ? LIMIT 1").get(peer.sent_seq, peer.site) !== undefined;
+  }
+
+  // How many rows this device changed that at least one of the peers has not had yet.
+  function count_unsent_rows(database: SqlDatabase, devices: readonly string[]): number {
+    if (devices.length === 0) return 0;
+    const sent_seq = Math.min(...devices.map((device) => read_peer(database, device).sent_seq));
+    const { site } = read_state(database);
+    const row = database.prepare("SELECT count(DISTINCT table_name || char(0) || row_key) AS count FROM sync_cells WHERE seq > ? AND site = ?").get(sent_seq, site);
+    return (row as { count: number }).count;
   }
 
   // ── Reading changes ──────────────────────────────────────────────────────
@@ -320,15 +393,6 @@ export function create_sync_engine(options: SyncEngineOptions) {
       else if (row && cell.column_name in row) changes.push({ ...base, value: row[cell.column_name] });
     }
     return changes;
-  }
-
-  // This device's own changes the server has not had yet, and the counter they were read at.
-  function collect_unpushed_changes(database: SqlDatabase): CollectedChanges {
-    const { site, pushed_seq, last_seq } = read_state(database);
-    const cells = database
-      .prepare("SELECT table_name, row_key, column_name, ts, site FROM sync_cells WHERE seq > ? AND seq <= ? AND site = ? ORDER BY seq")
-      .all(pushed_seq, last_seq, site) as CellRow[];
-    return { changes: cells_to_changes(database, cells), up_to_seq: last_seq };
   }
 
   // Every change after the cursor that another device should hear about, leaving out the ones it made itself.
@@ -477,15 +541,25 @@ export function create_sync_engine(options: SyncEngineOptions) {
     return in_sync_transaction(database, () => apply_each_row(database, changes));
   }
 
-  // Swaps every synced row for another copy's data in one transaction; rows kept to this device stay.
-  function replace_with_snapshot(database: SqlDatabase, changes: SyncChange[]): void {
-    in_sync_transaction(database, () => {
-      for (const table of [...tables].reverse()) {
-        database.exec(`DELETE FROM "${table.name}" WHERE rowid IN (SELECT rowid FROM "${table.name}" AS row WHERE ${filter_sql(table, "row")})`);
+  // Makes this copy win over a peer's, as after a restore: every value here is stamped newer than any either copy holds, and each row or
+  // map key only the other copy has is stamped as removed, so sending this copy's changes makes the other match it.
+  function claim_everything(database: SqlDatabase, theirs: SyncChange[]): void {
+    database.exec("BEGIN");
+    try {
+      const add_cell = database.prepare("INSERT OR IGNORE INTO sync_cells (table_name, row_key, column_name, ts, site, seq) VALUES (?, ?, ?, ?, '', 0)");
+      for (const change of theirs) {
+        const table = tables_by_name.get(change.table);
+        if (table && !table.local_keys.includes(change.key)) add_cell.run(change.table, change.key, change.column, change.ts);
       }
-      database.exec("DELETE FROM sync_cells");
-      apply_each_row(database, changes);
-    });
+      const newest_here = (database.prepare("SELECT coalesce(max(ts), 0) AS ts FROM sync_cells").get() as { ts: number }).ts;
+      const newest = Math.max(Date.now(), newest_here + 1, ...theirs.map((change) => change.ts + 1));
+      database.exec("UPDATE sync_state SET last_seq = last_seq + 1");
+      database.prepare("UPDATE sync_cells SET ts = ?, site = (SELECT site FROM sync_state), seq = (SELECT last_seq FROM sync_state)").run(newest);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   return {
@@ -494,13 +568,17 @@ export function create_sync_engine(options: SyncEngineOptions) {
     stamp_existing_rows,
     read_state,
     write_state,
-    has_unpushed_changes,
-    count_unpushed_rows,
+    claim_for_device,
     forget_history,
-    collect_unpushed_changes,
+    needs_claim,
+    read_peer,
+    write_peer,
+    remove_peer,
+    has_unsent_changes,
+    count_unsent_rows,
     collect_changes_since,
     collect_snapshot,
     apply_changes,
-    replace_with_snapshot,
+    claim_everything,
   };
 }

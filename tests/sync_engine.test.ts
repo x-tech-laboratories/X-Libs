@@ -25,11 +25,13 @@ function open_device(): SqlDatabase {
   return database;
 }
 
-// Sends one device's unpushed changes to another and marks them pushed.
-function push(from: SqlDatabase, to: SqlDatabase): number {
-  const outgoing = engine.collect_unpushed_changes(from);
-  engine.write_state(from, { pushed_seq: outgoing.up_to_seq });
-  return engine.apply_changes(to, outgoing.changes);
+// Sends one device's changes the other has not had and marks them sent, as a peer's exchange does.
+function push(from: SqlDatabase, to: SqlDatabase, using = engine): number {
+  const receiver = using.read_state(to).site;
+  const known = using.read_peer(from, receiver);
+  const outgoing = using.collect_changes_since(from, known.sent_seq, receiver);
+  using.write_peer(from, receiver, { site: receiver, sent_seq: outgoing.up_to_seq });
+  return using.apply_changes(to, outgoing.changes);
 }
 
 function rows(database: SqlDatabase, sql: string): unknown[] {
@@ -97,16 +99,77 @@ describe("sync engine", () => {
     expect(rows(desktop, "SELECT * FROM items")).toEqual([]);
   });
 
-  it("counts unpushed rows and rebuilds a device from a snapshot", () => {
+  it("counts the rows some peer has not had, and none once every peer has them", () => {
     const phone = open_device();
     const desktop = open_device();
+    const laptop = open_device();
     phone.exec("INSERT INTO lists VALUES ('l1', 'Legs'), ('l2', 'Arms')");
-    expect(engine.has_unpushed_changes(phone)).toBe(true);
-    expect(engine.count_unpushed_rows(phone)).toBe(2);
+    expect(engine.count_unsent_rows(phone, [])).toBe(0);
+    expect(engine.has_unsent_changes(phone, engine.read_state(desktop).site)).toBe(true);
+    expect(engine.count_unsent_rows(phone, [engine.read_state(desktop).site, engine.read_state(laptop).site])).toBe(2);
 
-    desktop.exec("INSERT INTO lists VALUES ('old', 'Gone soon')");
-    engine.replace_with_snapshot(desktop, engine.collect_snapshot(phone).changes);
-    expect(rows(desktop, "SELECT id FROM lists ORDER BY id")).toEqual([{ id: "l1" }, { id: "l2" }]);
+    push(phone, desktop);
+    expect(engine.count_unsent_rows(phone, [engine.read_state(desktop).site, engine.read_state(laptop).site])).toBe(2);
+    push(phone, laptop);
+    expect(engine.count_unsent_rows(phone, [engine.read_state(desktop).site, engine.read_state(laptop).site])).toBe(0);
+  });
+
+  it("passes on changes it took from one device to the next, but not back to the device that made them", () => {
+    const phone = open_device();
+    const desktop = open_device();
+    const laptop = open_device();
+    phone.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
+    push(phone, desktop);
+    const phone_site = engine.read_state(phone).site;
+    engine.write_peer(desktop, phone_site, { site: phone_site });
+
+    expect(engine.has_unsent_changes(desktop, phone_site)).toBe(false);
+    push(desktop, laptop);
+    expect(rows(laptop, "SELECT id, name FROM lists")).toEqual([{ id: "l1", name: "Legs" }]);
+  });
+
+  it("makes another copy match this one after a restore, removing rows only the other had", () => {
+    const phone = open_device();
+    const desktop = open_device();
+    phone.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
+    push(phone, desktop);
+    desktop.exec("UPDATE lists SET name = 'Later' WHERE id = 'l1'; INSERT INTO lists VALUES ('l2', 'Arms')");
+    push(desktop, phone);
+    phone.exec("UPDATE lists SET name = 'Legs' WHERE id = 'l1'; DELETE FROM lists WHERE id = 'l2'");
+
+    engine.forget_history(phone);
+    const desktop_site = engine.read_state(desktop).site;
+    expect(engine.needs_claim(phone, desktop_site)).toBe(true);
+    engine.claim_everything(phone, engine.collect_snapshot(desktop).changes);
+    engine.write_peer(phone, desktop_site, { claimed: engine.read_state(phone).claim_generation, sent_seq: 0 });
+    push(phone, desktop);
+
+    expect(engine.needs_claim(phone, desktop_site)).toBe(false);
+    expect(rows(desktop, "SELECT id, name FROM lists ORDER BY id")).toEqual([{ id: "l1", name: "Legs" }]);
+  });
+
+  it("gives a database first opened by another device fresh ids and forgets its peers", () => {
+    const phone = open_device();
+    engine.claim_for_device(phone, "PHONE");
+    engine.write_peer(phone, "DESKTOP", { sent_seq: 5 });
+    const before = engine.read_state(phone);
+
+    engine.claim_for_device(phone, "PHONE");
+    expect(engine.read_state(phone).site).toBe(before.site);
+    engine.claim_for_device(phone, "COPY");
+    expect(engine.read_state(phone).site).not.toBe(before.site);
+    expect(engine.read_peer(phone, "DESKTOP").sent_seq).toBe(0);
+    engine.remove_peer(phone, "DESKTOP");
+  });
+
+  it("adds the peer columns to a database made before peers synced", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`CREATE TABLE sync_state (id INTEGER PRIMARY KEY CHECK (id = 1), site TEXT NOT NULL, generation TEXT NOT NULL,
+      server_generation TEXT NOT NULL DEFAULT '', last_seq INTEGER NOT NULL DEFAULT 0, pushed_seq INTEGER NOT NULL DEFAULT 0,
+      pulled_seq INTEGER NOT NULL DEFAULT 0, is_applying INTEGER NOT NULL DEFAULT 0)`);
+    migrate(database, ["CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL)", "CREATE TABLE items (id TEXT PRIMARY KEY)", "CREATE TABLE settings (key TEXT PRIMARY KEY)"]);
+    engine.install(database);
+    expect(engine.read_state(database)).toMatchObject({ device: "", claim_generation: "" });
   });
 
   it("does not stamp changes it applies from elsewhere as its own", () => {
@@ -114,7 +177,7 @@ describe("sync engine", () => {
     const desktop = open_device();
     phone.exec("INSERT INTO lists VALUES ('l1', 'Legs')");
     push(phone, desktop);
-    expect(engine.has_unpushed_changes(desktop)).toBe(false);
+    expect(engine.count_unsent_rows(desktop, ["ANY"])).toBe(0);
   });
 });
 
@@ -129,9 +192,7 @@ function open_map_device(): SqlDatabase {
 }
 
 function push_map(from: SqlDatabase, to: SqlDatabase): number {
-  const outgoing = map_engine.collect_unpushed_changes(from);
-  map_engine.write_state(from, { pushed_seq: outgoing.up_to_seq });
-  return map_engine.apply_changes(to, outgoing.changes);
+  return push(from, to, map_engine);
 }
 
 function other_ids(database: SqlDatabase): unknown {
@@ -176,11 +237,15 @@ describe("sync engine map columns", () => {
     expect(other_ids(phone)).toEqual({ shelfdb: "9" });
   });
 
-  it("rebuilds a device's keys from a snapshot", () => {
+  it("removes a key only the other copy had when this copy claims it", () => {
     const phone = open_map_device();
     const desktop = open_map_device();
     phone.exec(`INSERT INTO games VALUES ('g1', 'Ori', '{"shelfdb":"7"}')`);
-    map_engine.replace_with_snapshot(desktop, map_engine.collect_snapshot(phone).changes);
+    push_map(phone, desktop);
+    desktop.exec(`UPDATE games SET other_ids = '{"shelfdb":"7","gamedb":"x1"}'`);
+
+    map_engine.claim_everything(phone, map_engine.collect_snapshot(desktop).changes);
+    push_map(phone, desktop);
     expect(other_ids(desktop)).toEqual({ shelfdb: "7" });
   });
 

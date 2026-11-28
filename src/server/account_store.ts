@@ -48,7 +48,7 @@ export interface Token {
   id: number;
   name: string;
   owner: string;
-  // A device's token may sync what only the user's own devices may change; a program's may not.
+  // A device's token may make what only the user may change; a program's may not.
   kind: TokenKind;
   // A read-only token can only make GET requests.
   read_only: boolean;

@@ -84,7 +84,7 @@ describe("drizzle", () => {
     engine.install(database);
 
     open_drizzle(database).insert(metrics).values({ id: "waist", name: "Waist" }).run();
-    expect(engine.collect_unpushed_changes(database).changes.map((change) => change.column).sort()).toEqual(["_exists", "id", "name"]);
+    expect(engine.collect_changes_since(database, 0, "").changes.map((change) => change.column).sort()).toEqual(["_exists", "id", "name"]);
   });
 
   it("gives the same typed queries for a connection each time, and its own to each connection", () => {

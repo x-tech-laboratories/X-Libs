@@ -42,7 +42,6 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - For X-Tasks: move its tray (`src/main/tray.ts`, `tray_menu.ts`) onto `electron/tray` and its `register_bridge_calls` (`src/server/app.ts`) onto `server/call_table`.
 - From X-Backups: fall back to a column id for an empty column label in web/tables.ts (DataTable throws on an empty label); Suggestions empty slot and source_delay_ms; FollowingOutput aria-label and tabIndex; guard extra paths such as /metrics; state badges, DurationBar and the live.ts client; an `extra` hook on register_error_replies.
 - From X-Media-Tracker: a TMDB client for any app showing film or TV details, such as X-Stream (`src/shared/library/tmdb.ts`); filter counts where each choice is narrowed by every other filter but its own, to pair with X-Music's facet pane (`facet_counts` in `src/shared/library/model.ts`); reading a picked file's text and saving text as a download, which X-Fitness hand-rolls too; `pick_list_dialog` that can untick a list and show lists under group headings, for collections; running an async step over a list a few at a time (`refresh_library` in `src/shared/library/store.ts`), as a `map_limited(items, limit, step)` beside X-Monitor's `Semaphore`.
-- From X-Media-Tracker's sync (2026-11-13): a relay mode for `sync_engine` and `sync_client`, so one server can be a device of another and pass on changes it took from its own devices; `collect_unpushed_changes` sends only the changes stamped with the device's own site, so today a server syncing to a server forwards only its own edits.
 - From X-Media-Tracker's Books (2026-11-15):
   - Move X-Fitness's hand-rolled `parse_csv` (`src/shared/workouts/liftosaur.ts`) and X-Tasks' `csv_field` onto the `csv` module.
   - Half stars for `web/react/rating` (a `step` of 0.5), so a 1 to 10 rating can show as five stars, as Hardcover and StoryGraph do; the Books page uses ten whole stars until then.
@@ -108,6 +107,11 @@ Every app signs in through `server/account_sign_in`, `server/account_store` and 
 - `server/password_sign_in` and `web/react/login`, the accounts-file sessions a restart forgets.
 - `server/login_page` and the one-secret half of `server/sign_in` (the login page, the cookie derived from the token and the bearer check). Keep `register_sign_in_guard` and `path_of`, which `account_sign_in` and X-Backups' `auth.ts` use.
 - Their README rows, the ones marked "For apps not yet on…". X-Monitor is the last app outside the shared accounts, and its TypeScript port should start on them rather than on these.
+
+## Peer-to-peer sync (next steps)
+
+- A phone that answers other devices too: a listener in `XLibsForegroundService` that hands each sealed call to the worker page's `sync_peer.answer`, so two phones pair without a desktop between them. Until then a phone only reaches out.
+- A QR code beside the pairing code in `SyncSettings`, so a phone scans the desktop's code instead of copying it.
 
 ## Unrelated, for the owner
 

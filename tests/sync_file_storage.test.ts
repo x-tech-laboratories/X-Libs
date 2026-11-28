@@ -1,52 +1,51 @@
-import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { file_sync_storage } from "../src/sync_file_storage.ts";
+import type { PeerRecord } from "../src/sync_protocol.ts";
+import { create_identity } from "../src/sync_seal.ts";
 
-const config = { server_url: "https://sync.example", token: "not-a-real-token" };
+const identity = create_identity();
+const other = create_identity();
+const peer: PeerRecord = { device: other.device, public_key: other.public_key, name: "Laptop", addresses: ["http://192.168.1.5:3920/"], updated_at: 1, removed: false };
 
 function folder(): string {
   return mkdtempSync(join(tmpdir(), "x-libs-sync-storage-"));
 }
 
 describe("file_sync_storage", () => {
-  it("reads null while there is no file, then what was written, in a file only its owner can read", () => {
-    const file = join(folder(), "profile", "sync.json");
-    const storage = file_sync_storage({ file, back_up_before_download: () => {} });
-    expect(storage.read_config()).toBeNull();
+  it("reads nothing while there is no file, then the keys and devices written, in a file only its owner can read", () => {
+    const file = join(folder(), "profile", "sync-peers.json");
+    const storage = file_sync_storage({ file, back_up_before_replace: () => {} });
+    expect(storage.read_identity()).toBeNull();
+    expect(storage.read_peers()).toEqual([]);
 
-    storage.write_config(config);
+    storage.write_identity(identity);
+    storage.write_peers([peer]);
 
-    expect(storage.read_config()).toEqual(config);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(config);
+    expect(storage.read_identity()).toEqual(identity);
+    expect(storage.read_peers()).toEqual([peer]);
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it("tightens a file left readable by others", () => {
-    const file = join(folder(), "sync.json");
-    writeFileSync(file, "{}");
+  it("tightens a file left readable by others, and reads a file of another shape as empty", () => {
+    const file = join(folder(), "sync-peers.json");
+    writeFileSync(file, JSON.stringify({ server_url: "https://old.example" }));
     chmodSync(file, 0o644);
+    const storage = file_sync_storage({ file, back_up_before_replace: () => {} });
+    expect(storage.read_identity()).toBeNull();
 
-    file_sync_storage({ file, back_up_before_download: () => {} }).write_config(config);
-
+    storage.write_peers([peer]);
     expect(statSync(file).mode & 0o777).toBe(0o600);
-  });
-
-  it("removes the file, and removing it again does nothing", () => {
-    const file = join(folder(), "sync.json");
-    const storage = file_sync_storage({ file, back_up_before_download: () => {} });
-    storage.write_config(config);
-
-    storage.remove_config();
-    expect(storage.read_config()).toBeNull();
-    expect(() => storage.remove_config()).not.toThrow();
+    writeFileSync(file, "not json");
+    expect(storage.read_peers()).toEqual([]);
   });
 
   it("hands on the backup it was given", async () => {
     const back_up = vi.fn(async () => {});
-    await file_sync_storage({ file: join(folder(), "sync.json"), back_up_before_download: back_up }).back_up_before_download();
+    await file_sync_storage({ file: join(folder(), "sync-peers.json"), back_up_before_replace: back_up }).back_up_before_replace();
     expect(back_up).toHaveBeenCalledTimes(1);
   });
 });

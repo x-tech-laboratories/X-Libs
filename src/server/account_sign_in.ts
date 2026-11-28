@@ -307,7 +307,7 @@ export async function register_accounts(app: FastifyInstance, options: AccountSi
         return reply.code(429).header("retry-after", String(retry_after_seconds)).send({ error: too_many_tries_text, code_needed: true });
       }
       if (user === null) return reply.code(401).send({ error: code ? "That code does not match." : "Enter the code from your authenticator app.", code_needed: true });
-      // A device, such as the phone app syncing with this server, gets a token of its own in place of a cookie.
+      // A device, such as the phone app connecting to this daemon, gets a token of its own in place of a cookie.
       if (typeof body.device === "string" && body.device.trim() !== "") {
         if (lacks_second_factor(user)) return reply.code(403).send({ error: "Set up a second factor on the page before signing in a device." });
         return reply.code(201).send(accounts.create_token(user.name, { name: body.device, read_only: false, kind: "device" }));
