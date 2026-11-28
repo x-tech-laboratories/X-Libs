@@ -1,0 +1,8 @@
+{
+  "extends": "./base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2024"],
+    "types": ["node"]
+  }
+}
