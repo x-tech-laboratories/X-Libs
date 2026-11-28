@@ -126,6 +126,8 @@ export function run_desktop(app: App, electron: ElectronLike, options: DesktopOp
       void apply_window_settings().catch(() => undefined);
     },
     on_sync_status: (status) => app.bridges.events.emit(windows(), "sync_status", status),
+    // The app's own events, such as a reply as it is written, go to every window by name.
+    on_event: (event, data) => app.bridges.events.emit(windows(), "app_event", { event, data: data === "" ? null : JSON.parse(data) }),
     on_switch: () => {
       for (const window of windows()) window.webContents.reload();
     },

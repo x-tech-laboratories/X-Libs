@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { build_server, call_args, run_server, type RunningServer } from "../src/app/server.ts";
+import type { HostContext } from "../src/app/services.ts";
 import { AccountStore } from "../src/server/account_store.ts";
 import { EventStream } from "../src/server/events.ts";
 import { hash_password } from "../src/server/passwords.ts";
@@ -246,5 +247,34 @@ describe("run_server", { timeout: 30_000 }, () => {
 
     expect(listed.statusCode).toBe(200);
     expect(readdirSync(join(folder, "backups")).length).toBeGreaterThan(0);
+  });
+
+  it("runs the app's services with the config's plugins folder, its declarations and named events, and stops them first", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "x-libs-app-services-"));
+    const config = join(folder, "config.json");
+    writeFileSync(config, JSON.stringify({ database: join(folder, "data", "sample.db"), backups_folder: join(folder, "backups"), plugins_folder: join(folder, "plugins"), extra: "kept" }));
+    const password_file = join(folder, "password.hash");
+    writeFileSync(password_file, `admin:${hash_password(test_password)}\n`);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    let context: HostContext | null = null;
+    const stopped = vi.fn();
+
+    running = await run_server(sample_app, {
+      web_folder: pathToFileURL(join(folder, "web")),
+      argv: ["--port", String(await free_port()), "--host", "127.0.0.1"],
+      env: { X_SAMPLE_CONFIG: config, X_SAMPLE_PASSWORD_HASH_FILE: password_file, X_SAMPLE_DECLARED_FILE: "" },
+      services: (given) => {
+        context = given;
+        given.side_database("index");
+        return { stop: () => void stopped(given.database().prepare("SELECT 1 AS open").get()) };
+      },
+    });
+    await running.stop();
+    running = null;
+
+    expect(context).toMatchObject({ kind: "server", plugins_folder: join(folder, "plugins"), declared_file: "", config: { extra: "kept" } });
+    expect(context!.device_name).toMatch(/^X-Sample server on /);
+    expect(stopped).toHaveBeenCalledWith({ open: 1 });
+    expect(existsSync(join(folder, "data", "sample-index.db"))).toBe(true);
   });
 });

@@ -154,6 +154,30 @@ describe("app desktop window", { timeout: 30_000 }, () => {
     expect(refused).toMatchObject({ ok: false });
   });
 
+  it("hands every window the events the daemon's services emit, by name", async () => {
+    const database_path = join(profile, "dev-data", "sample.db");
+    let emit: ((event: string, data: unknown) => void) | null = null;
+    const daemon = await start_daemon(sample_app, {
+      database_path,
+      socket_path: daemon_socket_path({ app: "x-sample", data_file: database_path }),
+      on_stopped: () => undefined,
+      default_peer_port: 0,
+      services: (context) => ((emit = context.emit), { stop: () => undefined }),
+    });
+    quitters.push(() => void daemon?.shut_down());
+    const fake = fake_electron();
+    run(fake, fake_daemon(), { env: { X_SAMPLE_USER_DATA: "dev-data" } });
+    await until(() => FakeWindow.made.length > 0);
+
+    const sent = () => FakeWindow.made.flatMap((window) => window.webContents.send.mock.calls).filter(([, message]) => (message as { name: string }).name === "app_event");
+    for (let tries = 0; tries < 100 && sent().length === 0; tries++) {
+      emit!("reply", { text: "Hello" });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(sent()[0]).toEqual([sample_app.bridges.events.channel, { name: "app_event", payload: { event: "reply", data: { text: "Hello" } } }]);
+  });
+
   it("saves a desktop setting on the daemon and takes the login entry away once it no longer runs in the background", async () => {
     const fake = fake_electron();
     const settings = { keep_running_in_background: true, start_at_login: true };

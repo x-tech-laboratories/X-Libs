@@ -30,6 +30,7 @@ import type { SqlDatabase } from "../sql.ts";
 import { file_sync_storage } from "../sync_file_storage.ts";
 import { create_sync_peer, sync_device_methods, type SyncPeer } from "../sync_peer.ts";
 import type { App } from "./define.ts";
+import { declared_file_of, no_services, side_databases, type StartServices } from "./services.ts";
 
 // ── Database ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ export interface AppDatabase {
   // A backup made by hand, such as before a device's data replaces this one.
   back_up: () => Promise<void>;
   backup_methods: BackupMethods;
+  // What else is told around a restore, such as the app's services, set once they have started.
+  on_restore: (hooks: { before?: () => void; after?: () => void }) => void;
   close: () => void;
 }
 
@@ -48,16 +51,21 @@ export function open_app_database(app: App, path: string, backups_folder: string
   mkdirSync(dirname(path), { recursive: true });
   const existed = existsSync(path);
   let database = new DatabaseSync(path);
+  let restore_hooks: { before?: () => void; after?: () => void } = {};
 
   const kept = sqlite_backups({
     folder: () => (mkdirSync(backups_folder, { recursive: true }), backups_folder),
     naming: app.backup_naming,
     database: () => database,
     database_path: () => path,
-    close: () => database.close(),
+    close: () => {
+      restore_hooks.before?.();
+      database.close();
+    },
     open: () => {
       database = new DatabaseSync(path);
       start(database);
+      restore_hooks.after?.();
     },
     // The restored data no longer matches other devices', so sync asks again which copy wins.
     after_restore: (restored) => app.sync_engine.forget_history(restored),
@@ -78,6 +86,7 @@ export function open_app_database(app: App, path: string, backups_folder: string
     database: () => database,
     back_up: async () => void (await kept.create()),
     backup_methods: app.backup_methods(kept, () => database, () => void keeper.check()),
+    on_restore: (hooks) => void (restore_hooks = hooks),
     close: () => {
       keeper.stop();
       database.close();
@@ -207,6 +216,8 @@ export async function build_server(app: App, options: ServerOptions): Promise<Fa
 interface ServerConfig {
   database: string;
   backups_folder: string;
+  // Each subfolder a plugin the app's services load; none unless set.
+  plugins_folder?: string;
   // Where other devices reach this server's sync, such as "https://budget.example.org/api/"; none unless set.
   sync_address?: string;
 }
@@ -217,6 +228,8 @@ export interface RunServerOptions {
   // The command line and environment, which a test hands in.
   argv?: string[];
   env?: NodeJS.ProcessEnv;
+  // The app's own work beside its calls, started once the server listens and stopped before sync and the database.
+  services?: StartServices;
 }
 
 export interface RunningServer {
@@ -280,12 +293,32 @@ export async function run_server(app: App, options: RunServerOptions): Promise<R
   const server = await build_server(app, { database: opened.database, accounts, web_folder: server_config.web_folder, sync, changes, backup_methods: opened.backup_methods });
   const address = await server.listen({ host: server_config.host, port: server_config.port });
   sync.start();
+
+  const sides = side_databases(database_path);
+  const services = options.services
+    ? await options.services({
+        kind: "server",
+        database: opened.database,
+        profile: dirname(database_path),
+        device_name: `${app.name} server on ${hostname()}`,
+        config: config as unknown as Record<string, unknown>,
+        plugins_folder: config.plugins_folder ? resolve(config.plugins_folder) : null,
+        declared_file: declared_file_of(app, options.env ?? process.env),
+        announce: (client_id) => changes.announce_change(client_id),
+        emit: (event, data) => changes.send(JSON.stringify(data), { event }),
+        side_database: sides.open,
+        back_up: opened.back_up,
+      })
+    : no_services;
+  opened.on_restore({ before: () => services.before_restore?.(), after: () => services.after_restore?.() });
   console.info(`${app.name} is serving ${address}/`);
 
   let stopping: Promise<void> | null = null;
   const stop = (): Promise<void> =>
-    (stopping ??= server.close().then(() => {
+    (stopping ??= server.close().then(async () => {
+      await services.stop();
       sync.stop();
+      sides.close_all();
       opened.close();
       accounts_database.close();
     }));

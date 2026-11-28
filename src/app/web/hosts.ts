@@ -25,11 +25,24 @@ const events_path = "api/events";
 const client_id_header = "x-client-id";
 const reconnect_delay_ms = 5000;
 
+// The app's own events the page listens for, by name, each with its listeners.
+type NamedListeners = Map<string, Set<(data: unknown) => void>>;
+
 // A greeting after the first means the stream reconnected and may have missed changes, so the page reloads too.
-function follow_changes(on_change: () => void, on_client_id: (client_id: string) => void): void {
+// Returns how to listen for one of the app's own events on the stream as it is now and after every reconnect.
+function follow_changes(on_change: () => void, on_client_id: (client_id: string) => void, named: NamedListeners): (event: string) => void {
   let has_connected = false;
+  let current: EventSource | null = null;
+  const listen = (events: EventSource, event: string): void =>
+    events.addEventListener(event, (message) => {
+      const text = (message as MessageEvent<string>).data;
+      const data: unknown = text === "" ? null : JSON.parse(text);
+      for (const listener of named.get(event) ?? []) listener(data);
+    });
   const connect = (): void => {
     const events = new EventSource(events_path);
+    current = events;
+    for (const event of named.keys()) listen(events, event);
     events.addEventListener("hello", (event) => {
       on_client_id((event as MessageEvent<string>).data);
       if (has_connected) on_change();
@@ -42,6 +55,9 @@ function follow_changes(on_change: () => void, on_client_id: (client_id: string)
     });
   };
   connect();
+  return (event) => {
+    if (current) listen(current, event);
+  };
 }
 
 export function web_api(app: Pick<App, "bridges">): PageApi {
@@ -62,11 +78,13 @@ export function web_api(app: Pick<App, "bridges">): PageApi {
   }
 
   const listeners = new Set<() => void>();
-  follow_changes(
+  const named: NamedListeners = new Map();
+  const listen_for = follow_changes(
     () => {
       for (const listener of listeners) listener();
     },
     (given) => (client_id = given),
+    named,
   );
   const { bridges } = app;
   return {
@@ -78,6 +96,15 @@ export function web_api(app: Pick<App, "bridges">): PageApi {
     on_change: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    on_event: (event, listener) => {
+      let kept = named.get(event);
+      if (!kept) {
+        named.set(event, (kept = new Set()));
+        listen_for(event);
+      }
+      kept.add(listener);
+      return () => void kept.delete(listener);
     },
   };
 }
@@ -106,6 +133,7 @@ export async function desktop_api(app: Pick<App, "bridges">): Promise<PageApi> {
     connections,
     desktop: exposed[bridges.desktop.api_name] as Client<DesktopMethods>,
     on_change: (listener) => events.on("changed", listener),
+    on_event: (event, listener) => events.on("app_event", (sent) => sent.event === event && listener(sent.data)),
   };
 }
 

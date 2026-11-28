@@ -72,4 +72,6 @@ export interface PageApi<Methods extends Record<keyof Methods, (...args: never[]
   desktop?: Client<DesktopMethods>;
   // Runs whenever the data changed somewhere else; returns the function that stops listening.
   on_change: (listener: () => void) => () => void;
+  // Runs whenever the app's services emit the named event, with its data; unset where no services run, as on a phone.
+  on_event?: (event: string, listener: (data: unknown) => void) => () => void;
 }

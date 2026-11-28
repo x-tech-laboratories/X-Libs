@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { start_daemon, type Daemon, type DaemonOptions } from "../src/app/daemon.ts";
+import type { HostContext } from "../src/app/services.ts";
 import { call_daemon, follow_daemon_events, is_answering } from "../src/local_daemon.ts";
 import { sample_app } from "./app/sample_app.ts";
 
@@ -49,6 +50,34 @@ describe("app daemon", { timeout: 30_000 }, () => {
     await call_daemon(socket_path, "/api/call/add_note", ["Groceries"]);
 
     expect(await call_daemon(socket_path, "/api/call/list_notes", [])).toEqual([expect.objectContaining({ title: "Groceries" })]);
+  });
+
+  it("runs the app's services on the open database, around a restore, and stops them before the database closes", async () => {
+    const seen: string[] = [];
+    let context: HostContext | null = null;
+    const daemon = await start({
+      declared_file: join(folder, "declared.json"),
+      services: (given) => {
+        context = given;
+        seen.push(`start ${given.kind}`);
+        given.side_database("index").exec("CREATE TABLE IF NOT EXISTS words (word TEXT)");
+        return {
+          before_restore: () => void seen.push("before restore"),
+          after_restore: () => void seen.push("after restore"),
+          stop: () => void seen.push(`stop with ${(given.database().prepare("SELECT count(*) AS n FROM notes").get() as { n: number }).n} notes`),
+        };
+      },
+    });
+    await call_daemon(socket_path, "/api/call/add_note", ["Groceries"]);
+    await call_daemon(socket_path, "/api/backups/create_backup", []);
+    const backup = ((await call_daemon(socket_path, "/api/backups/list_backups", [])) as { name: string }[]).find((each) => !each.name.endsWith("-auto.db"));
+    await call_daemon(socket_path, "/api/backups/restore_backup", [backup!.name]);
+
+    await daemon.shut_down();
+
+    expect(context).toMatchObject({ kind: "desktop", profile: folder, plugins_folder: join(folder, "plugins"), declared_file: join(folder, "declared.json"), config: {} });
+    expect(seen).toEqual(["start desktop", "before restore", "after restore", "stop with 1 notes"]);
+    expect(existsSync(join(folder, "sample-index.db"))).toBe(true);
   });
 
   it("answers this computer's own tables: sync, letting devices connect, backups, certificates and its settings", async () => {

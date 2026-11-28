@@ -19,8 +19,8 @@ afterEach(() => {
 });
 
 // Puts what the preload would expose on the window, the connections answering with the daemon in use.
-function expose(current: string): { changed: () => void } {
-  let listener = (): void => {};
+function expose(current: string): { changed: () => void; send: (name: string, payload: unknown) => void } {
+  const listeners = new Map<string, (payload?: unknown) => void>();
   const exposed: Record<string, unknown> = {
     [bridges.calls.api_name]: { list_notes: vi.fn() },
     [bridges.device.api_name]: { get_sync_status: vi.fn() },
@@ -29,11 +29,11 @@ function expose(current: string): { changed: () => void } {
     [bridges.certificates.api_name]: { list_trusted_certificates: vi.fn() },
     [bridges.desktop.api_name]: { get_desktop_settings: vi.fn() },
     [bridges.connections.api_name]: { list_connections: vi.fn(async () => ({ connections: [], current })) },
-    [bridges.events.api_name]: { on: (_event: string, given: () => void) => ((listener = given), () => undefined) },
+    [bridges.events.api_name]: { on: (event: string, given: (payload?: unknown) => void) => (listeners.set(event, given), () => undefined) },
   };
   Object.assign(window, exposed);
   window_keys.push(...Object.keys(exposed));
-  return { changed: () => listener() };
+  return { changed: () => listeners.get("changed")?.(), send: (name, payload) => listeners.get(name)?.(payload) };
 }
 
 class FakeEventSource {
@@ -92,6 +92,18 @@ describe("desktop host", () => {
     expect(api.peer_listening).toBeUndefined();
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it("hands the page the app's own events by name", async () => {
+    const { send } = expose("local");
+    const listener = vi.fn();
+
+    const api = await desktop_api(sample_app);
+    api.on_event!("reply", listener);
+    send("app_event", { event: "other", data: 1 });
+    send("app_event", { event: "reply", data: { text: "Hello" } });
+
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ text: "Hello" });
+  });
 });
 
 // ============================================================================
@@ -117,6 +129,27 @@ describe("web host", () => {
     expect(notes).toEqual([{ id: "note-1" }]);
     expect(fetch).toHaveBeenCalledWith("api/call/list_notes", expect.objectContaining({ headers: expect.objectContaining({ "x-client-id": "client-1" }) }));
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("hears the app's own events by name, on the stream now and after it reconnects", async () => {
+    vi.useFakeTimers();
+    FakeEventSource.made = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const listener = vi.fn();
+
+    const api = web_api(sample_app);
+    const stop = api.on_event!("reply", listener);
+    const first = FakeEventSource.made[0]!;
+    first.emit("reply", JSON.stringify({ text: "Hello" }));
+    first.readyState = FakeEventSource.CLOSED;
+    first.emit("error");
+    vi.advanceTimersByTime(5000);
+    FakeEventSource.made[1]!.emit("reply", JSON.stringify({ text: "Again" }));
+    stop();
+    FakeEventSource.made[1]!.emit("reply", JSON.stringify({ text: "Unheard" }));
+
+    expect(listener.mock.calls).toEqual([[{ text: "Hello" }], [{ text: "Again" }]]);
+    vi.useRealTimers();
   });
 
   it("follows the server's event stream again once the browser gave it up", async () => {
