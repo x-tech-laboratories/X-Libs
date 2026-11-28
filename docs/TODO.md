@@ -14,6 +14,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 
 ## Candidates for the next X-Libs and Halon round
 
+- From X-Budget, X-Media-Tracker, X-Fitness, X-Dev, CODEX and X-Control: each has its own `src/shared/desktop.ts` holding the desktop app's settings (keep running in the background, start at login, and a tray icon where the app has one), `read_desktop_settings`, `DesktopMethods`/`DaemonMethods`, the daemon's `/daemon` call table, and a Desktop app section in Settings; one `desktop_settings` module with a `web/react` section would serve them all, beside `daemon_router`.
 - From X-Music: the page-view tabs clipped under the header on first open.
 - From X-Music: playlist files (`src/shared/import/playlist_files.ts`): M3U/M3U8, PLS and XSPF read into paths (relative entries joined to the playlist's folder, `file://` URLs decoded) and written from entries with title, artist and length; X-Stream or any app with lists of media could share it.
 - For X-Tasks: move its phone notices (`src/web/android/phone_notices.ts`) onto `phone_notices` and the daemon's due reminders (`src/daemon/notices.ts`) onto `agent/scheduled_notices`.
