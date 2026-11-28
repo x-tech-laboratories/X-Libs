@@ -203,6 +203,8 @@ export interface PeerListening {
   on: boolean;
   port: number;
   addresses: string[];
+  // The SHA-256 fingerprint of the certificate it answers with, for the other device's user to check; empty before it first listened.
+  fingerprint: string;
   // Why the port could not be opened, such as another program holding it; empty when it opened.
   error: string;
 }

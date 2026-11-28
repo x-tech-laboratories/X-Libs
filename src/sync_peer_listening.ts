@@ -1,11 +1,15 @@
-// A desktop daemon's "Let other devices connect": off until the user turns it on, then a port of its own that paired
-// devices reach it on, announced on the local network. The setting belongs to this computer, so it is kept in a file
-// beside the database, never synced. Paired devices are found on the network either way.
+// A desktop daemon's "Let other devices connect": off until the user turns it on, then an https port of its own that
+// paired devices reach it on, announced on the local network, with a self-signed certificate made once, whose fingerprint
+// the Sync section shows so the other device's user can check it before trusting it. The setting belongs to this
+// computer, so it is kept in a file beside the database, never synced. Paired devices are found on the network either way.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { networkInterfaces } from "node:os";
+import { dirname, join } from "node:path";
+
+import { read_or_make_peer_certificate } from "./peer_certificate.ts";
 
 import { listen_for_peers, type PeerListener } from "./server/sync_peer_routes.ts";
 import type { SyncPeer } from "./sync_peer.ts";
@@ -21,9 +25,12 @@ export interface PeerListeningOptions {
   // The JSON file, such as "<profile>/sync-listening.json".
   file: string;
   default_port: number;
+  // The JSON file the https certificate is kept in, "sync-certificate.json" beside the setting's file unless set.
+  certificate_file?: string;
   // A test hands in its own; the real ones unless set.
   listen?: typeof listen_for_peers;
   discover?: typeof discover_peers;
+  certificate?: typeof read_or_make_peer_certificate;
 }
 
 interface SavedListening {
@@ -38,9 +45,17 @@ export type PeerListeningControl = ReturnType<typeof keep_listening_for_peers>;
 export function keep_listening_for_peers(options: PeerListeningOptions) {
   const listen = options.listen ?? listen_for_peers;
   const discover = options.discover ?? discover_peers;
+  const certificate = options.certificate ?? read_or_make_peer_certificate;
+  const certificate_file = options.certificate_file ?? join(dirname(options.file), "sync-certificate.json");
   let listener: PeerListener | null = null;
+  let fingerprint = "";
   let discovery: PeerDiscovery | null = null;
   let error = "";
+
+  // The computer's own network addresses, for the certificate to cover.
+  function local_ip_addresses(): string[] {
+    return Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).filter((entry) => !entry.internal).map((entry) => entry.address));
+  }
 
   // A missing or damaged file reads as off on the default port.
   function read_saved(): SavedListening {
@@ -67,7 +82,9 @@ export function keep_listening_for_peers(options: PeerListeningOptions) {
     error = "";
     if (saved.on) {
       try {
-        listener = await listen({ peer: options.peer(), port: saved.port });
+        const own = await certificate(certificate_file, `${options.app} on this computer`, local_ip_addresses());
+        fingerprint = own.fingerprint;
+        listener = await listen({ peer: options.peer(), port: saved.port, https: { cert: own.cert, key: own.key } });
       } catch (failure) {
         error = failure instanceof Error ? failure.message : String(failure);
       }
@@ -81,7 +98,7 @@ export function keep_listening_for_peers(options: PeerListeningOptions) {
 
   function get_peer_listening(): PeerListening {
     const saved = read_saved();
-    return { ...saved, addresses: addresses(), error };
+    return { ...saved, addresses: addresses(), fingerprint, error };
   }
 
   const methods: PeerListeningMethods = {

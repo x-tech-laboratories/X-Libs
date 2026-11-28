@@ -127,22 +127,49 @@ test("the sidebar button says sync is not set up while off and opens the setting
 });
 
 test("turns letting other devices connect on, shows where they reach it, moves the port, and says why a port would not open", async () => {
-  let state: PeerListening = { on: false, port: 3920, addresses: [], error: "" };
+  let state: PeerListening = { on: false, port: 3920, addresses: [], fingerprint: "", error: "" };
   const calls: [boolean, number | undefined][] = [];
   const listening: PeerListeningClient = {
     get_peer_listening: async () => state,
     set_peer_listening: async (on, port) => {
       calls.push([on, port]);
-      state = port === 80 ? { on, port, addresses: [], error: "permission denied" } : { on, port: port ?? 3920, addresses: on ? [`http://192.168.1.5:${port}/`] : [], error: "" };
+      state = port === 80 ? { on, port, addresses: [], fingerprint: "AB:CD", error: "permission denied" } : { on, port: port ?? 3920, addresses: on ? [`https://192.168.1.5:${port}/`] : [], fingerprint: "AB:CD", error: "" };
       return state;
     },
   };
   render(<><PeerListeningSettings listening={listening} /><Toasts /></>);
 
   fireEvent.click(await screen.findByRole("switch", { name: "Let other devices connect" }));
-  await waitFor(() => screen.getByText("Paired devices reach this one at http://192.168.1.5:3920/."));
+  await waitFor(() => screen.getByText("Paired devices reach this one at https://192.168.1.5:3920/. Its certificate's fingerprint is AB:CD."));
   fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "80" } });
   fireEvent.blur(screen.getByRole("spinbutton"));
   await waitFor(() => screen.getByText("Other devices cannot connect: permission denied"));
   expect(calls).toEqual([[true, 3920], [true, 80]]);
+});
+
+test("asks to review and trust a desktop's self-signed certificate when pairing fails over it, then pairs again", async () => {
+  let trusted = false;
+  let tries = 0;
+  const code = `x-sync:${btoa(JSON.stringify({ app: "x-test", addresses: ["https://192.168.1.5:3920/"] })).replace(/=+$/, "")}`;
+  const device = device_with(() => off, {
+    pair_device: async () => {
+      tries += 1;
+      if (!trusted) throw new Error("Desktop cannot be reached: fetch failed: self-signed certificate");
+      return { ...off, state: "idle", peers: [desktop] };
+    },
+  });
+  const leaf = { subject: "CN=x-test on this computer", issuer: "CN=x-test on this computer", alt_names: [], valid_from: "2026-01-01T00:00:00Z", valid_to: "2036-01-01T00:00:00Z", fingerprint: "AB:CD", serial_number: "01", pem: "" };
+  const certificates: CertificateClient = {
+    check_certificate: async () => ({ origin: "https://192.168.1.5:3920", host: "192.168.1.5", problems: ["self_signed"], reason: "DEPTH_ZERO_SELF_SIGNED_CERT", chain: [leaf], trusted }),
+    trust_certificate: async () => ((trusted = true), []),
+    list_trusted_certificates: async () => [],
+    forget_certificate: async () => [],
+  };
+  render(<><SyncSettings device={device} certificates={certificates} /><Dialogs /><Toasts /></>);
+
+  fireEvent.change(await screen.findByPlaceholderText("x-sync:…"), { target: { value: code } });
+  fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+  expect(await screen.findByText("AB:CD")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Trust this certificate" }));
+  await waitFor(() => expect(tries).toBe(2));
 });
