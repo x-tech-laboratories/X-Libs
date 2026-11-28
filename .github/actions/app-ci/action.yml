@@ -17,8 +17,8 @@ runs:
       shell: bash
     - run: npm run coverage
       shell: bash
-    # A run that raised the floor fails here until the new floor is committed.
-    - run: git diff --exit-code vitest.config.ts
+    # A run that raised the coverage floor, or changed any other file, fails here until the change is committed.
+    - run: git diff --exit-code
       shell: bash
     - run: npm run lint
       shell: bash

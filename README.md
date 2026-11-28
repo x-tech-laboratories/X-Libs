@@ -209,10 +209,11 @@ A change an app needs in the base goes into the base, so no app keeps a copy of 
 
 The rest of an app's files are short calls into X-App too:
 
-- **Configs**: `tsconfig/tsconfig.<target>.json` extends its `tsconfig.base.json` and
+- **Configs** sit in the app's `config/` folder: `tsconfig.<target>.json` extends `tsconfig.base.json` and
   `@x-tech-laboratories/x-app/config/tsconfig/<target>.json`; `vite.config.ts`, `electron.vite.config.ts` and
   `vite.android.config.ts` export a preset from `config/vite` or `config/electron_vite`; `vitest.config.ts` merges
-  `vitest_config()` with the app's coverage floor.
+  `vitest_config()` with the app's coverage floor. The npm scripts pass each with `-c` or `--config`; only
+  `tsconfig.json` (its references), `package.json` and `capacitor.config.json` stay at the root, where the tools look.
 - **Nix**: X-App's flake has a `lib` with `package`, `desktop_package`, `module`, `shell` and `android_shell`, each
   taking the app's package set and its `nix/app.nix` (name, display name, variables' prefix, port, database file and
   words); the app's `nix/flake.nix` takes `github:x-tech-laboratories/X-App` as an input and calls them.
