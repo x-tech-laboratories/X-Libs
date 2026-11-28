@@ -5,6 +5,8 @@
 import react from "@vitejs/plugin-react";
 import type { Plugin, UserConfig } from "vite";
 
+import { capacitor_stand_in } from "./capacitor.ts";
+
 // ── Web ──────────────────────────────────────────────────────────────────────
 
 export interface WebViteOptions {
@@ -19,9 +21,10 @@ export function web_vite_config({ port }: WebViteOptions): UserConfig {
   return {
     root: "src/web",
     base: "./",
-    plugins: [react()],
+    plugins: [react(), capacitor_stand_in()],
     build: { outDir: "../../out/web", emptyOutDir: true },
-    server: { proxy: { "/api": server, "/login": server } },
+    // With the slash, so the page's own src/web/api.ts is served by Vite rather than sent to the server.
+    server: { proxy: { "/api/": server, "/login": server } },
   };
 }
 
