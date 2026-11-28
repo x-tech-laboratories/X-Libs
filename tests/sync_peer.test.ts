@@ -7,7 +7,7 @@ import { create_sync_engine } from "../src/sync_engine.ts";
 import { put_file, type SyncFileStore } from "../src/sync_files.ts";
 import { create_sync_peer, normalise_address, sync_device_methods, type SyncPeer, type SyncPeerOptions } from "../src/sync_peer.ts";
 import { peer_device_header, peer_key_header, type PeerIdentity, type PeerRecord, type PeerStorage } from "../src/sync_protocol.ts";
-import { encode_pairing_offer, seal } from "../src/sync_seal.ts";
+import { encode_pairing_offer, open_sealed, seal } from "../src/sync_seal.ts";
 
 // ── Devices ──────────────────────────────────────────────────────────────────
 
@@ -218,6 +218,30 @@ describe("sync peer calls", () => {
     const stranger_keys = stranger.storage.read_identity()!;
     const not_pairing = seal({ to: desktop.peer.device, at: Date.now(), call: "snapshot", args: {} }, undefined, desktop_key, stranger_keys.secret_key);
     expect((await desktop.peer.answer({ device: stranger.peer.device, key: stranger_keys.public_key, body: not_pairing.body })).status).toBe(403);
+  });
+
+  it("refuses calls it cannot carry out in plain words, and answers a wait with nothing changed", async () => {
+    const network = new Network();
+    const desktop = device(network, "Desktop", "http://desktop.lan:3920/");
+    const phone = device(network, "Phone", null);
+    await phone.peer.pair_device(desktop.peer.create_pairing_code().code);
+    const phone_keys = phone.storage.read_identity()!;
+    const desktop_key = desktop.storage.read_identity()!.public_key;
+
+    async function ask(call: string, args: unknown): Promise<unknown> {
+      const sealed = seal({ to: desktop.peer.device, at: Date.now(), call, args }, undefined, desktop_key, phone_keys.secret_key);
+      const reply = await desktop.peer.answer({ device: phone.peer.device, body: sealed.body });
+      return open_sealed(reply.body as Uint8Array, desktop_key, phone_keys.secret_key)?.json;
+    }
+
+    expect(await ask("exchange", { changes: "none" })).toMatchObject({ error: "send site, generation, cursor and a list of changes" });
+    expect(await ask("files_missing", { names: ["../db"] })).toMatchObject({ error: "send the names of files as sha256 hex" });
+    expect(await ask("file_get", { name: "nope" })).toMatchObject({ error: "a file's name is the sha256 of its bytes" });
+    expect(await ask("file_get", { name: "0".repeat(64) })).toMatchObject({ result: { found: false } });
+    expect(await ask("file_put", { name: "bad" })).toMatchObject({ error: "a file's name is the sha256 of its bytes" });
+    expect(await ask("pair", { secret: "wrong", me: {} })).toMatchObject({ error: expect.stringContaining("ran out") });
+    const state = engine.read_state(desktop.database);
+    expect(await ask("wait", { cursor: { generation: state.generation, seq: state.last_seq }, wait_ms: 0 })).toMatchObject({ result: { changed: false } });
   });
 
   it("makes every device match a restored copy once, each keeping a copy first", async () => {
