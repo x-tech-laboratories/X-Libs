@@ -103,6 +103,8 @@ export interface AppOptions<Features extends readonly Feature[]> {
   page_only_refusal?: string;
   // The start of the server's access tokens, such as "cx" for cx_…; "xt" when not given.
   token_prefix?: string;
+  // How many days of changes the history keeps until the user chooses; 365 unless set.
+  history_days?: number;
   // The desktop app's own switches beside the base's, kept on the computer, such as which notifications it shows.
   desktop_settings?: Readonly<Record<string, DesktopSettingSpec>>;
   // The scheme of the app's links, such as "x-notes" for x-notes://note/<id>, which open the desktop app on that page.
@@ -157,7 +159,8 @@ export function define_app<const Features extends readonly Feature[]>(options: A
 
   // ── Settings ─────────────────────────────────────────────────────────
 
-  const settings_store: SettingsStore = create_settings_store([base_settings, options.settings ?? {}, ...options.features.map((feature) => feature.settings ?? {})], {
+  const own_base_settings = options.history_days === undefined ? base_settings : { ...base_settings, history_days: { ...base_settings.history_days, default: options.history_days } };
+  const settings_store: SettingsStore = create_settings_store([own_base_settings, options.settings ?? {}, ...options.features.map((feature) => feature.settings ?? {})], {
     app: { id: options.id, name: options.name },
     ...(options.settings_descriptions ? { descriptions: options.settings_descriptions } : {}),
     ...(options.setting_key_example ? { key_example: options.setting_key_example } : {}),
@@ -194,6 +197,8 @@ export function define_app<const Features extends readonly Feature[]>(options: A
     for (const history of histories) history.install(database);
     sync_engine.install(database);
     for (const feature of features) feature.on_open?.(database);
+    // What opening changed, such as rows an upgrade moved, is kept as a change made on this device.
+    for (const history of histories) history.record(database);
     prune_history(database);
   }
 

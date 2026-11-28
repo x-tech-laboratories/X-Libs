@@ -53,7 +53,11 @@ export const notes_feature = define_feature({
   },
   settings: { "notes.sort": { default: "title" }, "notes.locked": { default: false, user_only: true } },
   histories: [note_history],
-  on_open: () => void notes_hooks.opened++,
+  // A note named "rename me" is renamed on opening, as an upgrade might change rows.
+  on_open: (database) => {
+    notes_hooks.opened++;
+    database.prepare("UPDATE notes SET title = 'Renamed on opening' WHERE title = 'rename me'").run();
+  },
   after_write: () => void notes_hooks.writes++,
 });
 
