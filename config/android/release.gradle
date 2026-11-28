@@ -1,0 +1,25 @@
+// X-App's release settings for an X-app's Android package, which x-app-android applies from android/app/build.gradle.
+// CI numbers each build and names it after its version tag, so the phone and Obtainium see it as an update, and signs
+// it when the release key is in the environment; a build without the key stays unsigned.
+android {
+    defaultConfig {
+        versionCode((System.getenv("ANDROID_VERSION_CODE") ?: "1") as Integer)
+        versionName System.getenv("ANDROID_VERSION_NAME") ?: "0.0.0-dev"
+    }
+    def keystore_file = System.getenv("ANDROID_KEYSTORE_FILE")
+    if (keystore_file) {
+        signingConfigs {
+            release {
+                storeFile file(keystore_file)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}

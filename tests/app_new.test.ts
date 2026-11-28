@@ -33,6 +33,9 @@ describe("x-app-new", () => {
     expect(files["config/tsconfig.base.json"]).toContain("@x-tech-laboratories/x-app/config/tsconfig/base.json");
     expect(files["nix/flake.nix"]).toContain("x-app.lib.desktop_package pkgs app");
     expect(files[".github/workflows/ci.yml"]).toContain("x-tech-laboratories/X-App/.github/actions/app-ci@main");
+    expect(files[".github/workflows/ci.yml"]).toContain("x-tech-laboratories/X-App/.github/actions/app-android@main");
+    expect(manifest.scripts["build:android"]).toContain("x-app-android");
+    expect(files[".gitignore"]).toContain("android/");
   });
 
   it("leaves out what a web-only app has no use for", () => {
@@ -41,6 +44,7 @@ describe("x-app-new", () => {
     expect(Object.keys(files).filter((path) => /src\/(main|preload|daemon)|electron|android|capacitor/.test(path))).toEqual([]);
     expect(files["nix/flake.nix"]).not.toContain("desktop_package");
     expect(files[".github/workflows/ci.yml"]).toContain("targets: ./nix#default\n");
+    expect(files[".github/workflows/ci.yml"]).not.toContain("app-android");
     expect(JSON.parse(files["package.json"]!).devDependencies).not.toHaveProperty("electron");
   });
 
