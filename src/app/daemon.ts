@@ -19,6 +19,7 @@ import { file_sync_storage } from "../sync_file_storage.ts";
 import { create_sync_peer, sync_device_methods } from "../sync_peer.ts";
 import { keep_listening_for_peers } from "../sync_peer_listening.ts";
 import type { App } from "./define.ts";
+import { declared_file_of, no_services, side_databases, type HostServices, type StartServices } from "./services.ts";
 import { read_desktop_settings, type DaemonMethods, type DesktopSettings } from "./protocol.ts";
 import { call_body_limit, open_app_database, register_app_calls } from "./server.ts";
 
@@ -34,10 +35,14 @@ export interface DaemonOptions {
   unused_check_ms?: number;
   // The port other devices reach this computer's sync on once it lets them connect; the app's own unless set.
   default_peer_port?: number;
+  // The app's own work beside its calls, started once the daemon answers and stopped before sync and the database.
+  services?: StartServices;
+  // Where the declarations this computer's configuration makes are read from; /etc/<id>/declared.json unless set.
+  declared_file?: string;
 }
 
 export interface Daemon {
-  // Stops sync, the socket and the database, then runs on_stopped; a second call does nothing.
+  // Stops the app's services, sync, the socket and the database, then runs on_stopped; a second call does nothing.
   shut_down: () => Promise<void>;
 }
 
@@ -114,13 +119,17 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
 
   let stopping: Promise<void> | null = null;
   let unused_timer: ReturnType<typeof setInterval> | undefined;
+  const sides = side_databases(database_path);
+  let services: HostServices = no_services;
 
   function shut_down(): Promise<void> {
     stopping ??= (async () => {
       clearInterval(unused_timer);
+      await services.stop();
       sync.stop();
       await daemon.close();
       await listening.stop();
+      sides.close_all();
       opened.close();
       options.on_stopped();
     })();
@@ -140,6 +149,23 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
   await listening.start();
   sync.start();
 
+  if (options.services) {
+    services = await options.services({
+      kind: "desktop",
+      database: opened.database,
+      profile,
+      device_name: `${app.name} on ${hostname()}`,
+      config: {},
+      plugins_folder: join(profile, "plugins"),
+      declared_file: options.declared_file ?? `/etc/${app.id}/declared.json`,
+      announce: (client_id) => changes.announce_change(client_id),
+      emit: (event, data) => changes.send(JSON.stringify(data), { event }),
+      side_database: sides.open,
+      back_up: opened.back_up,
+    });
+    opened.on_restore({ before: () => services.before_restore?.(), after: () => services.after_restore?.() });
+  }
+
   // Without "Keep running in the background", the daemon stops a while after its last window has gone.
   let unused_since = Date.now();
   unused_timer = setInterval(() => {
@@ -154,7 +180,7 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
 
 // Starts the daemon on the database and socket the window names in <PREFIX>_DB and <PREFIX>_SOCKET, and ends the
 // process once it stops.
-export async function run_daemon(app: App, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export async function run_daemon(app: App, env: NodeJS.ProcessEnv = process.env, extra: { services?: StartServices } = {}): Promise<void> {
   const database_path = env[`${app.env_prefix}_DB`];
   if (!database_path) {
     console.error(`${app.id} daemon: ${app.env_prefix}_DB must name the database`);
@@ -164,7 +190,7 @@ export async function run_daemon(app: App, env: NodeJS.ProcessEnv = process.env)
   const socket_path = env[`${app.env_prefix}_SOCKET`] || daemon_socket_path({ app: app.id, data_file: database_path });
 
   try {
-    const daemon = await start_daemon(app, { database_path, socket_path, on_stopped: () => process.exit(0) });
+    const daemon = await start_daemon(app, { database_path, socket_path, on_stopped: () => process.exit(0), declared_file: declared_file_of(app, env), ...extra });
     // Another daemon on this database got there first, which is all that was asked for.
     if (!daemon) process.exit(0);
     console.log(`${app.id} daemon on ${socket_path}, using ${database_path}`);

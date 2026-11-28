@@ -128,8 +128,9 @@ export interface Restorable extends Backups {
   restore: (name: string) => Promise<void>;
 }
 
-// The events the desktop app's main process sends its pages: the data changed elsewhere, or sync's status moved.
-export type AppEvents = { changed: null; sync_status: SyncStatus };
+// The events the desktop app's main process sends its pages: the data changed elsewhere, sync's status moved, or one
+// of the app's own events its services emitted, by name.
+export type AppEvents = { changed: null; sync_status: SyncStatus; app_event: { event: string; data: unknown } };
 
 export interface AppBridges<Methods extends Record<keyof Methods, (...args: never[]) => unknown>> {
   calls: Bridge<Methods>;
