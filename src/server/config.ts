@@ -1,9 +1,11 @@
 // A server's settings from the command line and the environment: the address and port, the web folder, the app's own
 // options, and the secret browsers sign in with, read from a file or a variable. Without a secret the server may only
-// listen on this machine.
+// listen on this machine. A secret may also be printed by a command, such as a password manager's, so a setting names
+// the program and never holds the secret.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -87,6 +89,79 @@ export function read_secret_file(path: string): string {
   }
   if (secret.trim() === "") throw new Error(`The secret at ${path} is empty`);
   return secret.trim();
+}
+
+// ── Secret commands ──────────────────────────────────────────────────────────
+
+const secret_timeout_ms = 10_000;
+export const max_secret_chars = 1024;
+
+export type SecretReader = (command: string[]) => Promise<string>;
+
+export interface SecretCommandWords {
+  // What the command is called in a refusal, such as "API key command".
+  what?: string;
+  // What it prints, such as "key".
+  secret?: string;
+}
+
+// A command line split into words as a shell would, with single and double quotes and backslashes, but nothing expanded.
+export function command_words(line: string, words_for: SecretCommandWords = {}): string[] {
+  const words: string[] = [];
+  let word = "";
+  let has_word = false;
+  let quote: '"' | "'" | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]!;
+    if (quote === "'") {
+      if (char === "'") quote = null;
+      else word += char;
+    } else if (char === "\\" && index + 1 < line.length && (quote === null || /["\\$`]/.test(line[index + 1]!))) {
+      word += line[(index += 1)];
+      has_word = true;
+    } else if (quote === '"') {
+      if (char === '"') quote = null;
+      else word += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+      has_word = true;
+    } else if (/\s/.test(char)) {
+      if (has_word) words.push(word);
+      word = "";
+      has_word = false;
+    } else {
+      word += char;
+      has_word = true;
+    }
+  }
+  if (quote) throw new Error(`The ${words_for.what ?? "secret command"} has a quote that is never closed.`);
+  if (has_word) words.push(word);
+  return words;
+}
+
+// A reader of the first line a program prints, run without a shell; a failure, an empty line or an overlong one is
+// refused in words that never hold what it printed.
+export function secret_command_reader(words_for: SecretCommandWords = {}): SecretReader {
+  const what = words_for.what ?? "secret command";
+  const secret_word = words_for.secret ?? "secret";
+  return ([program, ...args]) =>
+    new Promise((resolve, reject) => {
+      if (!program) return reject(new Error(`The ${what} is empty.`));
+      execFile(program, args, { timeout: secret_timeout_ms, maxBuffer: max_secret_chars * 4, encoding: "utf8" }, (error, stdout) => {
+        if (error) return reject(new Error(`The ${what} ${program} failed${typeof error.code === "number" ? ` with exit code ${error.code}` : ""}.`));
+        const secret = stdout.split("\n")[0]!.replace(/\r$/, "");
+        if (!secret || secret.length > max_secret_chars) return reject(new Error(`The ${what} ${program} printed no usable ${secret_word}.`));
+        resolve(secret);
+      });
+    });
+}
+
+export const read_secret_command: SecretReader = secret_command_reader();
+
+// The secret a setting's command line prints, or "" when no command is set.
+export async function secret_from_command(command_line: string, read: SecretReader = read_secret_command, words_for: SecretCommandWords = {}): Promise<string> {
+  const words = command_words(command_line.trim(), words_for);
+  return words.length === 0 ? "" : read(words);
 }
 
 // ── Reading ──────────────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { useState } from "react";
 
-import { ComboField, Suggestions } from "../src/web/react/suggestions.tsx";
+import { ComboField, ListedField, Suggestions, type FieldListing } from "../src/web/react/suggestions.tsx";
 
 afterEach(cleanup);
 
@@ -158,4 +158,54 @@ test("a combo field told not to list on focus waits for typing", async () => {
   await settle();
 
   expect(names()).toEqual(["Snack"]);
+});
+
+// A model field as a settings row keeps it: the value held by the page, each choice written back.
+function ModelRow({ load, initial = "" }: { load: () => Promise<FieldListing>; initial?: string }) {
+  const [value, set_value] = useState(initial);
+  return (
+    <>
+      <ListedField label="Model" value={value} load={load} on_choose={set_value} placeholder="Any model" />
+      <output>{value || "none"}</output>
+    </>
+  );
+}
+
+const listed = async (): Promise<FieldListing> => ({
+  options: [
+    { value: "qwen3.6-35b-a3b", label: "qwen3.6-35b-a3b (loaded)" },
+    { value: "bonsai-2.5-27b", label: "bonsai-2.5-27b (not loaded)" },
+  ],
+});
+
+test("a listed field offers what its source lists, in its own words, and still takes a name typed", async () => {
+  const load = vi.fn(listed);
+  render(<ModelRow load={load} />);
+  expect(await screen.findByText("qwen3.6-35b-a3b (loaded), bonsai-2.5-27b (not loaded)")).toBeTruthy();
+  const field = screen.getByRole("combobox", { name: "Model" }) as HTMLInputElement;
+  expect(field.placeholder).toBe("Any model");
+  fireEvent.focus(field);
+  expect(names()).toEqual(["qwen3.6-35b-a3b", "bonsai-2.5-27b"]);
+
+  fireEvent.change(field, { target: { value: " bonsai-2.5-27b " } });
+  fireEvent.keyDown(field, { key: "Escape" });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(await screen.findByText("bonsai-2.5-27b", { selector: "output" })).toBeTruthy();
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+
+  fireEvent.change(field, { target: { value: "unlisted-model" } });
+  fireEvent.blur(field);
+  expect(await screen.findByText("unlisted-model", { selector: "output" })).toBeTruthy();
+
+  // Leaving the field unchanged writes nothing and asks the source nothing more.
+  fireEvent.focus(field);
+  fireEvent.blur(field);
+  await settle();
+  expect(load).toHaveBeenCalledTimes(3);
+});
+
+test("a listed field says why its source lists nothing", async () => {
+  render(<ModelRow load={async () => ({ options: [], problem: "127.0.0.1:8080 lists no models." })} initial="small" />);
+  expect(await screen.findByText("127.0.0.1:8080 lists no models.")).toBeTruthy();
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLInputElement).value).toBe("small");
 });
