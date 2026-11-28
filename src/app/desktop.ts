@@ -6,7 +6,7 @@
 
 import { unwatchFile, watchFile } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { launch_command, set_autostart, type AutostartOptions } from "../autostart.ts";
 import { backup_method_names } from "../backups.ts";
@@ -20,7 +20,7 @@ import { create_daemon_router, default_local_tables } from "../daemon_router.ts"
 import { bring_to_front, first_argument, hold_single_instance, type AppLike, type FocusableWindowLike } from "../electron/app.ts";
 import type { Implementation, IpcMainEventLike, IpcMainLike } from "../electron/bridge.ts";
 import type { WindowLike } from "../electron/events.ts";
-import { app_rows, create_app_tray, tray_groups, type AppTray, type TrayElectronLike, type TrayRow } from "../electron/tray.ts";
+import { app_rows, create_app_tray, tray_groups, type AppTray, type TrayElectronLike, type TrayLike, type TrayRow } from "../electron/tray.ts";
 import { create_window, is_app_page, type BrowserWindowLike, type BrowserWindowOptionsLike, type NativeThemeLike, type ScreenLike, type ShellLike } from "../electron/window.ts";
 import { call_daemon, daemon_log_path, daemon_socket_path, start_daemon } from "../local_daemon.ts";
 import { peer_listening_method_names, sync_device_method_names } from "../sync_protocol.ts";
@@ -51,10 +51,11 @@ export interface ElectronLike {
   nativeTheme: NativeThemeLike;
   screen: ScreenLike & { getPrimaryDisplay(): { workAreaSize: { width: number; height: number } } };
   shell: ShellLike;
-  // Electron's Tray, Menu and nativeImage, for the tray icon; without them the app has none.
-  Tray?: TrayElectronLike<unknown>["Tray"];
+  // Electron's Tray, Menu and nativeImage, for the tray icon; without them the app has none. Electron's Tray takes
+  // only its own images, so the image is any the app's nativeImage makes.
+  Tray?: new (image: never) => TrayLike;
   Menu?: TrayElectronLike<unknown>["Menu"];
-  nativeImage?: TrayElectronLike<unknown>["nativeImage"];
+  nativeImage?: { createFromPath(path: string): { resize(size: { width: number; height: number }): unknown } };
 }
 
 // What the app adds to its tray menu, above Show, Quit and Quit completely, worked out from its calls.
@@ -106,7 +107,7 @@ export function run_desktop(app: App, electron: ElectronLike, options: DesktopOp
   // Dev runs set this so they never touch the installed app's data.
   const own_profile = env[`${prefix}_USER_DATA`];
   const is_own_profile = own_profile === undefined;
-  if (!is_own_profile) electron.app.setPath("userData", join(options.cwd ?? process.cwd(), own_profile));
+  if (!is_own_profile) electron.app.setPath("userData", resolve(options.cwd ?? process.cwd(), own_profile));
 
   const profile = electron.app.getPath("userData");
   const database_path = join(profile, app.database_file);
@@ -238,7 +239,7 @@ export function run_desktop(app: App, electron: ElectronLike, options: DesktopOp
   const tray: AppTray | null =
     Tray && Menu && nativeImage
       ? create_app_tray({
-          electron: { Tray, Menu, nativeImage },
+          electron: { Tray, Menu, nativeImage } as unknown as TrayElectronLike<unknown>,
           icon_path,
           on_click: () => show_window(),
           on_error: (error) => console.error(error),
