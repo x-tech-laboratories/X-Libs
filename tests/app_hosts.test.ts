@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { desktop_api, is_android, is_desktop, web_api } from "../src/app/web/hosts.ts";
 import { calls, data_watch, page, page_hooks, set_page_api } from "../src/app/web/page.ts";
 import { LoginNeeded } from "../src/web/states.ts";
-import { sample_app } from "./app/sample_app.ts";
+import { sample_app, sample_app_with_mcp } from "./app/sample_app.ts";
 
 // ============================================================================
 // Helpers
@@ -29,6 +29,7 @@ function expose(current: string): { changed: () => void; send: (name: string, pa
     [bridges.certificates.api_name]: { list_trusted_certificates: vi.fn() },
     [bridges.desktop.api_name]: { get_desktop_settings: vi.fn() },
     [bridges.connections.api_name]: { list_connections: vi.fn(async () => ({ connections: [], current })) },
+    [bridges.local_mcp.api_name]: { get_local_mcp_settings: vi.fn() },
     [bridges.events.api_name]: { on: (event: string, given: (payload?: unknown) => void) => (listeners.set(event, given), () => undefined) },
   };
   Object.assign(window, exposed);
@@ -91,6 +92,15 @@ describe("desktop host", () => {
     expect(api.device).toBeNull();
     expect(api.peer_listening).toBeUndefined();
     expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("offers the app's own MCP endpoint on this computer's daemon, when the app serves one", async () => {
+    expose("local");
+
+    expect((await desktop_api(sample_app_with_mcp)).local_mcp).toBeDefined();
+    expect((await desktop_api(sample_app)).local_mcp).toBeUndefined();
+    expose("home-server");
+    expect((await desktop_api(sample_app_with_mcp)).local_mcp).toBeUndefined();
   });
 
   it("hands the page the app's own events by name", async () => {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { start_daemon, type Daemon, type DaemonOptions } from "../src/app/daemon.ts";
 import type { HostContext } from "../src/app/services.ts";
 import { call_daemon, follow_daemon_events, is_answering } from "../src/local_daemon.ts";
-import { sample_app } from "./app/sample_app.ts";
+import { sample_app, sample_app_with_mcp } from "./app/sample_app.ts";
 
 // ============================================================================
 // Helpers
@@ -78,6 +78,15 @@ describe("app daemon", { timeout: 30_000 }, () => {
     expect(context).toMatchObject({ kind: "desktop", profile: folder, plugins_folder: join(folder, "plugins"), declared_file: join(folder, "declared.json"), config: {} });
     expect(seen).toEqual(["start desktop", "before restore", "after restore", "stop with 1 notes"]);
     expect(existsSync(join(folder, "sample-index.db"))).toBe(true);
+  });
+
+  it("answers its own MCP endpoint's settings when the app serves one, off until turned on, and not otherwise", async () => {
+    const daemon = await start_daemon(sample_app_with_mcp, { database_path: join(folder, "mcp.db"), socket_path: join(folder, "mcp.sock"), on_stopped: () => undefined, default_peer_port: 0 });
+    running.push(daemon!);
+    await start();
+
+    expect(await call_daemon(join(folder, "mcp.sock"), "/api/local_mcp/get_local_mcp_settings", [])).toMatchObject({ enabled: false, port: 7792 });
+    await expect(call_daemon(socket_path, "/api/local_mcp/get_local_mcp_settings", [])).rejects.toThrow();
   });
 
   it("answers this computer's own tables: sync, letting devices connect, backups, certificates and its settings", async () => {

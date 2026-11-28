@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import fastify from "fastify";
 
 import { create_certificate_trust } from "../certificates.ts";
+import { create_local_mcp, type LocalMcp } from "../electron/mcp.ts";
 import { DaemonRunningError, daemon_socket_path, listen_on_socket } from "../local_daemon.ts";
 import { register_call_table } from "../server/call_table.ts";
 import { EventStream } from "../server/events.ts";
@@ -100,6 +101,21 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
     set_window_in_front: (in_front) => void (window_in_front = in_front === true),
   };
 
+  // Off until turned on in Settings; a change made through it reaches the open windows and syncs like any other.
+  const local_mcp: LocalMcp | null = app.local_mcp
+    ? create_local_mcp({
+        name: app.id,
+        version: app.version,
+        instructions: app.instructions,
+        api: app.api_spec,
+        is_read_only: app.is_read_only,
+        page_only: app.page_only,
+        settings_file: join(profile, "mcp.json"),
+        default_port: app.local_mcp.default_port,
+        call: (method, args) => app.bridges.calls.dispatch(app.bind_methods(opened.database, () => changes.announce_change(), "program"), method, args),
+      })
+    : null;
+
   // ── Calls ──────────────────────────────────────────────────────────
 
   const daemon = fastify({ bodyLimit: call_body_limit, forceCloseConnections: true });
@@ -116,6 +132,7 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
       register_call_table(api, "/device", sync_device_methods(sync), { is_read_only, on_change: tell_others });
       register_call_table(api, "/peer_listening", listening.methods, { is_read_only });
       register_call_table(api, "/certificates", certificates.methods, { is_read_only });
+      if (local_mcp) register_call_table(api, "/local_mcp", local_mcp.methods, { is_read_only });
       register_call_table(api, "/daemon", daemon_methods, { is_read_only, on_change: tell_others });
     },
     { prefix: "/api" },
@@ -133,6 +150,7 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
       clearInterval(unused_timer);
       await services.stop();
       sync.stop();
+      await local_mcp?.stop();
       await daemon.close();
       await listening.stop();
       sides.close_all();
@@ -154,6 +172,7 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
 
   await listening.start();
   sync.start();
+  await local_mcp?.start();
 
   if (options.services) {
     services = await options.services({

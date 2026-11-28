@@ -61,7 +61,7 @@ export const notes_feature = define_feature({
 // App
 // ============================================================================
 
-export const sample_app = define_app({
+const sample_options = {
   id: "x-sample",
   name: "X-Sample",
   env_prefix: "X_SAMPLE",
@@ -75,4 +75,9 @@ export const sample_app = define_app({
   server_example: "https://notes.example.org",
   features: [notes_feature],
   settings: { currency: { default: "USD" } },
-});
+} as const;
+
+export const sample_app = define_app(sample_options);
+
+// The same app serving its own MCP endpoint from the desktop daemon.
+export const sample_app_with_mcp = define_app({ ...sample_options, local_mcp: { default_port: 7792 } });

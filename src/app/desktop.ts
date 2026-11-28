@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { launch_command, set_autostart, type AutostartOptions } from "../autostart.ts";
 import { backup_method_names } from "../backups.ts";
 import { certificate_method_names } from "../certificate_protocol.ts";
+import { local_mcp_method_names } from "../local_mcp_protocol.ts";
 import { create_certificate_trust } from "../certificates.ts";
 import { connection_file_storage } from "../connection_file_storage.ts";
 import { create_connections } from "../connections.ts";
@@ -280,6 +281,7 @@ export function run_desktop(app: App, electron: ElectronLike, options: DesktopOp
     bridges.peer_listening.handle(ipcMain, forwarded(peer_listening_method_names, "peer_listening") as never, handle_options);
     bridges.certificates.handle(ipcMain, forwarded(certificate_method_names, "certificates") as never, handle_options);
     bridges.connections.handle(ipcMain, connections.methods, handle_options);
+    if (app.local_mcp) bridges.local_mcp.handle(ipcMain, forwarded(local_mcp_method_names, "local_mcp") as never, handle_options);
     const desktop: Implementation<DesktopMethods> = {
       get_desktop_settings,
       set_desktop_setting: async (key, value) => {
