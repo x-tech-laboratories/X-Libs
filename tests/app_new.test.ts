@@ -24,13 +24,13 @@ describe("x-app-new", () => {
     const files = new_app_files(options);
     const manifest = JSON.parse(files["package.json"]!) as { name: string; license: string; dependencies: Record<string, string>; scripts: Record<string, string> };
 
-    expect(Object.keys(files)).toEqual(expect.arrayContaining(["src/app.ts", "src/server/main.ts", "src/daemon/main.ts", "src/main/index.ts", "src/preload/index.ts", "src/web/main.tsx", "tests/app.test.ts", "tsconfig/tsconfig.base.json", "nix/flake.nix", "nix/shell.nix", ".github/workflows/ci.yml", "LICENSE"]));
+    expect(Object.keys(files)).toEqual(expect.arrayContaining(["src/app.ts", "src/server/main.ts", "src/daemon/main.ts", "src/main/index.ts", "src/preload/index.ts", "src/web/main.tsx", "tests/app.test.ts", "config/tsconfig.base.json", "config/vite.config.ts", "config/vitest.config.ts", "nix/flake.nix", "nix/shell.nix", ".github/workflows/ci.yml", "LICENSE"]));
     expect(manifest).toMatchObject({ name: "x-media-notes", license: "GPL-3.0-or-later" });
     expect(manifest.dependencies["@x-tech-laboratories/x-app"]).toMatch(/^\^\d+\.\d+\.\d+$/);
     expect(Object.keys(manifest.scripts)).toEqual(expect.arrayContaining(["dev:server", "dev:web", "dev", "build", "start", "test", "coverage", "lint"]));
     expect(files["src/app.ts"]).toContain('env_prefix: "X_MEDIA_NOTES"');
     expect(files["src/app.ts"]).toContain("ports: { server: 7790, peer: 7791 }");
-    expect(files["tsconfig/tsconfig.base.json"]).toContain("@x-tech-laboratories/x-app/config/tsconfig/base.json");
+    expect(files["config/tsconfig.base.json"]).toContain("@x-tech-laboratories/x-app/config/tsconfig/base.json");
     expect(files["nix/flake.nix"]).toContain("x-app.lib.desktop_package pkgs app");
     expect(files[".github/workflows/ci.yml"]).toContain("x-tech-laboratories/X-App/.github/actions/app-ci@main");
   });

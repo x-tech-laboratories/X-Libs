@@ -42,7 +42,7 @@ means one home for every shared piece, no re-export layer and one release step.
 | `app/daemon` | `run_daemon(app)`: the desktop app's local daemon on `local_daemon`, syncing through `sync_peer`. |
 | `app/desktop`, `app/preload` | `run_desktop(app)` and `run_preload(app)`: the Electron main process as a portal onto a local or remote daemon through `daemon_router`, with the tray, the single instance and the window. |
 | `app/web` | `render_app(app_pages)`: the page in its Shell, routed by the sidebar, with the Settings and History pages, `SyncButton`, and the hosts for the web, the desktop and Android. |
-| `config/*` | Presets: `tsconfig/base.json`, `node.json`, `web.json` and `tests.json` to extend, and `vite_config`, `electron_vite_config`, `vitest_config` and `capacitor_config`. |
+| `config/*` | Presets: `config/tsconfig/{base,node,web,tests}.json` to extend, and `web_vite_config`, `android_vite_config`, `desktop_vite_config` and `vitest_config`. |
 | Nix flake `lib` | `x_app_package`, `x_app_desktop_package`, `x_app_module`, `x_app_shell` and `x_app_android_shell`, called from an app's `nix/flake.nix`. |
 | CI actions | Composite actions `.github/actions/app-ci` (build, coverage floor, lint), `app-nix` (the Nix targets) and `app-dependabot-auto-merge`, each one step of an app's `ci`, `nix` and auto-merge jobs, which keep their names. |
 | `x-app-new` | A command that writes a new app's few files once. |
@@ -65,12 +65,12 @@ src/
 tests/
 docs/
 nix/                flake.nix calling X-App's lib, flake.lock, shell.nix, module.nix only when it adds options
-tsconfig/           tsconfig.base.json and tsconfig.<target>.json, each extending X-App's preset with the app's include paths
+config/             the Vite, electron-vite and Vitest configs, and tsconfig.base.json and tsconfig.<target>.json extending X-App's presets
 .github/            ci.yml and dependabot-auto-merge.yml calling X-App's workflows, dependabot.yml
-config.example.json, package.json, tsconfig.json, vite.config.ts, vitest.config.ts, capacitor.config.json
+config.example.json, package.json, tsconfig.json (references only), capacitor.config.json
 ```
 
-The layout follows the Application Standard: the flake in `nix/` and the tsconfigs in `tsconfig/`.
+The layout follows the Application Standard: the flake in `nix/` and the configs in `config/`.
 
 ## Customizing the base
 
@@ -128,7 +128,7 @@ When an app needs a hook that does not exist, X-App gains it; an app never forks
    `desktop-package.nix` and `module.nix`, and the CI and auto-merge actions.
 7. **Sample app and starter.** `x-app-new`, and an example app in `example/` with one item kind wired through every point
    of the standard's new-app checklist, which X-App's CI builds and tests on every pull request.
-8. **Pilot on X-Budget.** Its shell replaced by X-App, its duplicates moved in, the `nix/` and `tsconfig/` layout, and
+8. **Pilot on X-Budget.** Its shell replaced by X-App, its duplicates moved in, the `nix/` and `config/` layout, and
    TechNet's X-Budget input pointed at `?dir=nix`, coordinated with the other sessions before the switch.
 9. **Rollout.** X-Fitness, X-Media-Tracker, X-Dev and X-Control, one pull request each, then the apps that differ more
    (X-Backups, X-Nix and X-Monitor with their agents, X-Tasks, X-Music, X-Stream, CODEX, X-Mail), each switching from

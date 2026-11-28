@@ -73,16 +73,16 @@ function package_json(names: Names, options: NewAppOptions): string {
   const prefix = names.env_prefix;
   const scripts: Record<string, string> = {
     "dev:server": `${prefix}_CONFIG=\${${prefix}_CONFIG:-config.example.json} ${prefix}_PASSWORD_HASH_FILE=\${${prefix}_PASSWORD_HASH_FILE:-dev-data/password.hash} node --watch src/server/main.ts`,
-    "dev:web": "vite",
-    ...(options.desktop ? { dev: `${prefix}_USER_DATA=\${${prefix}_USER_DATA:-dev-data/desktop} electron-vite dev` } : {}),
-    build: "tsc -b && vite build",
-    ...(options.desktop ? { "build:desktop": "tsc -b && electron-vite build" } : {}),
-    ...(options.android ? { "build:android": "tsc -b && vite build -c vite.android.config.ts && cap sync android" } : {}),
+    "dev:web": "vite -c config/vite.config.ts",
+    ...(options.desktop ? { dev: `${prefix}_USER_DATA=\${${prefix}_USER_DATA:-dev-data/desktop} electron-vite dev -c config/electron.vite.config.ts` } : {}),
+    build: "tsc -b && vite build -c config/vite.config.ts",
+    ...(options.desktop ? { "build:desktop": "tsc -b && electron-vite build -c config/electron.vite.config.ts" } : {}),
+    ...(options.android ? { "build:android": "tsc -b && vite build -c config/vite.android.config.ts && cap sync android" } : {}),
     start: "NODE_ENV=production node src/server/main.ts",
-    ...(options.desktop ? { "start:desktop": "electron-vite preview" } : {}),
+    ...(options.desktop ? { "start:desktop": "electron-vite preview -c config/electron.vite.config.ts" } : {}),
     typecheck: "tsc -b",
-    test: "vitest run",
-    coverage: "vitest run --coverage",
+    test: "vitest run --config config/vitest.config.ts",
+    coverage: "vitest run --coverage --config config/vitest.config.ts",
     lint: "oxlint",
     "hash-password": "node src/server/hash_password.ts",
     icons: "x-app-icons",
@@ -336,23 +336,23 @@ export function NotesView() {
 
 function config_files(names: Names, options: NewAppOptions): Record<string, string> {
   const preset = "@x-tech-laboratories/x-app/config/tsconfig";
-  const node_include = ["../src/app.ts", "../src/server", ...(options.desktop ? ["../src/daemon", "../src/main", "../src/preload"] : []), "../src/shared", "../vite.config.ts", ...(options.android ? ["../vite.android.config.ts"] : []), ...(options.desktop ? ["../electron.vite.config.ts"] : []), "../vitest.config.ts"];
+  const node_include = ["../src/app.ts", "../src/server", ...(options.desktop ? ["../src/daemon", "../src/main", "../src/preload"] : []), "../src/shared", "vite.config.ts", ...(options.android ? ["vite.android.config.ts"] : []), ...(options.desktop ? ["electron.vite.config.ts"] : []), "vitest.config.ts"];
   const target = (name: string, include: string[]) =>
     json({ extends: ["./tsconfig.base.json", `${preset}/${name}.json`], include, compilerOptions: { tsBuildInfoFile: `../node_modules/.tmp/tsconfig.${name}.tsbuildinfo` } });
   return {
-    "tsconfig.json": json({ files: [], references: ["node", "web", "tests"].map((name) => ({ path: `./tsconfig/tsconfig.${name}.json` })) }),
-    "tsconfig/tsconfig.base.json": json({ extends: `${preset}/base.json` }),
-    "tsconfig/tsconfig.node.json": target("node", node_include),
-    "tsconfig/tsconfig.web.json": target("web", ["../src/app.ts", "../src/web", "../src/shared"]),
-    "tsconfig/tsconfig.tests.json": target("tests", ["../tests", "../src"]),
-    "vite.config.ts": `// The page for a browser, from X-App's preset.
+    "tsconfig.json": json({ files: [], references: ["node", "web", "tests"].map((name) => ({ path: `./config/tsconfig.${name}.json` })) }),
+    "config/tsconfig.base.json": json({ extends: `${preset}/base.json` }),
+    "config/tsconfig.node.json": target("node", node_include),
+    "config/tsconfig.web.json": target("web", ["../src/app.ts", "../src/web", "../src/shared"]),
+    "config/tsconfig.tests.json": target("tests", ["../tests", "../src"]),
+    "config/vite.config.ts": `// The page for a browser, from X-App's preset.
 
 import { defineConfig } from "vite";
 import { web_vite_config } from "@x-tech-laboratories/x-app/config/vite";
 
 export default defineConfig(web_vite_config({ port: ${options.port} }));
 `,
-    "vitest.config.ts": `// X-App's test preset, with this app's coverage floor, which only rises.
+    "config/vitest.config.ts": `// X-App's test preset, with this app's coverage floor, which only rises.
 
 import { defineConfig, mergeConfig } from "vitest/config";
 import { vitest_config } from "@x-tech-laboratories/x-app/config/vitest";
@@ -376,7 +376,7 @@ export default mergeConfig(
 `,
     ...(options.desktop
       ? {
-          "electron.vite.config.ts": `// The desktop app's window, daemon, preload and page, from X-App's preset.
+          "config/electron.vite.config.ts": `// The desktop app's window, daemon, preload and page, from X-App's preset.
 
 import { defineConfig } from "electron-vite";
 import { desktop_vite_config } from "@x-tech-laboratories/x-app/config/electron_vite";
@@ -387,7 +387,7 @@ export default defineConfig(desktop_vite_config());
       : {}),
     ...(options.android
       ? {
-          "vite.android.config.ts": `// The page for the Capacitor app, which keeps its database on the phone, from X-App's preset.
+          "config/vite.android.config.ts": `// The page for the Capacitor app, which keeps its database on the phone, from X-App's preset.
 
 import { defineConfig } from "vite";
 import { android_vite_config } from "@x-tech-laboratories/x-app/config/vite";
