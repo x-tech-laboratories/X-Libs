@@ -12,7 +12,7 @@ import { create_accounts_client, type Me } from "../../web/accounts.ts";
 import { AccountView, UsersView } from "../../web/react/accounts.tsx";
 import { SyncCertificatePrompt } from "../../web/react/certificates.tsx";
 import { PageHeading } from "../../web/react/layout.tsx";
-import { Shell, use_route, type ShellSection } from "../../web/react/shell.tsx";
+import { Shell, use_route, type ShellSection, type ShellView } from "../../web/react/shell.tsx";
 import { SignInForm, use_account } from "../../web/react/sign_in.tsx";
 import { SyncButton } from "../../web/react/sync_settings.tsx";
 import { theme_choice } from "../../web/theme.ts";
@@ -60,24 +60,34 @@ function SidebarFoot() {
 function Pages({ pages, account }: { pages: AppPages; account: Account | null }) {
   const { app } = pages;
   const route = use_route();
-  const [section = pages.pages[0]?.id ?? "settings", ...rest] = route.parts;
+  const [section = pages.default_page ?? pages.pages[0]?.id ?? "settings", ...rest] = route.parts;
   const shown = pages.pages.find((candidate) => candidate.id === section);
   const is_account = account !== null && section === "account";
   const label = shown?.label ?? (is_account ? "Your account" : "Settings");
   const view_key = route.parts.join("/");
+  const chrome = pages.use_chrome?.(route.parts) ?? {};
 
   useEffect(() => {
     document.title = `${label} · ${app.name}`;
   }, [label, app.name]);
 
-  const sections: ShellSection[] = pages.pages.map((each) => ({ id: each.id, label: each.label, href: `#/${each.id}` }));
+  // Each listed page's badge, such as how many things wait, from its hook, called in the same order every time.
+  const listed = pages.pages.filter((each) => each.in_sidebar !== false);
+  const badges = listed.map((each) => each.use_badge?.() ?? null);
+  const row_label = (index: number): string => (badges[index] ? `${listed[index]!.label} · ${badges[index]}` : listed[index]!.label);
+  const with_icons = listed.some((each) => each.icon);
+  const sections: ShellSection[] = listed.map((each, index) => ({ id: each.id, label: row_label(index), href: `#/${each.id}` }));
+  const views: ShellView[] = listed.map((each, index) => ({ id: each.id, label: row_label(index), href: `#/${each.id}`, ...(each.icon ? { icon: each.icon } : {}) }));
   const view = shown ? shown.view(rest) : is_account ? <AccountPage account={account} /> : <SettingsView pages={pages} is_admin={account === null || is_admin(account.me)} />;
   return (
     <Shell
       brand={app.name}
       brand_icon={pages.brand_icon ?? "icon.svg"}
-      sections={sections}
-      active={section}
+      {...(with_icons ? { views } : { sections })}
+      active={shown?.active_as ?? section}
+      {...(chrome.sidebar ? { sidebar: chrome.sidebar } : {})}
+      {...(chrome.tools ? { tools: chrome.tools } : {})}
+      {...(chrome.side_pane ? { side_pane: chrome.side_pane } : {})}
       theme={theme_choice(`${app.id}-theme`)}
       view_key={view_key}
       user={account ? account.me.name : undefined}
