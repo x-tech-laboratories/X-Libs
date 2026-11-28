@@ -8,6 +8,38 @@
 #     desktop_comment = "Budgets, monthly transactions and reports";
 #     port = 7740; database_file = "budget.db"; sync_example = "https://budget.example.org/api/";
 #   };
+#
+# An app may also give git_dependencies, each lock entry fetched over https, such as
+# { "node_modules/@x-tech-laboratories/smartharness" = "https://github.com/x-tech-laboratories/SmartHarness.git"; },
+# since the lock names them by ssh, which needs a key; and link_scheme, such as "codex", whose links the desktop opens.
+let
+  # The app's npm packages, read from package-lock.json so there is no deps hash to keep in step with it.
+  npm_deps =
+    pkgs: app:
+    pkgs.importNpmLock {
+      npmRoot = app.src;
+      fetcherOpts = builtins.mapAttrs (_: url: { inherit url; }) (app.git_dependencies or { });
+    };
+
+  # Leaves out what only development needs. importNpmLock puts the original lock back, whose git entries npm would
+  # fetch again, so prune runs on its copy; a git or folder dependency is linked from its store path, where Node would
+  # look for its own dependencies, so it is copied in.
+  prune_steps = ''
+    mv package.json package.json.orig
+    mv package-lock.json package-lock.json.orig
+    cp --no-preserve=mode $npmDeps/package.json $npmDeps/package-lock.json .
+    npm prune --omit=dev --no-save --ignore-scripts
+    mv package.json.orig package.json
+    mv package-lock.json.orig package-lock.json
+    for link in node_modules/* node_modules/@*/*; do
+      if [ -L "$link" ]; then
+        target=$(readlink -f "$link")
+        rm "$link"
+        cp -r --no-preserve=mode "$target" "$link"
+      fi
+    done
+  '';
+in
 {
   # ── Server ─────────────────────────────────────────────────────────────────
 
@@ -32,8 +64,10 @@
 
       inherit nodejs;
       # Read from package-lock.json, so there is no deps hash to keep in step with it.
-      npmDeps = pkgs.importNpmLock { npmRoot = app.src; };
+      npmDeps = npm_deps pkgs app;
       npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+      # npm unpacks a git dependency through its cache, so the cache must be writable.
+      makeCacheWritable = (app.git_dependencies or { }) != { };
       env.ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
 
       nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -41,7 +75,7 @@
       installPhase = ''
         runHook preInstall
 
-        npm prune --omit=dev --no-save --ignore-scripts
+        ${prune_steps}
 
         mkdir -p $out/lib/${app.name}/src $out/lib/${app.name}/out
         cp -r package.json node_modules $out/lib/${app.name}/
@@ -84,8 +118,10 @@
       src = lib.cleanSource app.src;
 
       nodejs = pkgs.nodejs_24;
-      npmDeps = pkgs.importNpmLock { npmRoot = app.src; };
+      npmDeps = npm_deps pkgs app;
       npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+      # npm unpacks a git dependency through its cache, so the cache must be writable.
+      makeCacheWritable = (app.git_dependencies or { }) != { };
       env.ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
 
       nativeBuildInputs = [
@@ -98,13 +134,14 @@
       installPhase = ''
         runHook preInstall
 
-        npm prune --omit=dev --no-save --ignore-scripts
+        ${prune_steps}
         mkdir -p $out/lib/${app.name}-desktop
         cp -r out resources package.json node_modules $out/lib/${app.name}-desktop/
         install -Dm644 resources/icon.svg $out/share/icons/hicolor/scalable/apps/${app.name}.svg
         makeWrapper ${lib.getExe electron} $out/bin/${app.name}-desktop \
           --add-flags $out/lib/${app.name}-desktop \
-          --unset ELECTRON_RUN_AS_NODE
+          --unset ELECTRON_RUN_AS_NODE \
+          --set ${app.env_prefix}_LAUNCHER ${app.name}-desktop
 
         runHook postInstall
       '';
@@ -114,9 +151,11 @@
           name = app.name;
           desktopName = app.display_name;
           comment = app.desktop_comment;
-          exec = "${app.name}-desktop";
+          # A link in the app's scheme, such as from a notification, opens the app on its page.
+          exec = "${app.name}-desktop" + lib.optionalString (app ? link_scheme) " %U";
           icon = app.name;
           categories = app.desktop_categories or [ "Utility" ];
+          mimeTypes = lib.optional (app ? link_scheme) "x-scheme-handler/${app.link_scheme}";
         })
       ];
 

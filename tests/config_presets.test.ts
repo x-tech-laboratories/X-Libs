@@ -1,9 +1,11 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import type { Plugin } from "vite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { capacitor_stand_in, has_package } from "../src/config/capacitor.ts";
 import { desktop_vite_config } from "../src/config/electron_vite.ts";
 import { android_content_policy, android_vite_config, web_vite_config } from "../src/config/vite.ts";
 import { vitest_config } from "../src/config/vitest.ts";
@@ -19,12 +21,30 @@ describe("vite presets", () => {
     const config = web_vite_config({ port: 7740 });
 
     expect(config).toMatchObject({ root: "src/web", base: "./", build: { outDir: "../../out/web" } });
-    expect(config.server?.proxy).toEqual({ "/api": "http://127.0.0.1:7740", "/login": "http://127.0.0.1:7740" });
+    expect(config.server?.proxy).toEqual({ "/api/": "http://127.0.0.1:7740", "/login": "http://127.0.0.1:7740" });
   });
 
   it("sends the dev API to the port PORT names", () => {
     vi.stubEnv("PORT", "9000");
-    expect(web_vite_config({ port: 7740 }).server?.proxy).toMatchObject({ "/api": "http://127.0.0.1:9000" });
+    expect(web_vite_config({ port: 7740 }).server?.proxy).toMatchObject({ "/api/": "http://127.0.0.1:9000" });
+  });
+
+  it("stands in for Capacitor in an app that lacks it, and leaves an app that has it to the real one", () => {
+    const without = mkdtempSync(join(tmpdir(), "x-app-no-capacitor-"));
+    writeFileSync(join(without, "package.json"), "{}");
+    const stand_in = capacitor_stand_in(without);
+    const resolve_id = stand_in.resolveId as (source: string) => string | null;
+    const load = stand_in.load as (id: string) => string | null;
+
+    const core = resolve_id("@capacitor/core")!;
+
+    expect(core).toContain("@capacitor/core");
+    expect(load(core)).toContain("export function registerPlugin");
+    expect(load(resolve_id("@capacitor/app")!)).toContain("export const App");
+    expect(resolve_id("react")).toBeNull();
+    expect(has_package(process.cwd(), "@capacitor/core")).toBe(true);
+    expect((capacitor_stand_in(process.cwd()).resolveId as (source: string) => string | null)("@capacitor/core")).toBeNull();
+    expect((web_vite_config({ port: 7740 }).plugins as Plugin[]).map((plugin) => plugin.name)).toContain("x-app-capacitor-stand-in");
   });
 
   it("builds the phone's page into out/android with a content policy that lets SQLite and sync run", () => {
