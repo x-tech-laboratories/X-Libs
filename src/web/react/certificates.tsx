@@ -129,7 +129,7 @@ export function with_certificate_prompt(send: typeof fetch, certificates: Certif
 
 const SYNC_CHECK_MS = 5000;
 
-// Placed once in the app: whenever sync fails, checks the server's certificate and asks about it, then syncs again if trusted.
+// Placed once in the app: whenever a paired device's https address fails, checks its certificate and asks about it, then syncs again if trusted.
 export function SyncCertificatePrompt({ device, certificates, subscribe }: { device: SyncDeviceClient; certificates: CertificateClient; subscribe?: (listener: () => void) => () => void }) {
   const looked_at = useRef("");
 
@@ -141,11 +141,14 @@ export function SyncCertificatePrompt({ device, certificates, subscribe }: { dev
       try {
         // Each failure is looked at once, and again only after sync recovers or fails differently.
         const status = await device.get_sync_status();
-        const failing = (status.state === "offline" || status.state === "failed") && status.server_url !== "";
-        const key = failing ? `${status.server_url} ${status.error}` : "";
+        const failing = status.peers.filter((peer) => peer.state === "offline" || peer.state === "failed");
+        const addresses = failing.flatMap((peer) => peer.addresses.filter((address) => address.startsWith("https:")));
+        const key = failing.map((peer) => `${peer.device} ${peer.error}`).join("\n");
         if (key === looked_at.current) return;
         looked_at.current = key;
-        if (failing && await offer_certificate_trust(status.server_url, certificates)) await device.sync_now();
+        for (const address of addresses) {
+          if (await offer_certificate_trust(address, certificates)) return void (await device.sync_now());
+        }
       } finally {
         checking = false;
       }

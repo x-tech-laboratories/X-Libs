@@ -2,17 +2,25 @@
 // daemons on other hosts by address, each signed in once for a token the page never sees. It pairs with `connections`,
 // which keeps the list wherever the app's bridge runs, and `web/react/connections`, the Connections section of Settings.
 
-// ── Imports ──────────────────────────────────────────────────────────────────
-
-import type { SyncCredentials } from "./sync_protocol.ts";
-
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
 // The local daemon's id, the same on every device.
 export const LOCAL_CONNECTION_ID = "local";
 
-// The name, password and the code when the daemon asks, the same as signing in to sync.
-export type ConnectionCredentials = SyncCredentials;
+// The name, password and the code, once the daemon asks for it.
+export interface ConnectionCredentials {
+  name: string;
+  password: string;
+  code?: string;
+}
+
+// What a daemon says when the password was right and only the authenticator code is missing.
+const code_needed_text = "Enter the code from your authenticator app.";
+
+// Whether a refused sign-in asks for the authenticator code, even after crossing to the page as plain text.
+export function asks_for_code(error: unknown): boolean {
+  return String(error instanceof Error ? error.message : error).includes(code_needed_text);
+}
 
 export interface ConnectionSummary {
   id: string;

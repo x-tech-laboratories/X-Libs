@@ -5,7 +5,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type { CertificateClient } from "../../certificate_protocol.ts";
 import { connection_address, type ConnectionClient, type ConnectionSummary, type ConnectionsView } from "../../connection_protocol.ts";
-import { asks_for_code } from "../../sync_protocol.ts";
+import { asks_for_code } from "../../connection_protocol.ts";
 import { describe_call_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
 import { offer_certificate_trust } from "./certificates.tsx";

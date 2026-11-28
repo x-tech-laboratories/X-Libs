@@ -1,9 +1,9 @@
-// Who a request came from, as `server/account_sign_in` tells them apart, in a module of its own so a route such as
-// `server/sync_routes` can ask without loading the sign-in.
+// Who a request came from, as `server/account_sign_in` tells them apart, in a module of its own so a route can ask
+// without loading the sign-in.
 
 // ── Kinds ────────────────────────────────────────────────────────────────────
 
-// What made a token: the device sign-in that sets up sync, or the account page or the config for a program.
+// What made a token: a device signing in to use the daemon, or the account page or the config for a program.
 export type TokenKind = "device" | "program";
 
 // Whether a request's viewer is the user themself, at the page or on one of their own devices, rather than a program:
