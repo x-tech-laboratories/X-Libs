@@ -44,6 +44,7 @@ describe("public_addresses", () => {
     await expect(public_addresses("gone.test", { resolve })).rejects.toThrow("The host gone.test could not be found.");
     await expect(public_addresses("[::1]", { resolve })).rejects.toThrow("is not a public address");
     await expect(public_addresses("127.0.0.1")).rejects.toThrow("is not a public address");
+    await expect(public_addresses("localhost")).rejects.toThrow(/^localhost is not a public address/);
     await expect(public_addresses("")).rejects.toThrow("with its host");
     expect(await public_addresses("127.0.0.1", { allow_address: (address) => address === "127.0.0.1" })).toEqual(["127.0.0.1"]);
     await expect(public_addresses("127.0.0.2", { allow_address: (address) => address === "127.0.0.1" })).rejects.toThrow("is not a public address");

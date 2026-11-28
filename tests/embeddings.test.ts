@@ -62,6 +62,8 @@ describe("an embeddings client", () => {
       message: "The embedder at embed.example:443 is limiting how often it is asked. Indexing tries again later.",
       detail: "The embeddings endpoint answered 429 Too Many Requests. slow down",
     });
+    const unreadable = { ok: false, status: 500, statusText: "Server Error", text: async () => Promise.reject(new Error("gone")) } as unknown as Response;
+    await expect(answering(() => unreadable).embed(["x"])).rejects.toMatchObject({ message: "The embedder at embed.example:443 could not answer.", detail: "The embeddings endpoint answered 500 Server Error." });
     const unreachable = embeddings_client(() => settings, { fetcher: (async () => Promise.reject(new Error("fetch failed"))) as unknown as typeof fetch, words });
     await expect(unreachable.embed(["x"])).rejects.toThrow("The embedder at embed.example:443 cannot be reached. Check that its server is running and that its endpoint under Settings → Index is right.");
     expect(unreachable.is_local()).toBe(false);
