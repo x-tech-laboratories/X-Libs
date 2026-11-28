@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { Toasts, undoable, type Undoable } from "../src/web/react/toasts.tsx";
+import { attempt, Toasts, undoable, type Undoable } from "../src/web/react/toasts.tsx";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -68,5 +68,20 @@ describe("undoable", () => {
     expect(undone.undo).toHaveBeenCalledTimes(1);
     expect(undone.commit).not.toHaveBeenCalled();
     expect(screen.queryByText("First")).toBeNull();
+  });
+});
+
+describe("attempt", () => {
+  test("shows a failure in its own words and stays quiet on success", async () => {
+    render(<Toasts />);
+
+    await act(async () => {
+      attempt(Promise.resolve("saved"));
+      attempt(Promise.reject(new Error("The disk is full.")));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("The disk is full.")).toBeTruthy();
+    expect(screen.queryByText("saved")).toBeNull();
   });
 });

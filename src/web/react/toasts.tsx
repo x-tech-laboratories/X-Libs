@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { describe_error } from "../errors.ts";
+
 // ── Toasts ───────────────────────────────────────────────────────────────────
 
 export interface ToastOptions {
@@ -46,6 +48,11 @@ export function toast(message: string, options: ToastOptions = {}): () => void {
   publish([...shown, { ...options, id, message }]);
   if (!(options.sticky ?? options.tone === "bad")) setTimeout(() => close_toast(id, "timeout"), options.duration_in_milliseconds ?? 6000);
   return () => close_toast(id, "closed");
+}
+
+// Runs work the user started, such as a save, and shows its failure, if any, as a bad toast in plain words.
+export function attempt(work: Promise<unknown>): void {
+  work.catch((error: unknown) => toast(describe_error(error), { tone: "bad" }));
 }
 
 // ── Undo ─────────────────────────────────────────────────────────────────────

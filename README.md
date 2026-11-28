@@ -8,6 +8,10 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 
 | Import                                   | What it holds                                                                 |
 | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `app/define`                             | The base app: `define_app` puts an X-app's name, ports, files, its own settings and its `define_feature` features (tables, migrations, calls, `api_spec`, settings, histories) together into one store every device keeps (`open_store`, `needs_upgrade`, `bind_methods` recording versions and announcing writes, `is_read_only`), its sync engine, its backups' names and schedule, and its bridges named after the app; `AppMethodsOf<typeof app>` types the app's calls. |
+| `app/server`, `app/daemon`               | `run_server(app, { web_folder })`: the web server from `<PREFIX>_CONFIG` with accounts, the calls, OpenAPI, MCP, the server's backups and its sync peer; `run_daemon(app)`: the desktop daemon from `<PREFIX>_DB` with sync, letting devices connect, backups, certificates and the desktop settings; `build_server`, `start_daemon`, `open_app_database` and `register_app_calls` for tests and apps that add their own. |
+| `app/desktop`, `app/preload`             | `run_desktop(app, electron, { main_dir })`: Electron's main process as a portal onto this computer's daemon or a server, with the window, the login entry, a second launch and `--daemon`; `run_preload(app, electron)` puts every bridge on the page. Electron is handed in, so neither imports it. |
+| `app/web/app_page`, `app/web/page`       | `render_app({ app, pages, general_settings })`: the page on the web, the desktop or Android in the `Shell`, with sign-in in a browser, Your account, Settings (the app's general sections, each page's own, Connections, Desktop app, Sync and Backups) and `SyncButton`; `page_hooks<Methods>()` gives the app's typed `calls`, `use_data` and `use_settings`. The phone's host (`app/web/android`) loads only on Android. |
 | `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds and "less than a second" below one, `format_age`, and `format_clock` for a playing time such as `"3:07"`, with `{ hours: "always" }` writing `"0:03:07"` so a column of times lines up and `empty` for no time. |
 | `log`                                    | Loggers by scope and level from a setting such as `"warn,play:debug"`; a malformed setting falls back instead of silencing logging, and a setting read through a function applies to loggers made before it arrived; a dotted scope such as `app.core.db` without its own level takes its nearest parent's. |
 | `cron`                                   | `CronSchedule.parse`: five-field cron lines read in local time, with `@daily`-style aliases, month and weekday names, steps, ranges and lists, 7 as Sunday, a restricted day of month and weekday matching either as cron does, and a line that never matches a real date refused; `next_after` gives the first run strictly after a moment. |
@@ -147,7 +151,7 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 | `web/react/outcome_log`                  | `OutcomeLog`: what happened to each item of a run, such as each file of a scan or each row of an import, on `DataTable` with `virtual` rows: a `StateBadge` per outcome, the item and why on one line each, cut off with an ellipsis and whole in their hover text, a filter of the outcomes that happened with their tallies, held by the log or the app, and a Follow switch keeping the newest in view while entries arrive until the reader scrolls up; its scrolling box takes Halon's `following-output` height unless `wrap_class` gives another. |
 | `web/react/shortcuts`                    | `use_shortcuts` for keys such as `"mod+z"`, quiet while typing or while a dialog or popover is open; `describe_keys` for help text. |
 | `web/react/tree`                         | `Tree`: nested rows that fold, walk with the arrow keys, reorder by dragging or with Alt and the arrow keys, show several picked, and take drops from outside; `has_children` gives a row a fold button before its children are listed, so an app can load them once it opens, such as in a large graph. |
-| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed, and `undoable` actions that commit or undo exactly once; modal dialogs with a subtitle, header actions, a full-window size and a `form` whose submit button sends it, and confirm and text dialogs, openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere, their keep-open items ticking at once; resize handles and splits. `SettingsDialogRow` is a settings row with a name, a short status and an Open button whose dialog holds that group's settings. |
+| `web/react/toasts`, `dialog`, `menus`, `split` | Toasts with a link or Undo that say how they closed, `undoable` actions that commit or undo exactly once, and `attempt`, which shows a failed call's words as a bad toast; modal dialogs with a subtitle, header actions, a full-window size and a `form` whose submit button sends it, and confirm and text dialogs, openable from anywhere; context menus and popovers worked by keyboard, openable from anywhere, their keep-open items ticking at once; resize handles and splits. `SettingsDialogRow` is a settings row with a name, a short status and an Open button whose dialog holds that group's settings. |
 | `web/react/page_view`                    | `PageView`: a full-window page over the app on the Dialog, such as Settings or an item's properties, with a Close button, actions beside it and section tabs that stay put while the body scrolls. |
 | `web/react/charts`                       | `LineChart` of readings over time as lines or dots, with dashed limits such as a goal, a scale from zero or fitted around the readings, and dots from a single reading; `moving_average` for its trend line; `BarChart`, naming each bar under it when asked, `StackedBarChart`, `Meters` with ticks and a lighter fill behind, `Donut` with its headline in the middle, `Timeline` of spans and instants per lane, `Sparkline` from zero or fitted to its readings, a pass/fail `Strip`, a `Gauge` ring beside a stat's value that can link like a `Tile`, a `DonutTile`, a stat tile drawn as a full ring with its value in the middle, a `ShareBar` with each part's value in its legend, and a `Treemap` of tiles sized by value on `squarify` that hands back the one clicked: small charts colored from Halon's tokens. |
 | `web/react/graph`                        | `GraphView`: a graph of nodes and links drawn by force, such as a knowledge graph: each node a shape and colour role by its `kind` (`GraphKind`: Halon's accent, a status or a `--series-*` token, read again when the theme changes), with an optional glyph and drawn faded when asked; each link solid or `dashed`, with an arrow when `directed` and a label shown near the selection or zoomed in. Selecting a node rings it and lights its neighbours; a click selects, a double-click opens (`on_activate`), a link click calls `on_link_select`; dragging pans, the wheel zooms, Fit, + and − in the toolbar beside the app's own `tools`; `focus_id` centres on a node, such as one a search found; a legend of kinds and link styles, an empty state, and every node with its links as a `Tree` under the drawing, so it is all reachable from the keyboard (arrow keys pan the drawing, + and − zoom, 0 fits, Enter opens the selection). On force-graph (MIT), loaded only when a graph is shown, which keeps a few thousand nodes moving on a canvas; X-Libs adds Halon's colours, the list, the keyboard path and selection. |
@@ -171,6 +175,34 @@ Code the X-apps share, published as one npm package, `@x-tech-laboratories/x-lib
 import { AgentHub } from "@x-tech-laboratories/x-libs/server/agents/hub";
 import { parse_duration } from "@x-tech-laboratories/x-libs/durations";
 ```
+
+## The base app
+
+An X-app describes itself once and the base app runs it everywhere: the web server, the desktop daemon and window, the
+phone and the page's layout. The app keeps only its features and one line per entry point.
+
+```ts
+// src/app.ts
+export const app = define_app({
+  id: "x-budget", name: "X-Budget", env_prefix: "X_BUDGET", version, summary, instructions,
+  data_name: "budgets", database_file: "budget.db", backup_prefix: "budget",
+  ports: { server: 7740, peer: 7741 }, server_example: "https://budget.example.org",
+  features: [budget_feature], settings: money_settings,
+});
+
+// src/server/main.ts
+await run_server(app, { web_folder: new URL("../../out/web", import.meta.url) });
+// src/daemon/main.ts
+await run_daemon(app);
+// src/main/index.ts
+run_desktop(app, electron, { main_dir: import.meta.dirname });
+// src/preload/index.ts
+run_preload(app, { contextBridge, ipcRenderer });
+// src/web/main.tsx
+void render_app({ app, pages: [{ id: "plan", label: "Plan", view: () => <PlanView />, settings: plan_settings }], general_settings: money_section });
+```
+
+A change an app needs in the base goes into the base, so no app keeps a copy of a base file.
 
 ## A web app's server
 
