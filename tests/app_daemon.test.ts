@@ -88,7 +88,7 @@ describe("app daemon", { timeout: 30_000 }, () => {
     expect(await call_daemon(socket_path, "/api/backups/list_backups", [])).toEqual(expect.any(Array));
     expect(await call_daemon(socket_path, "/api/certificates/list_trusted_certificates", [])).toEqual([]);
     await call_daemon(socket_path, "/api/daemon/set_desktop_setting", ["start_at_login", false]);
-    expect(await call_daemon(socket_path, "/api/daemon/get_desktop_settings", [])).toEqual({ keep_running_in_background: true, start_at_login: false });
+    expect(await call_daemon(socket_path, "/api/daemon/get_desktop_settings", [])).toEqual({ show_tray_icon: true, keep_running_in_background: true, start_at_login: false });
   });
 
   it("tells other windows of a change, but not the one that made it", async () => {

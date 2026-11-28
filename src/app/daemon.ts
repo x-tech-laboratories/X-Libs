@@ -39,6 +39,8 @@ export interface DaemonOptions {
   services?: StartServices;
   // Where the declarations this computer's configuration makes are read from; /etc/<id>/declared.json unless set.
   declared_file?: string;
+  // The app's icon, which the desktop app hands in for notifications.
+  icon_path?: string | null;
 }
 
 export interface Daemon {
@@ -84,14 +86,18 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
   const desktop_file = join(profile, "desktop.json");
 
   function read_desktop(): DesktopSettings {
-    return read_desktop_settings(existsSync(desktop_file) ? JSON.parse(readFileSync(desktop_file, "utf8")) : null);
+    return read_desktop_settings(existsSync(desktop_file) ? JSON.parse(readFileSync(desktop_file, "utf8")) : null, app.desktop_settings);
   }
+
+  // Told by the window as it comes and goes.
+  let window_in_front = false;
 
   const daemon_methods: DaemonMethods = {
     get_desktop_settings: read_desktop,
-    set_desktop_setting: (key, value) => writeFileSync(desktop_file, JSON.stringify(read_desktop_settings({ ...read_desktop(), [key]: value }), null, 2)),
+    set_desktop_setting: (key, value) => writeFileSync(desktop_file, JSON.stringify(read_desktop_settings({ ...read_desktop(), [key]: value }, app.desktop_settings), null, 2)),
     // Stops once the answer has gone back.
     stop_daemon: () => void setTimeout(() => void shut_down(), 0),
+    set_window_in_front: (in_front) => void (window_in_front = in_front === true),
   };
 
   // ── Calls ──────────────────────────────────────────────────────────
@@ -162,6 +168,8 @@ export async function start_daemon(app: App, options: DaemonOptions): Promise<Da
       emit: (event, data) => changes.send(JSON.stringify(data), { event }),
       side_database: sides.open,
       back_up: opened.back_up,
+      window_in_front: () => window_in_front,
+      icon_path: options.icon_path ?? null,
     });
     opened.on_restore({ before: () => services.before_restore?.(), after: () => services.after_restore?.() });
   }
@@ -190,7 +198,7 @@ export async function run_daemon(app: App, env: NodeJS.ProcessEnv = process.env,
   const socket_path = env[`${app.env_prefix}_SOCKET`] || daemon_socket_path({ app: app.id, data_file: database_path });
 
   try {
-    const daemon = await start_daemon(app, { database_path, socket_path, on_stopped: () => process.exit(0), declared_file: declared_file_of(app, env), ...extra });
+    const daemon = await start_daemon(app, { database_path, socket_path, on_stopped: () => process.exit(0), declared_file: declared_file_of(app, env), icon_path: env[`${app.env_prefix}_ICON`] ?? null, ...extra });
     // Another daemon on this database got there first, which is all that was asked for.
     if (!daemon) process.exit(0);
     console.log(`${app.id} daemon on ${socket_path}, using ${database_path}`);

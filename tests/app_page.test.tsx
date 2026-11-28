@@ -98,13 +98,16 @@ describe("app page", () => {
     const { bridges } = sample_app;
     exposed[bridges.calls.api_name] = calls;
     exposed[bridges.connections.api_name] = { list_connections: async () => ({ connections: [], current: "local" }) };
-    exposed[bridges.events.api_name] = { on: () => () => undefined };
+    const listeners = new Map<string, (payload: unknown) => void>();
+    exposed[bridges.events.api_name] = { on: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => undefined) };
     const root = document.createElement("div");
     document.body.append(root);
 
     await act(() => render_app({ ...pages, app: sample_app }, root));
+    listeners.get("app_event")?.({ event: "open", data: "#/settings" });
 
     expect(await screen.findByText("Every note")).toBeTruthy();
+    expect(location.hash).toBe("#/settings");
     for (const name of [bridges.calls.api_name, bridges.connections.api_name, bridges.events.api_name]) delete exposed[name];
   });
 });

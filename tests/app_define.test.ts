@@ -157,8 +157,15 @@ describe("feature hooks and callers", () => {
 
 describe("desktop settings", () => {
   it("fills in each default where a setting is missing or damaged", () => {
-    expect(read_desktop_settings(null)).toEqual({ keep_running_in_background: true, start_at_login: true });
-    expect(read_desktop_settings({ keep_running_in_background: false, start_at_login: "yes" })).toEqual({ keep_running_in_background: false, start_at_login: true });
+    expect(read_desktop_settings(null)).toEqual({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true });
+    expect(read_desktop_settings({ keep_running_in_background: false, start_at_login: "yes" })).toEqual({ show_tray_icon: true, keep_running_in_background: false, start_at_login: true });
+  });
+
+  it("keeps the app's own switches beside the base's, and drops keys it does not know", () => {
+    const own = { notify_inbox: { default: true, label: "Inbox notifications" } };
+
+    expect(read_desktop_settings({ notify_inbox: false, stray: true }, own)).toEqual({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true, notify_inbox: false });
+    expect(read_desktop_settings(null, own).notify_inbox).toBe(true);
   });
 
   it("takes a backup schedule only with a whole number to keep", () => {
