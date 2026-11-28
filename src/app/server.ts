@@ -14,6 +14,7 @@ import fastify, { type FastifyInstance } from "fastify";
 
 import { openapi_document, positional_args } from "../api_spec.ts";
 import { keep_backing_up, type BackupMethods } from "../backups.ts";
+import { backup_method_names } from "../backups.ts";
 import { calls_under, register_accounts } from "../server/account_sign_in.ts";
 import { caller_of } from "../caller.ts";
 import { AccountStore, holds_accounts, move_accounts } from "../server/account_store.ts";
@@ -192,6 +193,7 @@ export async function build_server(app: App, options: ServerOptions): Promise<Fa
       // The server's backups, as the page's Settings reach them.
       api.post<{ Params: { method: string } }>("/backups/:method", async (request, reply) => {
         const via = request.viewer?.via;
+        if (!(backup_method_names as readonly string[]).includes(request.params.method)) return send_text(reply, 404, `There is no backup call ${request.params.method}.`);
         if (user_only_backup_calls.has(request.params.method) && via !== "session" && via !== "proxy") return send_text(reply, 403, app.page_only.refusal);
         const args: unknown = request.body ?? [];
         if (args === BAD_JSON || !Array.isArray(args)) return send_text(reply, 400, "send the arguments as a JSON list");

@@ -57,6 +57,8 @@ export interface AppPages {
   app: Pick<App, "id" | "name" | "data_name" | "server_example" | "bridges"> & Partial<Pick<App, "desktop_settings">>;
   pages: readonly AppPage[];
   general_settings?: (props: PageSettingsProps) => SettingsSection[];
+  // Categories of the app's own after General, for settings that belong to no one page, such as an assistant's.
+  settings_categories?: (props: PageSettingsProps) => SettingsCategory[];
   // The icon the sidebar and sign-in show, an image URL beside the page; "icon.svg" unless set.
   brand_icon?: string;
   // The page an empty route opens; the first page unless set.
@@ -159,6 +161,7 @@ export function SettingsView({ pages, is_admin = true }: { pages: AppPages; is_a
             <SettingsPage
               categories={[
                 ...(general.length > 0 ? [{ heading: "General", sections: general }] : []),
+                ...(pages.settings_categories?.(props) ?? []).filter((category) => category.sections.length > 0),
                 ...pages.pages
                   .map((each) => ({ heading: each.label, sections: each.settings?.(props) ?? [] }))
                   .filter((category) => category.sections.length > 0),

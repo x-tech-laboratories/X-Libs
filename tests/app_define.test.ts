@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { is_backup_schedule, is_read_only } from "../src/app/define.ts";
+import { define_app, is_backup_schedule, is_read_only } from "../src/app/define.ts";
 import { read_desktop_settings } from "../src/app/protocol.ts";
 import { open_app_database, type AppDatabase } from "../src/app/server.ts";
 import { note_history, notes_hooks, sample_app } from "./app/sample_app.ts";
@@ -127,6 +127,15 @@ describe("app store", () => {
 // Desktop settings and schedules
 // ============================================================================
 
+describe("history days", () => {
+  it("keeps the app's own default for how far the history reaches back, 365 unless it gives one", () => {
+    const short = define_app({ id: "x-short", name: "X-Short", env_prefix: "X_SHORT", version: "1", summary: "", instructions: "", data_name: "notes", database_file: "short.db", backup_prefix: "short", ports: { server: 1, peer: 2 }, server_example: "", features: [], history_days: 180 });
+
+    expect(short.setting_defaults).toMatchObject({ history_days: 180 });
+    expect(sample_app.setting_defaults).toMatchObject({ history_days: 365 });
+  });
+});
+
 describe("feature hooks and callers", () => {
   it("tells a feature when the database opens and after every write, but not after a read", async () => {
     const before = { ...notes_hooks };
@@ -139,6 +148,16 @@ describe("feature hooks and callers", () => {
 
     expect(notes_hooks.opened).toBe(before.opened + 1);
     expect(notes_hooks.writes).toBe(before.writes + 2);
+  });
+
+  it("keeps what opening changed as a version made on this device", () => {
+    const database = open_database();
+    sample_app.bind_methods(() => database, () => undefined).add_note("rename me");
+
+    sample_app.open_store(database);
+
+    const id = (database.prepare("SELECT id FROM notes").get() as { id: string }).id;
+    expect(note_history.read_versions(database, id).map((version) => version.snapshot.title)).toContain("Renamed on opening");
   });
 
   it("runs each call as the caller it is bound for, the page unless told", () => {

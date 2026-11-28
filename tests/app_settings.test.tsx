@@ -103,6 +103,16 @@ describe("app settings", () => {
     expect(screen.getByText("Starts X-Sample in the background when you log in, without opening its window.")).toBeTruthy();
   });
 
+  it("shows the app's own categories after General, leaving out an empty one", async () => {
+    set_page_api({ host: "web", calls: fake_calls({}), device: null, backups: null, on_change: () => () => undefined });
+    const own: AppPages = { ...pages, settings_categories: () => [{ heading: "Assistant", sections: [{ id: "engine", heading: "Engine", content: <p>Which engine answers</p> }] }, { heading: "Empty", sections: [] }] };
+    render(<><SettingsView pages={own} /><Dialogs /></>);
+
+    expect(await screen.findByText("Which engine answers")).toBeTruthy();
+    expect(screen.getAllByText("Assistant").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Empty")).toBeNull();
+  });
+
   it("shows the app's own MCP endpoint where the desktop app serves one", async () => {
     const local_mcp = {
       get_local_mcp_settings: vi.fn(async () => ({ enabled: false, port: 7792, require_token: false })),

@@ -139,6 +139,7 @@ describe("app server", () => {
     expect(JSON.parse(pairing.body)).toHaveProperty("code");
     expect((await server!.inject({ method: "POST", url: "/api/call/list_notes", payload: [], headers: { cookie: reader_cookie } })).statusCode).toBe(200);
     expect((await server!.inject({ method: "POST", url: "/api/backups/list_backups", payload: { not: "a list" }, headers: { cookie } })).statusCode).toBe(400);
+    expect((await server!.inject({ method: "POST", url: "/api/backups/drop_everything", payload: [], headers: { cookie } })).statusCode).toBe(404);
   });
 
   it("turns away a page that has not signed in, but not another device's sealed sync", async () => {
