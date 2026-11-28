@@ -1,5 +1,5 @@
 // Backups on a phone, kept in a folder the user picks once in its storage, where file managers and sync apps reach them.
-// The folder lives on the Android side, in X-Libs' XLibsBackupFolder plugin, and each file crosses the bridge as base64.
+// The folder lives on the Android side, in X-App's XLibsBackupFolder plugin, and each file crosses the bridge as base64.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 

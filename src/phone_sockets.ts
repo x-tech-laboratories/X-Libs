@@ -1,4 +1,4 @@
-// UDP and TCP sockets for a phone service's worker (see phone_service), answered by X-Libs' Android side: TLS can be
+// UDP and TCP sockets for a phone service's worker (see phone_service), answered by X-App's Android side: TLS can be
 // started on a connected socket in either role after plain text, as KDE Connect does after its identity line, with
 // the app's own certificate and key, and any peer is let through for the worker to check its certificate itself.
 // A TCP socket reads nothing until asked, by read_line for one line or start_reading for everything after it, so no

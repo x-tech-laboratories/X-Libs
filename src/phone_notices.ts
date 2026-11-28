@@ -4,7 +4,7 @@
 
 // ── Capacitor's shapes ───────────────────────────────────────────────────────
 
-// Only the parts of @capacitor/local-notifications this uses, so X-Libs does not depend on the plugin; the app passes
+// Only the parts of @capacitor/local-notifications this uses, so X-App does not depend on the plugin; the app passes
 // its own LocalNotifications.
 export interface LocalNotificationsLike {
   getPending(): Promise<{ notifications: { id: number }[] }>;

@@ -2,7 +2,7 @@
 // SQLite in WebAssembly in a phone's page. Drizzle was chosen over Kysely and hand-written SQL because it types rows from
 // one schema written in TypeScript, writes the migration SQL from that schema with drizzle-kit, and runs synchronously,
 // as the stores and sync here do. It is pinned to 1.0.0-rc.5, the first line with a node:sqlite session.
-// X-Libs adds: the connection over SqlDatabase without node:sqlite's own driver, which a page cannot load; the sync list
+// X-App adds: the connection over SqlDatabase without node:sqlite's own driver, which a page cannot load; the sync list
 // read from the schema's primary keys; and migrations kept per owner through `sql`'s migrate.
 
 // ── Imports ──────────────────────────────────────────────────────────────────

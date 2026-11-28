@@ -98,7 +98,7 @@ describe("reading a change from git", () => {
 // The command
 // ============================================================================
 
-describe("x-libs-check", () => {
+describe("x-app-check", () => {
   async function run(args: string[], folder: string, env: Record<string, string> = {}) {
     const out = capture();
     const err = capture();
@@ -121,7 +121,7 @@ describe("x-libs-check", () => {
 
   it("passes when only the named checks pass, and reads settings from package.json at the base", async () => {
     const { folder, base, git } = make_repository();
-    writeFileSync(join(folder, "package.json"), JSON.stringify({ "x-libs-check": { commit_trailer: "Signed-off-by", trailer_organisations: ["acme"] } }));
+    writeFileSync(join(folder, "package.json"), JSON.stringify({ "x-app-check": { commit_trailer: "Signed-off-by", trailer_organisations: ["acme"] } }));
     git("add", ".");
     git("commit", "-q", "-m", "chore: settings\n\nSigned-off-by: Example User");
     const settled = git("rev-parse", "HEAD");
@@ -137,10 +137,10 @@ describe("x-libs-check", () => {
     const { folder } = make_repository();
     expect((await run(["vibes"], folder)).err).toContain("no check called vibes");
     expect((await run(["--nope"], folder)).code).toBe(2);
-    expect((await run(["--help"], folder)).out).toContain("Usage: x-libs-check");
+    expect((await run(["--help"], folder)).out).toContain("Usage: x-app-check");
     const missing_base = await run(["--base", "no-such-ref"], folder);
     expect(missing_base.code).toBe(2);
-    expect(missing_base.err).toContain("x-libs-check:");
+    expect(missing_base.err).toContain("x-app-check:");
   });
 
   it("runs an app's own registry", async () => {
@@ -182,8 +182,8 @@ describe("x-libs-check", () => {
   it("keeps only known settings of the right kind", () => {
     expect(options_from_manifest(null)).toEqual({});
     expect(options_from_manifest("{}")).toEqual({});
-    expect(options_from_manifest(JSON.stringify({ "x-libs-check": { commit_trailer: null, ai_mention: "robot", allowed_licences: ["MIT"], wrapped_libraries: [1], other: true } }))).toEqual({ commit_trailer: null, ai_mention: /robot/i, allowed_licences: ["MIT"] });
-    expect(options_from_manifest(JSON.stringify({ "x-libs-check": { ai_mention: null } }))).toEqual({ ai_mention: null });
+    expect(options_from_manifest(JSON.stringify({ "x-app-check": { commit_trailer: null, ai_mention: "robot", allowed_licences: ["MIT"], wrapped_libraries: [1], other: true } }))).toEqual({ commit_trailer: null, ai_mention: /robot/i, allowed_licences: ["MIT"] });
+    expect(options_from_manifest(JSON.stringify({ "x-app-check": { ai_mention: null } }))).toEqual({ ai_mention: null });
   });
 
   it("marks each outcome", () => {

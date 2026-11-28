@@ -1,18 +1,18 @@
-# X-Libs and Halon to-do
+# X-App and Halon to-do
 
 Work for a later pass, written down so another agent can pick it up. Check each item against current `main` first, since the libraries have moved on since this was logged.
 
-## X-Tasks look differences (Halon and X-Libs)
+## X-Tasks look differences (Halon and X-App)
 
 Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d524aa.
 
-1. PageHeading stacks the title, the "N left" count and the actions in three rows instead of one baseline row. Fix in X-Libs.
+1. PageHeading stacks the title, the "N left" count and the actions in three rows instead of one baseline row. Fix in X-App.
 2. Field labels were uppercase, 11px and tracked. They are now sentence case. Restore the caps in Halon.
 3. Table header column separators are gone. Restore them in Halon.
-4. The brand moved into the top bar and search no longer spans the full width. Fix in the X-Libs Shell; it affects every app.
+4. The brand moved into the top bar and search no longer spans the full width. Fix in the X-App Shell; it affects every app.
 5. The tree toggle glyph is a down triangle instead of the old chevron.
 
-## Candidates for the next X-Libs and Halon round
+## Candidates for the next X-App and Halon round
 
 - From X-Budget, X-Media-Tracker, X-Fitness, X-Dev, CODEX and X-Control: each has its own `src/shared/desktop.ts` holding the desktop app's settings (keep running in the background, start at login, and a tray icon where the app has one), `read_desktop_settings`, `DesktopMethods`/`DaemonMethods`, the daemon's `/daemon` call table, and a Desktop app section in Settings; one `desktop_settings` module with a `web/react` section would serve them all, beside `daemon_router`.
 - From X-Music: the page-view tabs clipped under the header on first open.
@@ -53,7 +53,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
   - `use_refresh`: following a job that runs on its own wherever the data is kept by asking its progress each second, including one already running when the page opens, and toasting its report when it ends (`src/web/refresh.ts`), for any app with a long background refresh.
   - Paced requests for services that ask for one request at a time or a gap between them, waiting out a 429's `Retry-After` (the Wikidata and MobyGames clients in `src/shared/games/`), beside X-Monitor's `Semaphore`.
   - Game catalogue clients for any app that shows games: RAWG, MobyGames, Giant Bomb, Wikidata and Steam answering in one shape, joined into one game, with Wikidata linking each catalogue's ids (`src/shared/games/{rawg,mobygames,giantbomb,wikidata,steam,catalog}.ts`).
-- From CODEX's assistant pane (2026-11-28, `src/web/assistant/pinned_scroll.ts`): a follow-the-tail hook that follows new content only while the reader is at the bottom and lets go only when the reader scrolls up, so growing content and its own scrolling never stop it (X-Libs `use_follow_tail` checks "at the bottom" on every scroll event, including its own, and gives up when more text arrives before the event); with a "Jump to latest" control and `overscroll-behavior: contain` for nested scrolling boxes.
+- From CODEX's assistant pane (2026-11-28, `src/web/assistant/pinned_scroll.ts`): a follow-the-tail hook that follows new content only while the reader is at the bottom and lets go only when the reader scrolls up, so growing content and its own scrolling never stop it (X-App `use_follow_tail` checks "at the bottom" on every scroll event, including its own, and gives up when more text arrives before the event); with a "Jump to latest" control and `overscroll-behavior: contain` for nested scrolling boxes.
 - From X-Tasks' worklog (2026-11-17): a `week` period for `PeriodStepper` (X-Tasks steps weeks with its own buttons in `src/web/WorklogPage.tsx`); a desktop `save_text_file` that asks where through Electron's Save dialog, with a browser download and a phone's copy beside it (`src/main/index.ts`, `src/web/web_bridge.ts`), since a blob download in Electron saves to Downloads without asking; and its RFC 4180 `csv_field` for the `csv` candidate below.
 - From X-Tasks' timer (2026-11-17): stretches of work with a start and an optional end, the open one counting up to now, totalled per local day with a stretch past midnight split between the days (`seconds_by_day`, `running_entry` and `time_spent_label` in `src/shared/time_tracking.ts`), and a running-timer chip for the `Shell`'s tools (`TimerBar` in `src/web/TimeTracking.tsx`), as a `time_tracking` module.
 - From X-Media-Tracker's merge window (2026-11-18, `src/web/merging.tsx`): `MergeGrid` options for a field the survivor leaves empty to default to the first record that has it, for `combine` to be offered without being the default (catalogues name the same genres differently), and for records that can lend values but not survive (catalogue answers beside tracked rows); and a `MergeWindow` over it with fields that write several columns, such as a book's authors with their ids, and a second grid for the records' own data.
@@ -78,7 +78,7 @@ Found when Halon 0.5 and X-Libs 0.11 were compared with the X-Tasks look at 9d52
 - From X-Control and X-Monitor: an MQTT link to Home Assistant on `mqtt_discovery`, as `server/mqtt_bridge`: one session with a retained last will, reconnecting with backoff, announcing everything again when `homeassistant/status` says `online`, clearing retained configs no entity has now, and publishing values only as they change (X-Control `src/server/home_assistant/bridge.ts`, X-Monitor `src/server/exporters/mqtt.ts`). With it, entities of every kind (sensor, binary sensor, switch, button, number, select, text) read on their own intervals with a timeout and set from Home Assistant's text (X-Control `src/server/computer/readings.ts`), and the `notify` component in `Component`.
 - From X-Control: a computer's readings on Linux from `/proc` and `/sys` (processor load per core, memory, disks with btrfs and bind mounts once, disk and network rates, hwmon temperatures told apart by device, GPUs without waking a sleeping NVIDIA card, logind idle, a restart waiting on NixOS), as `agent/readings` for X-Monitor's agent and X-Control (`src/server/system/linux_readings.ts`).
 - From X-Control: BlueZ profiles from Node, as `agent/bluez`: a `Profile1` registered on the system bus whose connections arrive as file descriptors (dbus-next with the native `usocket` module, built for Electron in the desktop package as X-Control's `nix/desktop-package.nix` does), the descriptor opened as a socket through libuv's pipe handle, and bonded devices offering a UUID asked to connect (X-Control `src/server/kdeconnect/bluetooth/bluez.ts`).
-- A widget gallery: a demo page that shows the `web/react` widgets (shell, tables, dialogs, settings panels, tiles) on Halon, with example data, so X-Libs has a screenshot for the Projects page of x-tech-laboratories.github.io (`src/content/docs/projects.mdx`) and a place to see a widget before using it. The `x-libs-site` generator could publish it as X-Libs' own Pages site.
+- A widget gallery: a demo page that shows the `web/react` widgets (shell, tables, dialogs, settings panels, tiles) on Halon, with example data, so X-App has a screenshot for the Projects page of x-tech-laboratories.github.io (`src/content/docs/projects.mdx`) and a place to see a widget before using it. The `x-app-site` generator could publish it as X-App's own Pages site.
 - From CODEX: file helpers for a page (`src/web/files.ts`), as `web/files`: `read_picked` hands on a file picker's text, then clears the picker so the same file can be picked again, and `save_text` saves text as a download; every app's settings import and export needs them.
 
 ## Settings, History and Users in Settings (Application Standard, 2026-11-13)
@@ -92,7 +92,7 @@ that do not yet:
 - X-Fitness: Users is a page with a row in the sidebar foot (`src/web/App.tsx`, `src/web/Sidebar.tsx`); move it to `users_settings`.
 - X-Music: no sync (Electron only, no server).
 - X-Nix: History is left out in its README (a log; items from config); no sync.
-- X-Stream: Settings does not use `SettingsPage` (`src/pages/Settings/Settings.tsx`); its playlist versions have no History page of their own (`/history` is watch history); no X-Libs sync.
+- X-Stream: Settings does not use `SettingsPage` (`src/pages/Settings/Settings.tsx`); its playlist versions have no History page of their own (`/history` is watch history); no X-App sync.
 - X-Tasks: Users is a `#/users` page and a sections entry (`src/web/SignedIn.tsx`); move it to `users_settings`.
 - CODEX: an options view on `SettingsGroup` rather than a `SettingsPage` (`src/web/views/options.tsx`); no History page and no README note leaving it out; no sync.
 

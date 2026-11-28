@@ -143,12 +143,12 @@ export function write_entries(project: SiteProject, plan: SitePlan): void {
   const css_lines = (project.config.css ?? []).map((sheet) => `import ${JSON.stringify(sheet.startsWith(".") ? from_work(resolve(project.root, sheet)) : sheet)};`);
   const draws_diagrams = plan.pages.some((page) => has_mermaid(readFileSync(join(project.content_folder, page.id), "utf8")));
   const start = draws_diagrams
-    ? `import { mermaid_drawer } from "@x-tech-laboratories/x-libs/web/site/mermaid";\nimport { pages } from "./pages.js";\n\nstart_site(pages, { draw_diagram: mermaid_drawer(() => import("mermaid")) });\n`
+    ? `import { mermaid_drawer } from "@x-tech-laboratories/x-app/web/site/mermaid";\nimport { pages } from "./pages.js";\n\nstart_site(pages, { draw_diagram: mermaid_drawer(() => import("mermaid")) });\n`
     : `import { pages } from "./pages.js";\n\nstart_site(pages);\n`;
   const files: Record<string, string> = {
     "pages.js": `export const pages = {\n${page_lines.join("\n")}\n};\n`,
-    "client.js": `${css_lines.join("\n")}\nimport { start_site } from "@x-tech-laboratories/x-libs/web/site/client";\n${start}`,
-    "server.js": `export { load_content, render_content, render_page } from "@x-tech-laboratories/x-libs/web/site/server";\nexport { pages } from "./pages.js";\n`,
+    "client.js": `${css_lines.join("\n")}\nimport { start_site } from "@x-tech-laboratories/x-app/web/site/client";\n${start}`,
+    "server.js": `export { load_content, render_content, render_page } from "@x-tech-laboratories/x-app/web/site/server";\nexport { pages } from "./pages.js";\n`,
     ".gitignore": "*\n",
   };
   for (const [name, text] of Object.entries(files)) {
@@ -199,7 +199,7 @@ function head_tags(project: SiteProject, page: PageData, route: Route | null): s
     `<meta name="viewport" content="width=device-width, initial-scale=1">`,
     `<title>${escape_html(full_title)}</title>`,
     description && `<meta name="description" content="${escape_html(description)}">`,
-    `<meta name="generator" content="X-Libs site">`,
+    `<meta name="generator" content="X-App site">`,
     `<meta property="og:title" content="${escape_html(page.title)}">`,
     `<meta property="og:site_name" content="${escape_html(config.title)}">`,
     `<meta property="og:type" content="website">`,

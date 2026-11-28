@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The `x-libs-check [--base <ref>] [check...]` command: runs the change checks on what changed since a base, for a CI
+// The `x-app-check [--base <ref>] [check...]` command: runs the change checks on what changed since a base, for a CI
 // job on a pull request, printing each check's findings one per line and failing when any check fails. An app with
 // checks of its own calls `run_check_command` with its own registry.
 
@@ -14,7 +14,7 @@ import { read_change } from "./change_checks_git.ts";
 // ── Options ──────────────────────────────────────────────────────────────────
 
 // The checks run when none are named.
-export const default_checks = ["commits", "secrets", "leftovers", "comments", "coverage", "x-libs", "dependencies"];
+export const default_checks = ["commits", "secrets", "leftovers", "comments", "coverage", "x-app", "dependencies"];
 
 export interface CheckCommandContext {
   cwd: string;
@@ -25,7 +25,7 @@ export interface CheckCommandContext {
   options?: Partial<ChangeCheckOptions>;
   // The checks run when none are named, the built-in ones unless given.
   default_checks?: readonly string[];
-  // The command's name in its usage and errors, x-libs-check unless given.
+  // The command's name in its usage and errors, x-app-check unless given.
   command_name?: string;
 }
 
@@ -35,13 +35,13 @@ function usage(command_name: string, defaults: readonly string[], names: string[
 Runs the change checks on what changed since the base (the branch point from origin/main unless given) and fails
 when any check fails. With no checks named it runs: ${defaults.join(", ")}.
 Checks: ${names.join(", ")}.
-Settings come from the "x-libs-check" key of package.json as it was at the base, so a change cannot loosen its own checks.`;
+Settings come from the "x-app-check" key of package.json as it was at the base, so a change cannot loosen its own checks.`;
 }
 
-// The settings package.json gives under "x-libs-check", keeping only known keys of the right kind.
+// The settings package.json gives under "x-app-check", keeping only known keys of the right kind.
 export function options_from_manifest(text: string | null): Partial<ChangeCheckOptions> {
   if (text === null) return {};
-  const given = (JSON.parse(text) as Record<string, unknown>)["x-libs-check"];
+  const given = (JSON.parse(text) as Record<string, unknown>)["x-app-check"];
   if (!given || typeof given !== "object") return {};
   const settings = given as Record<string, unknown>;
   const options: Partial<ChangeCheckOptions> = {};
@@ -74,7 +74,7 @@ async function git(args: string[], cwd: string): Promise<string> {
 // Runs the command with its arguments, answering the exit code: 0 when nothing failed, 1 when a check failed, 2 when misused.
 export async function run_check_command(args: string[], context: CheckCommandContext): Promise<number> {
   const registry = context.registry ?? create_check_registry();
-  const command_name = context.command_name ?? "x-libs-check";
+  const command_name = context.command_name ?? "x-app-check";
   const defaults = context.default_checks ?? default_checks;
   const help = () => usage(command_name, defaults, registry.names());
   let parsed;

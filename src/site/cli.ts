@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// The `x-libs-site` command: `dev` serves the site with live reloading, `build` writes it to dist/ for GitHub Pages and
+// The `x-app-site` command: `dev` serves the site with live reloading, `build` writes it to dist/ for GitHub Pages and
 // `preview` serves what was built, each for the site in the folder given or the current one.
 
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { build_site, preview_site, serve_site } from "./build.ts";
 
-const usage = "Usage: x-libs-site <dev|build|preview> [site folder] [--port <number>]";
+const usage = "Usage: x-app-site <dev|build|preview> [site folder] [--port <number>]";
 
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({ allowPositionals: true, options: { port: { type: "string" }, help: { type: "boolean", short: "h" } } });

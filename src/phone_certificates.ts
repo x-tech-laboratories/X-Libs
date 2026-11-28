@@ -1,5 +1,5 @@
 // Server certificates on a phone, such as a home sync server's self-signed one: the same calls the desktop app answers,
-// answered by X-Libs' XLibsCertificates plugin, which also lets the app's WebView reach the servers the user trusts.
+// answered by X-App's XLibsCertificates plugin, which also lets the app's WebView reach the servers the user trusts.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 

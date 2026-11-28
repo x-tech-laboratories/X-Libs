@@ -1,7 +1,7 @@
 // Checks on a change, such as a pull request, that any repository's CI can run: its commit messages, secrets, debug
-// leftovers and long comments in the lines it added, its coverage floor, imports of libraries X-Libs wraps, and the
+// leftovers and long comments in the lines it added, its coverage floor, imports of libraries X-App wraps, and the
 // licences of new dependencies. Each check works on a change already described, so it runs anywhere and its tests need
-// no repository; `change_checks_git` reads a change from git and `x-libs-check` runs the checks from a CI job.
+// no repository; `change_checks_git` reads a change from git and `x-app-check` runs the checks from a CI job.
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ export interface BeforeAndAfter {
 }
 
 export interface Change {
-  // The repository as owner/name, such as "x-tech-laboratories/X-Libs", or "" when it is not known.
+  // The repository as owner/name, such as "x-tech-laboratories/X-App", or "" when it is not known.
   repository: string;
   // The commit the change is measured from, as read_change resolved it.
   base?: string;
@@ -60,7 +60,7 @@ export interface ChangeCheckOptions {
   trailer_organisations: string[];
   // What a commit message may not say outside its trailer; null for no rule.
   ai_mention: RegExp | null;
-  // Packages X-Libs wraps, which an app imports through X-Libs; a name ending in "/" covers a whole scope.
+  // Packages X-App wraps, which an app imports through X-App; a name ending in "/" covers a whole scope.
   wrapped_libraries: string[];
   // Repositories, as owner/name, that wrap those packages and so may import them.
   wrapping_repositories: string[];
@@ -70,13 +70,13 @@ export interface ChangeCheckOptions {
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
-// X-Tech Laboratories' rules: the Assisted-by trailer, X-Libs' wrapped libraries, and licences GPL-3.0-or-later can take in.
+// X-Tech Laboratories' rules: the Assisted-by trailer, X-App's wrapped libraries, and licences GPL-3.0-or-later can take in.
 export const x_tech_options: ChangeCheckOptions = {
   commit_trailer: "Assisted-by",
   trailer_organisations: ["x-tech-laboratories"],
   ai_mention: /\b(claude|anthropic|co-authored-by|generated with|ai[- ]generated|chatgpt|copilot)\b/i,
   wrapped_libraries: ["drizzle-orm", "@tanstack/react-table", "lucide-react", "marked", "dompurify", "@tiptap/", "fflate", "rrule", "frimousse", "squarify", "react-error-boundary", "es-module-lexer", "hookable", "parse-duration", "pretty-bytes", "emojibase", "emojibase-data", "@sqlite.org/sqlite-wasm", "@modelcontextprotocol/server", "@fastify/session", "nodemailer", "sshpk"],
-  wrapping_repositories: ["x-tech-laboratories/X-Libs"],
+  wrapping_repositories: ["x-tech-laboratories/X-App"],
   allowed_licences: ["0BSD", "MIT", "MIT-0", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "Zlib", "Unlicense", "CC0-1.0", "CC-BY-3.0", "CC-BY-4.0", "BlueOak-1.0.0", "Python-2.0", "Artistic-2.0", "MPL-2.0", "LGPL-2.1-or-later", "LGPL-3.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later"],
 };
 
@@ -250,7 +250,7 @@ export function check_comments(files: readonly ChangedFile[]): GateResult {
   return verdict("comments", findings);
 }
 
-// ── X-Libs ───────────────────────────────────────────────────────────────────
+// ── X-App ────────────────────────────────────────────────────────────────────
 
 const import_from = /^\s*(?:import|export)\b[^"'`]*?\bfrom\s+["']([^"']+)["']|^\s*import\s+["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']/;
 
@@ -259,9 +259,9 @@ export function is_wrapping_repository(repository: string, options: Partial<Chan
   return options_with_defaults(options).wrapping_repositories.some((each) => each.toLowerCase() === repository.toLowerCase());
 }
 
-// Imports of a library X-Libs wraps, which an app reaches through X-Libs instead.
-export function check_x_libs(files: readonly ChangedFile[], is_wrapping: boolean, options: Partial<ChangeCheckOptions> = {}): GateResult {
-  if (is_wrapping) return passed("x-libs");
+// Imports of a library X-App wraps, which an app reaches through X-App instead.
+export function check_x_app(files: readonly ChangedFile[], is_wrapping: boolean, options: Partial<ChangeCheckOptions> = {}): GateResult {
+  if (is_wrapping) return passed("x-app");
   const { wrapped_libraries } = options_with_defaults(options);
   const findings: string[] = [];
   for (const file of files) {
@@ -269,10 +269,10 @@ export function check_x_libs(files: readonly ChangedFile[], is_wrapping: boolean
       const match = import_from.exec(added.text);
       const source = match?.[1] ?? match?.[2] ?? match?.[3];
       const wrapped = source && wrapped_libraries.find((library) => (library.endsWith("/") ? source.startsWith(library) : source === library || source.startsWith(`${library}/`)));
-      if (wrapped) findings.push(`${file.path}:${added.line} imports ${source}, which X-Libs wraps; import it from X-Libs`);
+      if (wrapped) findings.push(`${file.path}:${added.line} imports ${source}, which X-App wraps; import it from X-App`);
     }
   }
-  return verdict("x-libs", findings);
+  return verdict("x-app", findings);
 }
 
 // ── Coverage ─────────────────────────────────────────────────────────────────
@@ -352,14 +352,14 @@ function parse_manifest(text: string | null): Manifest | null {
   return text === null ? null : (JSON.parse(text) as Manifest);
 }
 
-// The checks X-Libs carries, by name.
+// The checks X-App carries, by name.
 export const builtin_checks: Record<string, ChangeCheck> = {
   commits: (change, options) => check_commits(change.commits, needs_trailer(change.repository, options), options),
   secrets: (change) => check_secrets(change.files, change.texts, change.commits),
   leftovers: (change) => check_leftovers(change.files),
   comments: (change) => check_comments(change.files),
   coverage: (change) => check_coverage(change.vitest_config.before, change.vitest_config.after),
-  "x-libs": (change, options) => check_x_libs(change.files, is_wrapping_repository(change.repository, options), options),
+  "x-app": (change, options) => check_x_app(change.files, is_wrapping_repository(change.repository, options), options),
   dependencies: (change, options) => check_dependencies(parse_manifest(change.package_json.before), parse_manifest(change.package_json.after), (name) => change.licences[name] ?? null, options),
 };
 

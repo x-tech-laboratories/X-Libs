@@ -2,7 +2,7 @@
 // resized from its corner or with Shift and the arrow keys; cards float up to fill the gaps, and a phone shows them in
 // a column in the same order. Built on react-grid-layout (MIT), chosen over Gridstack because it is React through and
 // through, keeps the layout as plain data the app saves, and covers dragging, resizing and compacting feature by
-// feature; X-Libs adds the keyboard path, the phone layout, placing new cards and Halon's markup.
+// feature; X-App adds the keyboard path, the phone layout, placing new cards and Halon's markup.
 
 import { type KeyboardEvent, type ReactNode } from "react";
 import ReactGridLayout, { moveElement, useContainerWidth, verticalCompactor, type Layout, type LayoutItem } from "react-grid-layout";

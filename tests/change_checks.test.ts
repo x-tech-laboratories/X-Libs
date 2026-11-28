@@ -7,7 +7,7 @@ import {
   check_dependencies,
   check_leftovers,
   check_secrets,
-  check_x_libs,
+  check_x_app,
   code_only,
   create_check_registry,
   is_wrapping_repository,
@@ -56,11 +56,11 @@ describe("the commits check", () => {
   it("takes another trailer and organisation, or no rules at all", () => {
     const options = { commit_trailer: "Signed-off-by", trailer_organisations: ["acme"], ai_mention: null };
     expect(needs_trailer("Acme/tool", options)).toBe(true);
-    expect(needs_trailer("x-tech-laboratories/X-Libs")).toBe(true);
+    expect(needs_trailer("x-tech-laboratories/X-App")).toBe(true);
     expect(needs_trailer("someone/else")).toBe(false);
     expect(check_commits([{ sha: "d".repeat(40), message: "fix: a\n\nSigned-off-by: Example User" }], true, options).outcome).toBe("passed");
     expect(check_commits([{ sha: "e".repeat(40), message: "fix: by Claude" }], false, { commit_trailer: null, ai_mention: null }).outcome).toBe("passed");
-    expect(needs_trailer("x-tech-laboratories/X-Libs", { commit_trailer: null })).toBe(false);
+    expect(needs_trailer("x-tech-laboratories/X-App", { commit_trailer: null })).toBe(false);
   });
 });
 
@@ -129,30 +129,30 @@ describe("the comments check", () => {
 });
 
 // ============================================================================
-// X-Libs, coverage and dependencies
+// X-App, coverage and dependencies
 // ============================================================================
 
-describe("the x-libs check", () => {
-  it("knows the libraries X-Libs' SQLite, MCP, sign-in, mail, key and emoji modules wrap", () => {
+describe("the x-app check", () => {
+  it("knows the libraries X-App's SQLite, MCP, sign-in, mail, key and emoji modules wrap", () => {
     const sources = ["@sqlite.org/sqlite-wasm", "@modelcontextprotocol/server", "@fastify/session", "nodemailer", "sshpk", "emojibase", "emojibase-data/en/data.json"];
     const files = [changed("src/a.ts", sources.map((source) => `import x from "${source}";`)), changed("src/b.ts", ['import cors from "@fastify/cors";', 'import semver from "semver";'])];
-    expect(check_x_libs(files, false).findings).toHaveLength(sources.length);
+    expect(check_x_app(files, false).findings).toHaveLength(sources.length);
   });
 
-  it("fails an app's import of a library X-Libs wraps, but not X-Libs' own", () => {
-    const files = [changed("src/a.ts", ['import { eq } from "drizzle-orm";', 'import { Editor } from "@tiptap/react";', 'import { x } from "@x-tech-laboratories/x-libs/drizzle";', 'const m = await import("marked/lib");'])];
-    expect(check_x_libs(files, false).findings).toEqual([
-      "src/a.ts:1 imports drizzle-orm, which X-Libs wraps; import it from X-Libs",
-      "src/a.ts:2 imports @tiptap/react, which X-Libs wraps; import it from X-Libs",
-      "src/a.ts:4 imports marked/lib, which X-Libs wraps; import it from X-Libs",
+  it("fails an app's import of a library X-App wraps, but not X-App's own", () => {
+    const files = [changed("src/a.ts", ['import { eq } from "drizzle-orm";', 'import { Editor } from "@tiptap/react";', 'import { x } from "@x-tech-laboratories/x-app/drizzle";', 'const m = await import("marked/lib");'])];
+    expect(check_x_app(files, false).findings).toEqual([
+      "src/a.ts:1 imports drizzle-orm, which X-App wraps; import it from X-App",
+      "src/a.ts:2 imports @tiptap/react, which X-App wraps; import it from X-App",
+      "src/a.ts:4 imports marked/lib, which X-App wraps; import it from X-App",
     ]);
-    expect(check_x_libs(files, true).outcome).toBe("passed");
-    expect(check_x_libs(files, false, { wrapped_libraries: ["left-pad"] }).outcome).toBe("passed");
+    expect(check_x_app(files, true).outcome).toBe("passed");
+    expect(check_x_app(files, false, { wrapped_libraries: ["left-pad"] }).outcome).toBe("passed");
   });
 
   it("knows the wrapping repository whatever its case", () => {
-    expect(is_wrapping_repository("X-Tech-Laboratories/x-libs")).toBe(true);
-    expect(is_wrapping_repository("someone/X-Libs")).toBe(false);
+    expect(is_wrapping_repository("X-Tech-Laboratories/x-app")).toBe(true);
+    expect(is_wrapping_repository("someone/X-App")).toBe(false);
   });
 });
 
@@ -211,14 +211,14 @@ describe("the check registry", () => {
       licences: { yaml: "ISC" },
     });
     const registry = create_check_registry();
-    const results = await registry.run(["commits", "secrets", "leftovers", "comments", "coverage", "x-libs", "dependencies"], change);
+    const results = await registry.run(["commits", "secrets", "leftovers", "comments", "coverage", "x-app", "dependencies"], change);
     expect(results.map((result) => [result.gate, result.outcome])).toEqual([
       ["commits", "failed"],
       ["secrets", "passed"],
       ["leftovers", "failed"],
       ["comments", "passed"],
       ["coverage", "failed"],
-      ["x-libs", "failed"],
+      ["x-app", "failed"],
       ["dependencies", "warning"],
     ]);
     expect(results[0]!.findings).toEqual(["aaaaaaa has no Assisted-by trailer"]);
