@@ -4,10 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, test } from "vitest";
 
 import type { CertificateClient } from "../src/certificate_protocol.ts";
-import type { PeerStatus, SyncDeviceClient, SyncStatus } from "../src/sync_protocol.ts";
+import type { PeerListening, PeerListeningClient, PeerStatus, SyncDeviceClient, SyncStatus } from "../src/sync_protocol.ts";
 import { SyncCertificatePrompt } from "../src/web/react/certificates.tsx";
 import { Dialogs } from "../src/web/react/dialog.tsx";
-import { SyncButton, SyncSettings } from "../src/web/react/sync_settings.tsx";
+import { PeerListeningSettings, SyncButton, SyncSettings } from "../src/web/react/sync_settings.tsx";
 import { Toasts } from "../src/web/react/toasts.tsx";
 
 afterEach(cleanup);
@@ -124,4 +124,25 @@ test("the sidebar button says sync is not set up while off and opens the setting
   fireEvent.click(await screen.findByRole("button", { name: /Sync failed/ }));
   expect(opened).toBe(2);
   expect(syncs).toBe(1);
+});
+
+test("turns letting other devices connect on, shows where they reach it, moves the port, and says why a port would not open", async () => {
+  let state: PeerListening = { on: false, port: 3920, addresses: [], error: "" };
+  const calls: [boolean, number | undefined][] = [];
+  const listening: PeerListeningClient = {
+    get_peer_listening: async () => state,
+    set_peer_listening: async (on, port) => {
+      calls.push([on, port]);
+      state = port === 80 ? { on, port, addresses: [], error: "permission denied" } : { on, port: port ?? 3920, addresses: on ? [`http://192.168.1.5:${port}/`] : [], error: "" };
+      return state;
+    },
+  };
+  render(<><PeerListeningSettings listening={listening} /><Toasts /></>);
+
+  fireEvent.click(await screen.findByRole("switch", { name: "Let other devices connect" }));
+  await waitFor(() => screen.getByText("Paired devices reach this one at http://192.168.1.5:3920/."));
+  fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "80" } });
+  fireEvent.blur(screen.getByRole("spinbutton"));
+  await waitFor(() => screen.getByText("Other devices cannot connect: permission denied"));
+  expect(calls).toEqual([[true, 3920], [true, 80]]);
 });

@@ -5,9 +5,10 @@
 // SyncButton is the same status as a sidebar row that syncs on a click.
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { format_device_id, type PeerStatus, type SyncDeviceClient, type SyncStatus } from "../../sync_protocol.ts";
+import { format_device_id, type PeerListening, type PeerListeningClient, type PeerStatus, type SyncDeviceClient, type SyncStatus } from "../../sync_protocol.ts";
 import { describe_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
+import { Switch } from "./controls.tsx";
 import { confirm_dialog, text_dialog } from "./dialog.tsx";
 import { SettingRow } from "./layout.tsx";
 import { toast } from "./toasts.tsx";
@@ -110,6 +111,39 @@ export function SyncSettings({ device, subscribe, data_name = "data", extra }: S
         </SettingRow>
       </form>
       {extra}
+    </>
+  );
+}
+
+// ── Listening ────────────────────────────────────────────────────────────────
+
+// A desktop's "Let other devices connect" switch and its port, for the Sync section's extra rows.
+export function PeerListeningSettings({ listening }: { listening: PeerListeningClient }) {
+  const [state, set_state] = useState<PeerListening | null>(null);
+  const [port, set_port] = useState("");
+
+  useEffect(() => void listening.get_peer_listening().then((read) => (set_state(read), set_port(String(read.port)))), [listening]);
+
+  async function change(on: boolean, typed = port): Promise<void> {
+    try {
+      const next = await listening.set_peer_listening(on, Number(typed));
+      set_state(next);
+      if (next.error) toast(`Other devices cannot connect: ${next.error}`, { tone: "bad" });
+    } catch (error) {
+      toast(error_text(error), { tone: "bad" });
+    }
+  }
+
+  if (!state) return null;
+  const hint = state.on && state.addresses.length > 0 ? `Paired devices reach this one at ${state.addresses.join(", ")}.` : "Lets paired devices on your networks reach this one, so they sync without a server between them.";
+  return (
+    <>
+      <SettingRow label="Let other devices connect" hint={state.error ? `The port could not be opened: ${state.error}` : hint} as_label>
+        <Switch label="Let other devices connect" checked={state.on} on_change={(on) => change(on)} />
+      </SettingRow>
+      <SettingRow label="Port" hint="The port other devices connect to." as_label>
+        <input type="number" min={1} max={65535} value={port} onChange={(event) => set_port(event.currentTarget.value)} onBlur={() => state.on && Number(port) !== state.port && void change(true)} />
+      </SettingRow>
     </>
   );
 }

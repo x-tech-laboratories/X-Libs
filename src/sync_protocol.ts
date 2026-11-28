@@ -195,3 +195,23 @@ export const sync_device_method_names = [
 
 // The same calls as the page makes them, each answered later, as a bridge's client gives them.
 export type SyncDeviceClient = { [Name in keyof SyncDeviceMethods]: (...args: Parameters<SyncDeviceMethods[Name]>) => Promise<Awaited<ReturnType<SyncDeviceMethods[Name]>>> };
+
+// ── Listening ────────────────────────────────────────────────────────────────
+
+// Whether a desktop daemon lets other devices reach it, on which port, and where they reach it.
+export interface PeerListening {
+  on: boolean;
+  port: number;
+  addresses: string[];
+  // Why the port could not be opened, such as another program holding it; empty when it opened.
+  error: string;
+}
+
+export interface PeerListeningMethods {
+  get_peer_listening: () => PeerListening;
+  set_peer_listening: (on: boolean, port?: number) => Promise<PeerListening>;
+}
+
+export const peer_listening_method_names = ["get_peer_listening", "set_peer_listening"] as const satisfies readonly (keyof PeerListeningMethods)[];
+
+export type PeerListeningClient = { [Name in keyof PeerListeningMethods]: (...args: Parameters<PeerListeningMethods[Name]>) => Promise<Awaited<ReturnType<PeerListeningMethods[Name]>>> };
