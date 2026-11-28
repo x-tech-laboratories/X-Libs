@@ -77,6 +77,20 @@ class FakeTray {
   isDestroyed = () => this.destroyed;
 }
 
+// Electron's own Tray takes only its own images and nativeImage makes them, as ElectronLike must take; checked by tsc.
+class StrictImage {
+  resize = (): StrictImage => this;
+}
+class StrictTray {
+  constructor(_image: string | StrictImage) {}
+  on = () => this;
+  setToolTip = () => undefined;
+  setContextMenu = () => undefined;
+  destroy = () => undefined;
+  isDestroyed = () => false;
+}
+const strict_tray_parts: Pick<ElectronLike, "Tray" | "nativeImage"> = { Tray: StrictTray, nativeImage: { createFromPath: () => new StrictImage() } };
+
 interface Fake {
   electron: ElectronLike;
   handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown>;
@@ -254,6 +268,16 @@ describe("app desktop window", { timeout: 30_000 }, () => {
     FakeWindow.made[0]!.webContents.once.mock.calls[0]![1]();
 
     expect(FakeWindow.made[0]!.webContents.send).toHaveBeenCalledWith(sample_app.bridges.events.channel, { name: "app_event", payload: { event: "open", data: "#/note/note-1" } });
+  });
+
+  it("takes Electron's own Tray and nativeImage, and a dev profile given as an absolute path", async () => {
+    const fake = fake_electron();
+    const own_profile = join(profile, "absolute-dev");
+    run(fake, fake_daemon({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true }), { env: { X_SAMPLE_USER_DATA: own_profile } });
+    await until(() => FakeTray.made.length > 0);
+
+    expect(strict_tray_parts.Tray).toBe(StrictTray);
+    expect(fake.electron.app.getPath("userData")).toBe(own_profile);
   });
 
   it("sizes the first window from the screen, tells the daemon while it is in front, and keeps a dev run off the declarations", async () => {
