@@ -136,7 +136,7 @@ describe("web host", () => {
 
   it("reaches the server's sync and backups, and asks to sign in when signed out", async () => {
     vi.stubGlobal("EventSource", FakeEventSource);
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => (path.startsWith("api/device/") ? new Response("", { status: 401 }) : new Response(null, { status: 204 }))));
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => (path.startsWith("api/sync/") ? new Response("", { status: 401 }) : new Response(null, { status: 204 }))));
 
     const api = web_api(sample_app);
 

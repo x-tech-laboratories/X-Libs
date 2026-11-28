@@ -17,22 +17,25 @@ function setup(listen_fails = false) {
   const stopped = vi.fn();
   const discover = vi.fn(() => ({ stop: stopped }));
   const peer = { device: "ME" } as unknown as SyncPeer;
-  const control = keep_listening_for_peers({ peer: () => peer, app: "x-test", file, default_port: 3920, listen: listen as never, discover: discover as never });
-  return { file, control, listen, closed, discover, stopped };
+  const certificate = vi.fn(async () => ({ cert: "CERT", key: "KEY", fingerprint: "AB:CD" }));
+  const control = keep_listening_for_peers({ peer: () => peer, app: "x-test", file, default_port: 3920, listen: listen as never, discover: discover as never, certificate });
+  return { file, control, listen, closed, discover, stopped, certificate };
 }
 
 describe("keep_listening_for_peers", () => {
   it("stays off until turned on, looking for paired devices all the same", async () => {
     const { control, listen, discover } = setup();
     await control.start();
-    expect(control.methods.get_peer_listening()).toEqual({ on: false, port: 3920, addresses: [], error: "" });
+    expect(control.methods.get_peer_listening()).toEqual({ on: false, port: 3920, addresses: [], fingerprint: "", error: "" });
     expect(listen).not.toHaveBeenCalled();
     expect(discover).toHaveBeenCalledWith(expect.objectContaining({ app: "x-test", port: undefined }));
   });
 
   it("opens the port when turned on, moves it, and closes it when turned off, keeping the choice", async () => {
-    const { file, control, listen, closed } = setup();
-    expect(await control.methods.set_peer_listening(true)).toEqual({ on: true, port: 3920, addresses: ["http://192.168.1.5:3920/"], error: "" });
+    const { file, control, listen, closed, certificate } = setup();
+    expect(await control.methods.set_peer_listening(true)).toEqual({ on: true, port: 3920, addresses: ["http://192.168.1.5:3920/"], fingerprint: "AB:CD", error: "" });
+    expect(listen).toHaveBeenLastCalledWith(expect.objectContaining({ https: { cert: "CERT", key: "KEY" } }));
+    expect(certificate).toHaveBeenCalledWith(join(file, "..", "sync-certificate.json"), "x-test on this computer", expect.any(Array));
     expect(control.addresses()).toEqual(["http://192.168.1.5:3920/"]);
     await control.methods.set_peer_listening(true, 4000);
     expect(listen).toHaveBeenLastCalledWith(expect.objectContaining({ port: 4000 }));

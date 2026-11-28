@@ -5,9 +5,11 @@
 // SyncButton is the same status as a sidebar row that syncs on a click.
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { CertificateClient } from "../../certificate_protocol.ts";
 import { format_device_id, type PeerListening, type PeerListeningClient, type PeerStatus, type SyncDeviceClient, type SyncStatus } from "../../sync_protocol.ts";
 import { describe_error } from "../errors.ts";
 import { StatusPill } from "./badges.tsx";
+import { offer_certificate_trust } from "./certificates.tsx";
 import { Switch } from "./controls.tsx";
 import { confirm_dialog, text_dialog } from "./dialog.tsx";
 import { SettingRow } from "./layout.tsx";
@@ -22,10 +24,23 @@ export interface SyncSettingsProps {
   data_name?: string;
   // More rows after the section, such as the switch that lets other devices connect.
   extra?: ReactNode;
+  // Asks to review and trust the other device's self-signed certificate when pairing fails over it, then pairs again.
+  certificates?: CertificateClient;
 }
 
 const tones = { off: "none", idle: "good", syncing: "info", offline: "warn", failed: "bad" } as const;
 const state_text = { off: "Not paired with another device", idle: "Synced", syncing: "Syncing", offline: "Offline", failed: "Failed" } as const;
+
+// The addresses a pairing code says its device answers at, or none when it is not a whole code; it checks nothing else.
+function addresses_in_pairing_code(code: string): string[] {
+  try {
+    const text = code.replace(/\s+/g, "").replace(/^x-sync:/, "").replaceAll("-", "+").replaceAll("_", "/");
+    const offer = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(text.padEnd(Math.ceil(text.length / 4) * 4, "=")), (letter: string) => letter.charCodeAt(0)))) as { addresses?: unknown };
+    return Array.isArray(offer.addresses) ? offer.addresses.filter((address): address is string => typeof address === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 // Strips what Electron adds in front of an error that crossed from the main process.
 function error_text(error: unknown): string {
@@ -47,7 +62,7 @@ function PeerRow({ peer, on_remove }: { peer: PeerStatus; on_remove: () => void 
   );
 }
 
-export function SyncSettings({ device, subscribe, data_name = "data", extra }: SyncSettingsProps) {
+export function SyncSettings({ device, subscribe, data_name = "data", extra, certificates }: SyncSettingsProps) {
   const [status, set_status] = useState<SyncStatus | null>(null);
   const [code, set_code] = useState("");
   const [busy, set_busy] = useState(false);
@@ -67,14 +82,24 @@ export function SyncSettings({ device, subscribe, data_name = "data", extra }: S
     }
   }
 
-  async function pair(event: FormEvent): Promise<void> {
-    event.preventDefault();
+  // The first https address whose certificate the user trusts after reviewing it, if any.
+  async function trusted_after_review(): Promise<boolean> {
+    if (!certificates) return false;
+    for (const address of addresses_in_pairing_code(code).filter((each) => each.startsWith("https:"))) {
+      if (await offer_certificate_trust(address, certificates)) return true;
+    }
+    return false;
+  }
+
+  async function pair(event: FormEvent | null, is_retry = false): Promise<void> {
+    event?.preventDefault();
     set_busy(true);
     try {
       set_status(await device.pair_device(code));
       set_code("");
       toast(`Paired. The ${data_name} on both devices are merged, the newest change to each winning.`, { tone: "good" });
     } catch (error) {
+      if (!is_retry && (await trusted_after_review())) return void (await pair(null, true));
       toast(error_text(error), { tone: "bad" });
     } finally {
       set_busy(false);
@@ -135,7 +160,9 @@ export function PeerListeningSettings({ listening }: { listening: PeerListeningC
   }
 
   if (!state) return null;
-  const hint = state.on && state.addresses.length > 0 ? `Paired devices reach this one at ${state.addresses.join(", ")}.` : "Lets paired devices on your networks reach this one, so they sync without a server between them.";
+  const reached = state.on && state.addresses.length > 0 ? `Paired devices reach this one at ${state.addresses.join(", ")}.` : "Lets paired devices on your networks reach this one over https, so they sync without a server between them.";
+  // The other device asks to trust this one's self-signed certificate once; its fingerprint there should match this one.
+  const hint = state.fingerprint ? `${reached} Its certificate's fingerprint is ${state.fingerprint}.` : reached;
   return (
     <>
       <SettingRow label="Let other devices connect" hint={state.error ? `The port could not be opened: ${state.error}` : hint} as_label>

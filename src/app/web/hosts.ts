@@ -19,7 +19,8 @@ import type { DesktopMethods, PageApi } from "../protocol.ts";
 // Relative, so a server behind a proxy under a folder keeps it.
 const call_path = "api/call/";
 const backups_path = "api/backups/";
-const device_path = "api/device/";
+// The server's own sync calls sit beside the route paired devices sync through.
+const device_path = "api/sync/";
 const events_path = "api/events";
 const client_id_header = "x-client-id";
 const reconnect_delay_ms = 5000;

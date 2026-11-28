@@ -7,7 +7,7 @@
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
 
-import fastify, { type FastifyInstance } from "fastify";
+import fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 
 import type { SyncPeer } from "../sync_peer.ts";
 import { peer_device_header, peer_key_header, sync_peer_path } from "../sync_protocol.ts";
@@ -49,6 +49,8 @@ export interface PeerListenerOptions {
   host?: string;
   port: number;
   body_limit?: number;
+  // The certificate and key it serves https with; plain http without them, which only a test or a trusted tunnel should use.
+  https?: { cert: string; key: string };
 }
 
 export interface PeerListener {
@@ -60,12 +62,12 @@ export interface PeerListener {
 }
 
 // The computer's own addresses other devices on its networks can reach, leaving out loopback and link-local ones.
-export function reachable_addresses(port: number, interfaces = networkInterfaces()): string[] {
+export function reachable_addresses(port: number, interfaces = networkInterfaces(), scheme: "http" | "https" = "http"): string[] {
   const found: string[] = [];
   for (const entries of Object.values(interfaces)) {
     for (const entry of entries ?? []) {
       if (entry.internal || (entry.family === "IPv6" && entry.address.toLowerCase().startsWith("fe80"))) continue;
-      found.push(entry.family === "IPv6" ? `http://[${entry.address}]:${port}/` : `http://${entry.address}:${port}/`);
+      found.push(entry.family === "IPv6" ? `${scheme}://[${entry.address}]:${port}/` : `${scheme}://${entry.address}:${port}/`);
     }
   }
   return found;
@@ -73,10 +75,11 @@ export function reachable_addresses(port: number, interfaces = networkInterfaces
 
 // A desktop daemon's port for other devices, opened only once the user lets other devices connect.
 export async function listen_for_peers(options: PeerListenerOptions): Promise<PeerListener> {
-  const app = fastify({ forceCloseConnections: true });
+  const app = fastify({ forceCloseConnections: true, ...(options.https ? { https: options.https } : {}) } as FastifyServerOptions);
   await register_open_cors(app, { allowed_headers: sync_peer_headers });
   register_sync_peer_routes(app, options.peer, { body_limit: options.body_limit });
   await app.listen({ host: options.host ?? "::", port: options.port });
   const port = (app.server.address() as AddressInfo).port;
-  return { close: () => app.close(), port, addresses: () => reachable_addresses(port) };
+  const scheme = options.https ? "https" : "http";
+  return { close: () => app.close(), port, addresses: () => reachable_addresses(port, networkInterfaces(), scheme) };
 }

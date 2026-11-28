@@ -131,7 +131,7 @@ describe("app server", () => {
 
     const listed = await server!.inject({ method: "POST", url: "/api/backups/list_backups", payload: [], headers: { cookie } });
     const refused = await server!.inject({ method: "POST", url: "/api/backups/list_backups", payload: [], headers: { cookie: reader_cookie } });
-    const pairing = await server!.inject({ method: "POST", url: "/api/device/create_pairing_code", payload: [], headers: { cookie } });
+    const pairing = await server!.inject({ method: "POST", url: "/api/sync/create_pairing_code", payload: [], headers: { cookie } });
 
     expect(listed.json()).toEqual([]);
     expect(refused.statusCode).toBe(403);
@@ -144,7 +144,7 @@ describe("app server", () => {
     await start();
 
     expect((await server!.inject({ method: "POST", url: "/api/call/list_notes", payload: [] })).statusCode).toBe(401);
-    expect((await server!.inject({ method: "POST", url: "/api/device/get_sync_status", payload: [] })).statusCode).toBe(401);
+    expect((await server!.inject({ method: "POST", url: "/api/sync/get_sync_status", payload: [] })).statusCode).toBe(401);
     const sealed = await server!.inject({ method: "POST", url: "/api/sync/peer", headers: { "content-type": "application/octet-stream" }, payload: Buffer.from("not sealed") });
     expect(sealed.statusCode).not.toBe(401);
   });
