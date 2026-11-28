@@ -125,6 +125,11 @@ async function host_api(app: App): Promise<PageApi> {
 
 // Starts the page on whichever host it runs: the desktop app, the phone app or a browser.
 export async function render_app(pages: AppPages & { app: App }, root: HTMLElement = document.getElementById("app")!): Promise<void> {
-  set_page_api(await host_api(pages.app));
+  const api = await host_api(pages.app);
+  set_page_api(api);
+  // A link the desktop app was opened with, or a tray row, opens its page.
+  api.on_event?.("open", (route) => {
+    if (typeof route === "string" && route.startsWith("#/")) location.hash = route;
+  });
   createRoot(root).render(<AppView pages={pages} />);
 }

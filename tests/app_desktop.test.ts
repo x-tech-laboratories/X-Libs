@@ -9,6 +9,7 @@ import { start_daemon } from "../src/app/daemon.ts";
 import { run_desktop, type DesktopOptions, type ElectronLike } from "../src/app/desktop.ts";
 import { daemon_socket_path } from "../src/local_daemon.ts";
 import { run_preload } from "../src/app/preload.ts";
+import { route_of_link } from "../src/app/links.ts";
 import { sample_app } from "./app/sample_app.ts";
 
 // ============================================================================
@@ -35,7 +36,7 @@ class FakeWindow {
 
   options: unknown;
   focused = 0;
-  webContents = { setWindowOpenHandler: vi.fn(), on: vi.fn(), send: vi.fn(), reload: vi.fn() };
+  webContents = { setWindowOpenHandler: vi.fn(), on: vi.fn(), once: vi.fn(), send: vi.fn(), reload: vi.fn() };
 
   constructor(options: unknown) {
     this.options = options;
@@ -53,8 +54,27 @@ class FakeWindow {
   loadURL = vi.fn(async () => undefined);
   loadFile = vi.fn(async () => undefined);
   isMinimized = () => false;
+  isFocused = () => true;
+  isVisible = () => true;
   restore = vi.fn();
   focus = () => void this.focused++;
+}
+
+class FakeTray {
+  static made: FakeTray[] = [];
+  menu: { label?: string; click?: () => void }[] = [];
+  tooltip = "";
+  destroyed = false;
+
+  constructor() {
+    FakeTray.made.push(this);
+  }
+
+  on = vi.fn();
+  setToolTip = (text: string) => void (this.tooltip = text);
+  setContextMenu = (menu: { label?: string; click?: () => void }[]) => void (this.menu = menu);
+  destroy = () => void (this.destroyed = true);
+  isDestroyed = () => this.destroyed;
 }
 
 interface Fake {
@@ -68,6 +88,7 @@ interface Fake {
 
 function fake_electron(): Fake {
   FakeWindow.made = [];
+  FakeTray.made = [];
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
   const listeners = new Map<string, (...args: unknown[]) => void>();
   const exit = vi.fn();
@@ -90,15 +111,18 @@ function fake_electron(): Fake {
     dialog: { showErrorBox: error_box },
     ipcMain: { handle: (channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) => void handlers.set(channel, listener), removeHandler: (channel: string) => void handlers.delete(channel) },
     nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), removeListener: vi.fn() },
-    screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }] },
+    screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }], getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
     shell: { openExternal: vi.fn(async () => undefined) },
+    Tray: FakeTray,
+    Menu: { buildFromTemplate: (template: unknown) => template },
+    nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
   } as unknown as ElectronLike;
   quitters.push(() => listeners.get("will-quit")?.());
   return { electron, handlers, listeners, exit, quit, error_box };
 }
 
 // The desktop settings the daemon answers with, and every call the window made to it.
-function fake_daemon(settings = { keep_running_in_background: true, start_at_login: true }) {
+function fake_daemon(settings: Record<string, boolean> = { show_tray_icon: false, keep_running_in_background: true, start_at_login: true }) {
   const calls: { path: string; args: unknown[] }[] = [];
   const call_daemon = vi.fn(async (_socket: string, path: string, args: unknown[] = []) => {
     calls.push({ path, args });
@@ -190,6 +214,61 @@ describe("app desktop window", { timeout: 30_000 }, () => {
 
     expect(daemon.calls).toContainEqual({ path: expect.stringContaining("daemon/set_desktop_setting"), args: ["keep_running_in_background", false] });
     expect(daemon.set_autostart).toHaveBeenLastCalledWith(expect.anything(), false);
+  });
+
+  it("keeps a tray with the app's own rows above Show and Quit, and stays in it when the last window closes", async () => {
+    const fake = fake_electron();
+    const daemon = fake_daemon({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true });
+    run(fake, daemon, { tray: async () => ({ tooltip: "X-Sample · 1 note", rows: [{ kind: "item", label: "1 note", run: () => undefined }] }) });
+    await until(() => (FakeTray.made[0]?.menu.length ?? 0) > 0);
+
+    fake.listeners.get("window-all-closed")!();
+
+    expect(FakeTray.made[0]!.tooltip).toBe("X-Sample · 1 note");
+    expect(FakeTray.made[0]!.menu.map((row) => row.label)).toEqual(["1 note", undefined, "Show X-Sample", "Quit", "Quit completely"]);
+    expect(fake.quit).not.toHaveBeenCalled();
+  });
+
+  it("quits when the last window closes without a tray, and starts hidden only when there is one", async () => {
+    const fake = fake_electron();
+    run(fake, fake_daemon(), { argv: ["--hidden"] });
+    await until(() => FakeWindow.made.length > 0);
+
+    fake.listeners.get("window-all-closed")!();
+
+    expect(FakeTray.made).toHaveLength(0);
+    expect(fake.quit).toHaveBeenCalled();
+
+    const tray_fake = fake_electron();
+    run(tray_fake, fake_daemon({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true }), { argv: ["--hidden"] });
+    await until(() => FakeTray.made.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(FakeWindow.made).toHaveLength(0);
+  });
+
+  it("opens the window on the page a link names, once the page has loaded", async () => {
+    const fake = fake_electron();
+    run(fake, fake_daemon(), { argv: ["x-sample://note/note-1"], route_of_link: (link) => route_of_link("x-sample", link) });
+    await until(() => FakeWindow.made[0]?.webContents.once.mock.calls.length === 1);
+
+    FakeWindow.made[0]!.webContents.once.mock.calls[0]![1]();
+
+    expect(FakeWindow.made[0]!.webContents.send).toHaveBeenCalledWith(sample_app.bridges.events.channel, { name: "app_event", payload: { event: "open", data: "#/note/note-1" } });
+  });
+
+  it("sizes the first window from the screen, tells the daemon while it is in front, and keeps a dev run off the declarations", async () => {
+    const fake = fake_electron();
+    const daemon = fake_daemon();
+    run(fake, daemon, { env: { X_SAMPLE_USER_DATA: "dev-data" }, default_size: (area) => ({ width: area.width / 2, height: area.height / 2 }) });
+    await until(() => FakeWindow.made.length > 0);
+
+    const focus = FakeWindow.made[0]!.on.mock.calls.find(([event]) => event === "focus")![1] as () => void;
+    focus();
+    await until(() => daemon.calls.some((each) => each.path.endsWith("daemon/set_window_in_front")));
+
+    expect(FakeWindow.made[0]!.options).toMatchObject({ width: 960, height: 540 });
+    expect(daemon.calls).toContainEqual({ path: expect.stringContaining("daemon/set_window_in_front"), args: [true] });
+    expect(daemon.start_daemon).toHaveBeenCalledWith(expect.objectContaining({ env: expect.objectContaining({ X_SAMPLE_DECLARED_FILE: "", X_SAMPLE_ICON: join(main_dir, "../../resources/icon.png") }) }));
   });
 
   it("quits completely, stopping the daemon too", async () => {

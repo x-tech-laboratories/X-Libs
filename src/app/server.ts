@@ -308,6 +308,8 @@ export async function run_server(app: App, options: RunServerOptions): Promise<R
         emit: (event, data) => changes.send(JSON.stringify(data), { event }),
         side_database: sides.open,
         back_up: opened.back_up,
+        window_in_front: () => false,
+        icon_path: null,
       })
     : no_services;
   opened.on_restore({ before: () => services.before_restore?.(), after: () => services.after_restore?.() });

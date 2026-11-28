@@ -34,6 +34,10 @@ export interface HostContext {
   side_database: (name: string) => DatabaseSync;
   // A backup of the main database made now, such as before the services change much of it.
   back_up: () => Promise<void>;
+  // Whether one of the desktop app's windows is in front, so a notification can stay quiet; never on the server.
+  window_in_front: () => boolean;
+  // The app's icon for a notification, which the desktop app hands its daemon; null on the server.
+  icon_path: string | null;
 }
 
 export interface HostServices {

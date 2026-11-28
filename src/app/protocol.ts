@@ -11,21 +11,32 @@ import type { PeerListeningClient, SyncDeviceClient } from "../sync_protocol.ts"
 
 // ── Desktop settings ─────────────────────────────────────────────────────────
 
+// The base's own, beside any switches the app adds of its own, such as which notifications this computer shows.
 export interface DesktopSettings {
+  show_tray_icon: boolean;
   keep_running_in_background: boolean;
   start_at_login: boolean;
+  [key: string]: boolean;
 }
 
 export const desktop_setting_defaults: DesktopSettings = {
+  show_tray_icon: true,
   keep_running_in_background: true,
   start_at_login: true,
 };
 
-// Settings saved on the device, each default where it is missing or damaged.
-export function read_desktop_settings(saved: unknown): DesktopSettings {
-  const settings = (saved ?? {}) as Partial<Record<keyof DesktopSettings, unknown>>;
-  const flag = (key: keyof DesktopSettings): boolean => (typeof settings[key] === "boolean" ? settings[key] : desktop_setting_defaults[key]);
-  return { keep_running_in_background: flag("keep_running_in_background"), start_at_login: flag("start_at_login") };
+// One of the app's own desktop switches, as Settings → Desktop app shows it.
+export interface DesktopSettingSpec {
+  default: boolean;
+  label: string;
+  hint?: string;
+}
+
+// Settings saved on the device, the base's and the app's own, each default where it is missing or damaged.
+export function read_desktop_settings(saved: unknown, specs: Readonly<Record<string, DesktopSettingSpec>> = {}): DesktopSettings {
+  const settings = (saved ?? {}) as Record<string, unknown>;
+  const defaults: Record<string, boolean> = { ...desktop_setting_defaults, ...Object.fromEntries(Object.entries(specs).map(([key, spec]) => [key, spec.default])) };
+  return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => [key, typeof settings[key] === "boolean" ? settings[key] : fallback])) as DesktopSettings;
 }
 
 // What the page asks of the desktop app; quitting completely also stops the daemon.
@@ -37,11 +48,12 @@ export interface DesktopMethods {
 
 export const desktop_method_names = ["get_desktop_settings", "set_desktop_setting", "quit_completely"] as const satisfies readonly (keyof DesktopMethods)[];
 
-// What the daemon answers about itself: its settings, and stopping.
+// What the daemon answers about itself: its settings, stopping, and whether a window is in front, which the window tells.
 export interface DaemonMethods {
   get_desktop_settings: () => DesktopSettings;
   set_desktop_setting: (key: keyof DesktopSettings, value: boolean) => void;
   stop_daemon: () => void;
+  set_window_in_front: (in_front: boolean) => void;
 }
 
 // ── The page's api ───────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ import { migrate, type MigrationStep, type SqlDatabase } from "../sql.ts";
 import { create_sync_engine, type SyncedTable } from "../sync_engine.ts";
 import { backup_method_names } from "../backups.ts";
 import { peer_listening_method_names, sync_device_method_names, type PeerListeningMethods, type SyncDeviceMethods, type SyncStatus } from "../sync_protocol.ts";
-import { desktop_method_names, type DesktopMethods } from "./protocol.ts";
+import { desktop_method_names, type DesktopMethods, type DesktopSettingSpec } from "./protocol.ts";
 
 // ── Features ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +102,10 @@ export interface AppOptions<Features extends readonly Feature[]> {
   page_only_refusal?: string;
   // The start of the server's access tokens, such as "cx" for cx_…; "xt" when not given.
   token_prefix?: string;
+  // The desktop app's own switches beside the base's, kept on the computer, such as which notifications it shows.
+  desktop_settings?: Readonly<Record<string, DesktopSettingSpec>>;
+  // The scheme of the app's links, such as "x-notes" for x-notes://note/<id>, which open the desktop app on that page.
+  link_scheme?: string;
 }
 
 // The settings every app keeps: how long its history reaches back, and this device's backup schedule.

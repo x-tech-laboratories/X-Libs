@@ -87,7 +87,7 @@ describe("app settings", () => {
     const view = { connections: [{ id: "local", name: "This computer", kind: "local" as const, address: "", user: "" }], current: "local" };
     const connections = { list_connections: vi.fn(async () => view), add_connection: vi.fn(), rename_connection: vi.fn(), remove_connection: vi.fn(), choose_connection: vi.fn() };
     const desktop = {
-      get_desktop_settings: vi.fn(async () => ({ keep_running_in_background: true, start_at_login: true })),
+      get_desktop_settings: vi.fn(async () => ({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true })),
       set_desktop_setting: vi.fn(async () => undefined),
       quit_completely: vi.fn(async () => undefined),
     };
@@ -101,6 +101,24 @@ describe("app settings", () => {
     await waitFor(() => expect(desktop.set_desktop_setting).toHaveBeenCalledWith("keep_running_in_background", false));
     expect(desktop.quit_completely).toHaveBeenCalledOnce();
     expect(screen.getByText("Starts X-Sample in the background when you log in, without opening its window.")).toBeTruthy();
+  });
+
+  it("shows the tray switch and the app's own desktop switches, saving each on this computer", async () => {
+    const desktop = {
+      get_desktop_settings: vi.fn(async () => ({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true, notify_inbox: true })),
+      set_desktop_setting: vi.fn(async () => undefined),
+      quit_completely: vi.fn(async () => undefined),
+    };
+    set_page_api({ host: "desktop", calls: fake_calls({}), device: null, backups: null, desktop, on_change: () => () => undefined });
+    const own: AppPages = { ...pages, app: { ...pages.app, desktop_settings: { notify_inbox: { default: true, label: "Inbox notifications", hint: "Says when something waits." } } } };
+    render(<><SettingsView pages={own} /><Dialogs /></>);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Show the tray icon" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Inbox notifications" }));
+
+    await waitFor(() => expect(desktop.set_desktop_setting).toHaveBeenCalledWith("notify_inbox", false));
+    expect(desktop.set_desktop_setting).toHaveBeenCalledWith("show_tray_icon", false);
+    expect(screen.getByText("Says when something waits.")).toBeTruthy();
   });
 
   it("asks a phone for a backup folder before it backs up, and lists backups once one is picked", async () => {

@@ -15,7 +15,7 @@ import { Loaded } from "../../web/react/states.tsx";
 import { PeerListeningSettings, SyncSettings } from "../../web/react/sync_settings.tsx";
 import { attempt } from "../../web/react/toasts.tsx";
 import type { App } from "../define.ts";
-import type { BackupFolder, DesktopSettings } from "../protocol.ts";
+import type { BackupFolder, DesktopSettingSpec, DesktopSettings } from "../protocol.ts";
 import { calls, data_watch, page, use_settings } from "./page.ts";
 
 // ── Pages ────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ export interface AppPage {
 
 // What the page side of the base app is given: the app, its pages, and its own sections under General.
 export interface AppPages {
-  app: Pick<App, "id" | "name" | "data_name" | "server_example" | "bridges">;
+  app: Pick<App, "id" | "name" | "data_name" | "server_example" | "bridges"> & Partial<Pick<App, "desktop_settings">>;
   pages: readonly AppPage[];
   general_settings?: (props: PageSettingsProps) => SettingsSection[];
   // The icon the sidebar and sign-in show, an image URL beside the page; "icon.svg" unless set.
@@ -61,7 +61,7 @@ function FolderBackups({ backups, folder, data_name }: { backups: BackupClient; 
 }
 
 // The desktop app's own settings, which belong to this computer and do not sync.
-function Desktop({ app_name }: { app_name: string }) {
+function Desktop({ app_name, own }: { app_name: string; own: Readonly<Record<string, DesktopSettingSpec>> }) {
   const { desktop } = page();
   const [settings, set_settings] = useState<DesktopSettings | null>(null);
   useEffect(() => void desktop?.get_desktop_settings().then(set_settings, () => undefined), [desktop]);
@@ -73,12 +73,20 @@ function Desktop({ app_name }: { app_name: string }) {
   };
   return (
     <>
+      <SettingRow label="Show the tray icon" hint={`Keeps ${app_name} in the tray, where closing the window leaves it.`} as_label>
+        <Switch label="Show the tray icon" checked={settings.show_tray_icon} on_change={(on) => change("show_tray_icon", on)} />
+      </SettingRow>
       <SettingRow label="Keep running in the background" hint="Sync and backups carry on with the window closed. Turned off, they stop shortly after the last window closes." as_label>
         <Switch label="Keep running in the background" checked={settings.keep_running_in_background} on_change={(on) => change("keep_running_in_background", on)} />
       </SettingRow>
       <SettingRow label="Start at login" hint={`Starts ${app_name} in the background when you log in, without opening its window.`} as_label>
         <Switch label="Start at login" checked={settings.start_at_login} disabled={!settings.keep_running_in_background} on_change={(on) => change("start_at_login", on)} />
       </SettingRow>
+      {Object.entries(own).map(([key, spec]) => (
+        <SettingRow key={key} label={spec.label} {...(spec.hint ? { hint: spec.hint } : {})} as_label>
+          <Switch label={spec.label} checked={settings[key] ?? spec.default} on_change={(on) => change(key, on)} />
+        </SettingRow>
+      ))}
       <SettingRow label="Quit completely" hint={`Closes the window and stops ${app_name} in the background too, until you open it again.`}>
         <button type="button" onClick={() => attempt(desktop.quit_completely())}>Quit completely</button>
       </SettingRow>
@@ -98,7 +106,7 @@ function storage_category(app: AppPages["app"], is_admin: boolean): SettingsCate
       {!device && certificates && <TrustedCertificates certificates={certificates} />}
     </> });
   }
-  if (desktop) sections.push({ id: "desktop", heading: "Desktop app", content: <Desktop app_name={name} /> });
+  if (desktop) sections.push({ id: "desktop", heading: "Desktop app", content: <Desktop app_name={name} own={app.desktop_settings ?? {}} /> });
   if (device && (!on_server || is_admin)) {
     const hint = on_server ? `Keep the server's ${data_name} alike with the devices paired with it.` : `Keep this device's ${data_name} alike with your other devices and your ${name} server.`;
     sections.push({ id: "sync", heading: "Sync", hint, content: <SyncSettings device={device} subscribe={(listener) => data_watch.subscribe(listener)} data_name={data_name} extra={peer_listening && <PeerListeningSettings listening={peer_listening} />} /> });
