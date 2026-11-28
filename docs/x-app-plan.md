@@ -44,7 +44,7 @@ means one home for every shared piece, no re-export layer and one release step.
 | `app/web` | `render_app(app_pages)`: the page in its Shell, routed by the sidebar, with the Settings and History pages, `SyncButton`, and the hosts for the web, the desktop and Android. |
 | `config/*` | Presets: `tsconfig/base.json`, `node.json`, `web.json` and `tests.json` to extend, and `vite_config`, `electron_vite_config`, `vitest_config` and `capacitor_config`. |
 | Nix flake `lib` | `x_app_package`, `x_app_desktop_package`, `x_app_module`, `x_app_shell` and `x_app_android_shell`, called from an app's `nix/flake.nix`. |
-| Reusable workflows | `.github/workflows/app-ci.yml` (build, coverage floor, lint, Nix targets) and `app-dependabot-auto-merge.yml`, called by each app. |
+| CI actions | Composite actions `.github/actions/app-ci` (build, coverage floor, lint), `app-nix` (the Nix targets) and `app-dependabot-auto-merge`, each one step of an app's `ci`, `nix` and auto-merge jobs, which keep their names. |
 | `x-app-new` | A command that writes a new app's few files once. |
 
 The headless agents and the site framework keep importing single modules; React, Electron, Fastify and the rest stay
@@ -125,7 +125,7 @@ When an app needs a hook that does not exist, X-App gains it; an app never forks
    behaviour, move the shell into `app/*`, then run the same tests against X-App. Plugins, notifications and item search
    come from X-Fitness and X-Media-Tracker, which have them.
 6. **Nix and workflows.** The flake `lib` functions from the five apps' near-identical `package.nix`,
-   `desktop-package.nix` and `module.nix`, and the reusable CI and auto-merge workflows.
+   `desktop-package.nix` and `module.nix`, and the CI and auto-merge actions.
 7. **Sample app and starter.** `x-app-new`, and an example app in `example/` with one item kind wired through every point
    of the standard's new-app checklist, which X-App's CI builds and tests on every pull request.
 8. **Pilot on X-Budget.** Its shell replaced by X-App, its duplicates moved in, the `nix/` and `tsconfig/` layout, and
@@ -136,7 +136,7 @@ When an app needs a hook that does not exist, X-App gains it; an app never forks
 
 ## Open questions
 
-- Does Vitest's `autoUpdate` still write the coverage floor when the config comes from a preset? If not, an app's
-  `vitest.config.ts` keeps the `thresholds` literal and merges the preset with `mergeConfig`.
+- Settled: Vitest's `autoUpdate` raises a floor kept literal in the app's `vitest.config.ts` and merged into the preset
+  with `mergeConfig`.
 - How apps get X-App's flake updates: Dependabot's Nix support if it handles flake inputs, else a weekly
   `update-flake-lock` workflow.

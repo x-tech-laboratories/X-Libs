@@ -13,6 +13,8 @@ an app moves over by changing the package name in its imports and its `x-libs-*`
 | `app/server`, `app/daemon`               | `run_server(app, { web_folder })`: the web server from `<PREFIX>_CONFIG` with accounts, the calls, OpenAPI, MCP, the server's backups and its sync peer; `run_daemon(app)`: the desktop daemon from `<PREFIX>_DB` with sync, letting devices connect, backups, certificates and the desktop settings; `build_server`, `start_daemon`, `open_app_database` and `register_app_calls` for tests and apps that add their own. |
 | `app/desktop`, `app/preload`             | `run_desktop(app, electron, { main_dir })`: Electron's main process as a portal onto this computer's daemon or a server, with the window, the login entry, a second launch and `--daemon`; `run_preload(app, electron)` puts every bridge on the page. Electron is handed in, so neither imports it. |
 | `app/web/app_page`, `app/web/page`       | `render_app({ app, pages, general_settings })`: the page on the web, the desktop or Android in the `Shell`, with sign-in in a browser, Your account, Settings (the app's general sections, each page's own, Connections, Desktop app, Sync and Backups) and `SyncButton`; `page_hooks<Methods>()` gives the app's typed `calls`, `use_data` and `use_settings`. The phone's host (`app/web/android`) loads only on Android. |
+| `config/vite`, `config/electron_vite`, `config/vitest`, `config/tsconfig/*.json` | An X-app's configs as presets: `web_vite_config({ port })` and `android_vite_config()` for the page, `desktop_vite_config()` for electron-vite's window, daemon, preload and page, `vitest_config()` for tests in `tests/` in UTC with coverage of `src/` to the terminal, merged with the app's own floor so `autoUpdate` still raises it, and `base`, `node`, `web` and `tests` tsconfigs to extend. |
+| `app_new`                                | The `x-app-new <X-Name>` command: a new X-app's files written once, laid out as the Application Standard asks, on the base app, the presets, X-App's Nix lib and its CI actions, with an example notes feature; `--port`, `--folder`, `--no-desktop` and `--no-android`. |
 | `durations`                              | `parse_duration` for settings such as `"2h30m"`, `format_duration` in months down to seconds and "less than a second" below one, `format_age`, and `format_clock` for a playing time such as `"3:07"`, with `{ hours: "always" }` writing `"0:03:07"` so a column of times lines up and `empty` for no time. |
 | `log`                                    | Loggers by scope and level from a setting such as `"warn,play:debug"`; a malformed setting falls back instead of silencing logging, and a setting read through a function applies to loggers made before it arrived; a dotted scope such as `app.core.db` without its own level takes its nearest parent's. |
 | `cron`                                   | `CronSchedule.parse`: five-field cron lines read in local time, with `@daily`-style aliases, month and weekday names, steps, ranges and lists, 7 as Sunday, a restricted day of month and weekday matching either as cron does, and a line that never matches a real date refused; `next_after` gives the first run strictly after a moment. |
@@ -204,6 +206,21 @@ void render_app({ app, pages: [{ id: "plan", label: "Plan", view: () => <PlanVie
 ```
 
 A change an app needs in the base goes into the base, so no app keeps a copy of a base file.
+
+The rest of an app's files are short calls into X-App too:
+
+- **Configs**: `tsconfig/tsconfig.<target>.json` extends its `tsconfig.base.json` and
+  `@x-tech-laboratories/x-app/config/tsconfig/<target>.json`; `vite.config.ts`, `electron.vite.config.ts` and
+  `vite.android.config.ts` export a preset from `config/vite` or `config/electron_vite`; `vitest.config.ts` merges
+  `vitest_config()` with the app's coverage floor.
+- **Nix**: X-App's flake has a `lib` with `package`, `desktop_package`, `module`, `shell` and `android_shell`, each
+  taking the app's package set and its `nix/app.nix` (name, display name, variables' prefix, port, database file and
+  words); the app's `nix/flake.nix` takes `github:x-tech-laboratories/X-App` as an input and calls them.
+- **CI**: the app's `ci` job runs `x-tech-laboratories/X-App/.github/actions/app-ci@main`, its `nix` job
+  `app-nix@main` with the targets to build, and its Dependabot workflow `app-dependabot-auto-merge@main`. They are
+  composite actions, so the jobs keep the names `ci` and `nix` the ruleset requires.
+
+`npx x-app-new X-Notes` writes all of it for a new app.
 
 ## A web app's server
 

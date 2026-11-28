@@ -135,7 +135,7 @@ export interface ServerOptions {
 }
 
 // The server's backups and its sync peer's pairings, which only an admin reaches.
-const admin_paths = ["/api/backups/", "/api/device/"];
+const admin_paths = ["/api/backups/", "/api/sync/"];
 
 export async function build_server(app: App, options: ServerOptions): Promise<FastifyInstance> {
   const server = fastify({ forceCloseConnections: true });
@@ -181,7 +181,7 @@ export async function build_server(app: App, options: ServerOptions): Promise<Fa
       });
 
       register_sync_peer_routes(api, options.sync);
-      register_call_table(api, "/device", sync_device_methods(options.sync), { is_read_only: app.is_read_only });
+      register_call_table(api, "/sync", sync_device_methods(options.sync), { is_read_only: app.is_read_only });
     },
     { prefix: "/api" },
   );
