@@ -7,6 +7,7 @@ import { AppView, render_app } from "../src/app/web/app_page.tsx";
 import type { AppPages } from "../src/app/web/settings_page.tsx";
 import { set_page_api } from "../src/app/web/page.ts";
 import type { PageApi } from "../src/app/protocol.ts";
+import { HomeIcon } from "../src/web/react/icons.tsx";
 import { sample_app } from "./app/sample_app.ts";
 
 afterEach(() => {
@@ -75,13 +76,12 @@ describe("app page", () => {
 
   it("shows rows with icons and badges, opens the default page, lights a hidden page's row and draws the app's chrome", async () => {
     device_page();
-    const Glyph = () => <svg />;
     const own: AppPages = {
       ...pages,
       default_page: "inbox",
       pages: [
-        { id: "notes", label: "Notes", icon: Glyph, view: () => <p>Every note</p> },
-        { id: "inbox", label: "Inbox", icon: Glyph, use_badge: () => 3, view: () => <p>Waiting</p> },
+        { id: "notes", label: "Notes", icon: HomeIcon, view: () => <p>Every note</p> },
+        { id: "inbox", label: "Inbox", icon: HomeIcon, use_badge: () => 3, view: () => <p>Waiting</p> },
         { id: "note", label: "Note", in_sidebar: false, active_as: "notes", view: (parts) => <p>One note {parts[0]}</p> },
       ],
       use_chrome: (parts) => ({ sidebar: <p>Tree at {parts.join("/") || "home"}</p>, tools: <button type="button">Assistant</button>, side_pane: { title: "Assistant", open: true, on_open_change: () => undefined, content: <p>Pane</p> } }),
