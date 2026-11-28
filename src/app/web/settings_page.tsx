@@ -9,6 +9,7 @@ import type { BackupClient } from "../../backups.ts";
 import { BackupSettings } from "../../web/react/backup_settings.tsx";
 import { TrustedCertificates } from "../../web/react/certificates.tsx";
 import { ConnectionSettings } from "../../web/react/connections.tsx";
+import { LocalMcpSettings } from "../../web/react/local_mcp_settings.tsx";
 import { Switch } from "../../web/react/controls.tsx";
 import type { IconGlyph } from "../../web/react/icons.tsx";
 import { PageHeading, SettingRow, SettingsPage, type SettingsCategory, type SettingsSection } from "../../web/react/layout.tsx";
@@ -117,7 +118,7 @@ function Desktop({ app_name, own }: { app_name: string; own: Readonly<Record<str
 
 // A desktop window on a server's daemon works on the server's data, as a browser does.
 function storage_category(app: AppPages["app"], is_admin: boolean): SettingsCategory[] {
-  const { backups, backup_folder, certificates, connections, desktop, device, host, peer_listening } = page();
+  const { backups, backup_folder, certificates, connections, desktop, device, host, local_mcp, peer_listening } = page();
   const { data_name, name } = app;
   const on_server = host === "web" || (host === "desktop" && !device);
   const sections: SettingsSection[] = [];
@@ -128,6 +129,7 @@ function storage_category(app: AppPages["app"], is_admin: boolean): SettingsCate
     </> });
   }
   if (desktop) sections.push({ id: "desktop", heading: "Desktop app", content: <Desktop app_name={name} own={app.desktop_settings ?? {}} /> });
+  if (local_mcp) sections.push({ id: "mcp", heading: "MCP server", hint: `Let AI assistants such as Claude Code reach this computer's ${data_name} without the server.`, content: <LocalMcpSettings device={local_mcp} name={name} /> });
   if (device && (!on_server || is_admin)) {
     const hint = on_server ? `Keep the server's ${data_name} alike with the devices paired with it.` : `Keep this device's ${data_name} alike with your other devices and your ${name} server.`;
     sections.push({ id: "sync", heading: "Sync", hint, content: <SyncSettings device={device} subscribe={(listener) => data_watch.subscribe(listener)} data_name={data_name} extra={peer_listening && <PeerListeningSettings listening={peer_listening} />} /> });

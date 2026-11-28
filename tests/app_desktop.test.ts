@@ -10,7 +10,7 @@ import { run_desktop, type DesktopOptions, type ElectronLike } from "../src/app/
 import { daemon_socket_path } from "../src/local_daemon.ts";
 import { run_preload } from "../src/app/preload.ts";
 import { route_of_link } from "../src/app/links.ts";
-import { sample_app } from "./app/sample_app.ts";
+import { sample_app, sample_app_with_mcp } from "./app/sample_app.ts";
 
 // ============================================================================
 // A fake Electron
@@ -269,6 +269,18 @@ describe("app desktop window", { timeout: 30_000 }, () => {
     expect(FakeWindow.made[0]!.options).toMatchObject({ width: 960, height: 540 });
     expect(daemon.calls).toContainEqual({ path: expect.stringContaining("daemon/set_window_in_front"), args: [true] });
     expect(daemon.start_daemon).toHaveBeenCalledWith(expect.objectContaining({ env: expect.objectContaining({ X_SAMPLE_DECLARED_FILE: "", X_SAMPLE_ICON: join(main_dir, "../../resources/icon.png") }) }));
+  });
+
+  it("passes the page's MCP endpoint calls to the daemon only for an app that serves one", async () => {
+    const fake = fake_electron();
+    run_desktop(sample_app_with_mcp, fake.electron, { main_dir, argv: [], env: {}, cwd: profile, ...(({ calls: _calls, ...rest }) => rest)(fake_daemon()) });
+    await until(() => fake.handlers.size > 0);
+    const plain = fake_electron();
+    run(plain, fake_daemon());
+    await until(() => plain.handlers.size > 0);
+
+    expect(fake.handlers.has("x_sample_local_mcp:get_local_mcp_settings")).toBe(true);
+    expect(plain.handlers.has("x_sample_local_mcp:get_local_mcp_settings")).toBe(false);
   });
 
   it("quits completely, stopping the daemon too", async () => {

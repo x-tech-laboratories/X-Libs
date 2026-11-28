@@ -103,6 +103,19 @@ describe("app settings", () => {
     expect(screen.getByText("Starts X-Sample in the background when you log in, without opening its window.")).toBeTruthy();
   });
 
+  it("shows the app's own MCP endpoint where the desktop app serves one", async () => {
+    const local_mcp = {
+      get_local_mcp_settings: vi.fn(async () => ({ enabled: false, port: 7792, require_token: false })),
+      set_local_mcp_settings: vi.fn(async () => undefined),
+      get_local_mcp_status: vi.fn(async () => ({ listening: false, port: 7792, error: null })),
+    };
+    set_page_api({ host: "desktop", calls: fake_calls({}), device: null, backups: null, local_mcp, on_change: () => () => undefined } as never);
+    render(<><SettingsView pages={pages} /><Dialogs /></>);
+
+    expect((await screen.findAllByText("MCP server")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(local_mcp.get_local_mcp_settings).toHaveBeenCalled());
+  });
+
   it("shows the tray switch and the app's own desktop switches, saving each on this computer", async () => {
     const desktop = {
       get_desktop_settings: vi.fn(async () => ({ show_tray_icon: true, keep_running_in_background: true, start_at_login: true, notify_inbox: true })),

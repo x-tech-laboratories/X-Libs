@@ -9,6 +9,7 @@ import type { CertificateClient } from "../../certificate_protocol.ts";
 import { LOCAL_CONNECTION_ID, type ConnectionClient } from "../../connection_protocol.ts";
 import type { Client } from "../../electron/bridge.ts";
 import type { EventsClient } from "../../electron/events.ts";
+import type { LocalMcpClient } from "../../local_mcp_protocol.ts";
 import type { PeerListeningClient, SyncDeviceClient } from "../../sync_protocol.ts";
 import { LoginNeeded } from "../../web/states.ts";
 import type { App, AppEvents } from "../define.ts";
@@ -116,7 +117,7 @@ export function is_desktop(app: Pick<App, "bridges">): boolean {
 }
 
 // The window starts again whenever another daemon is chosen, so where it runs is read once here.
-export async function desktop_api(app: Pick<App, "bridges">): Promise<PageApi> {
+export async function desktop_api(app: Pick<App, "bridges"> & Partial<Pick<App, "local_mcp">>): Promise<PageApi> {
   const exposed = window as unknown as Record<string, unknown>;
   const { bridges } = app;
   const events = exposed[bridges.events.api_name] as EventsClient<AppEvents>;
@@ -128,6 +129,7 @@ export async function desktop_api(app: Pick<App, "bridges">): Promise<PageApi> {
     // Sync belongs to this computer's own daemon, so it shows only while that daemon is in use.
     device: is_here ? (exposed[bridges.device.api_name] as SyncDeviceClient) : null,
     ...(is_here ? { peer_listening: exposed[bridges.peer_listening.api_name] as PeerListeningClient } : {}),
+    ...(is_here && app.local_mcp ? { local_mcp: exposed[bridges.local_mcp.api_name] as LocalMcpClient } : {}),
     backups: exposed[bridges.backups.api_name] as BackupClient,
     certificates: exposed[bridges.certificates.api_name] as CertificateClient,
     connections,

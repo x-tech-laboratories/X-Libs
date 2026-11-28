@@ -18,5 +18,6 @@ export function run_preload(app: App, { contextBridge, ipcRenderer }: PreloadEle
   for (const bridge of [bridges.calls, bridges.device, bridges.backups, bridges.certificates, bridges.peer_listening, bridges.desktop, bridges.connections]) {
     bridge.expose(contextBridge, ipcRenderer, { envelopes: true });
   }
+  if (app.local_mcp) bridges.local_mcp.expose(contextBridge, ipcRenderer, { envelopes: true });
   bridges.events.expose(contextBridge, ipcRenderer);
 }

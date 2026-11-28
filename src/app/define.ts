@@ -14,6 +14,7 @@ import { connection_method_names, type ConnectionMethods } from "../connection_p
 import { define_bridge, type Bridge } from "../electron/bridge.ts";
 import { define_events, type EventsBridge } from "../electron/events.ts";
 import type { History } from "../history.ts";
+import { local_mcp_method_names, type LocalMcpMethods } from "../local_mcp_protocol.ts";
 import { create_settings_store, read_setting, settings_of, write_setting, type SettingSpec, type SettingsMethods, type SettingsStore, type SettingsStoreOptions } from "../settings.ts";
 import { migrate, type MigrationStep, type SqlDatabase } from "../sql.ts";
 import { create_sync_engine, type SyncedTable } from "../sync_engine.ts";
@@ -106,6 +107,9 @@ export interface AppOptions<Features extends readonly Feature[]> {
   desktop_settings?: Readonly<Record<string, DesktopSettingSpec>>;
   // The scheme of the app's links, such as "x-notes" for x-notes://note/<id>, which open the desktop app on that page.
   link_scheme?: string;
+  // The desktop app's own MCP endpoint on 127.0.0.1 for AI clients on the same computer, off until turned on in
+  // Settings, on its own default port so several apps can run at once.
+  local_mcp?: { default_port: number };
 }
 
 // The settings every app keeps: how long its history reaches back, and this device's backup schedule.
@@ -144,6 +148,7 @@ export interface AppBridges<Methods extends Record<keyof Methods, (...args: neve
   certificates: Bridge<CertificateMethods>;
   desktop: Bridge<DesktopMethods>;
   connections: Bridge<ConnectionMethods>;
+  local_mcp: Bridge<LocalMcpMethods>;
   events: EventsBridge<AppEvents>;
 }
 
@@ -277,6 +282,8 @@ export function define_app<const Features extends readonly Feature[]>(options: A
     desktop: define_bridge<DesktopMethods>(`${prefix}_desktop`, desktop_method_names),
     // The daemons the desktop app can work on: this computer's, or a server signed in to as this device.
     connections: define_bridge<ConnectionMethods>(`${prefix}_connections`, connection_method_names),
+    // The desktop app's own MCP endpoint, for AI clients on the same computer.
+    local_mcp: define_bridge<LocalMcpMethods>(`${prefix}_local_mcp`, local_mcp_method_names),
     events: define_events<AppEvents>(`${prefix}_events`),
   };
 

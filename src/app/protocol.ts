@@ -6,6 +6,7 @@
 import type { BackupClient } from "../backups.ts";
 import type { CertificateClient } from "../certificate_protocol.ts";
 import type { ConnectionClient } from "../connection_protocol.ts";
+import type { LocalMcpClient } from "../local_mcp_protocol.ts";
 import type { Client } from "../electron/bridge.ts";
 import type { PeerListeningClient, SyncDeviceClient } from "../sync_protocol.ts";
 
@@ -82,6 +83,8 @@ export interface PageApi<Methods extends Record<keyof Methods, (...args: never[]
   // Set on the desktop while it works on this computer's daemon, which other devices may be let reach.
   peer_listening?: PeerListeningClient;
   desktop?: Client<DesktopMethods>;
+  // Set on the desktop while it works on this computer's daemon, when the app serves its own MCP endpoint there.
+  local_mcp?: LocalMcpClient;
   // Runs whenever the data changed somewhere else; returns the function that stops listening.
   on_change: (listener: () => void) => () => void;
   // Runs whenever the app's services emit the named event, with its data; unset where no services run, as on a phone.
