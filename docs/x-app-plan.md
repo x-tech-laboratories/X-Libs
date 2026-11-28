@@ -44,7 +44,8 @@ means one home for every shared piece, no re-export layer and one release step.
 | `app/web` | `render_app(app_pages)`: the page in its Shell, routed by the sidebar, with the Settings and History pages, `SyncButton`, and the hosts for the web, the desktop and Android. |
 | `config/*` | Presets: `config/tsconfig/{base,node,web,tests}.json` to extend, and `web_vite_config`, `android_vite_config`, `desktop_vite_config` and `vitest_config`. |
 | Nix flake `lib` | `x_app_package`, `x_app_desktop_package`, `x_app_module`, `x_app_shell` and `x_app_android_shell`, called from an app's `nix/flake.nix`. |
-| CI actions | Composite actions `.github/actions/app-ci` (build, coverage floor, lint), `app-nix` (the Nix targets) and `app-dependabot-auto-merge`, each one step of an app's `ci`, `nix` and auto-merge jobs, which keep their names. |
+| `x-app-android` | A command that makes or updates the app's Capacitor project in `android/` from Capacitor's template with X-App's release settings and icons, so no app keeps the generated project. |
+| CI actions | Composite actions `.github/actions/app-ci` (build, coverage floor, lint), `app-nix` (the Nix targets), `app-android` (the APK and its release) and `app-dependabot-auto-merge`, each one step of an app's `ci`, `nix` and auto-merge jobs, which keep their names. |
 | `x-app-new` | A command that writes a new app's few files once. |
 
 The headless agents and the site framework keep importing single modules; React, Electron, Fastify and the rest stay

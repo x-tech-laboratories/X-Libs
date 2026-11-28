@@ -77,7 +77,7 @@ function package_json(names: Names, options: NewAppOptions): string {
     ...(options.desktop ? { dev: `${prefix}_USER_DATA=\${${prefix}_USER_DATA:-dev-data/desktop} electron-vite dev -c config/electron.vite.config.ts` } : {}),
     build: "tsc -b && vite build -c config/vite.config.ts",
     ...(options.desktop ? { "build:desktop": "tsc -b && electron-vite build -c config/electron.vite.config.ts" } : {}),
-    ...(options.android ? { "build:android": "tsc -b && vite build -c config/vite.android.config.ts && cap sync android" } : {}),
+    ...(options.android ? { "build:android": "tsc -b && vite build -c config/vite.android.config.ts && x-app-android" } : {}),
     start: "NODE_ENV=production node src/server/main.ts",
     ...(options.desktop ? { "start:desktop": "electron-vite preview -c config/electron.vite.config.ts" } : {}),
     typecheck: "tsc -b",
@@ -398,7 +398,8 @@ export default defineConfig(android_vite_config());
         }
       : {}),
     "config.example.json": json({ database: `dev-data/server/${names.short}.db`, backups_folder: "dev-data/server/backups" }),
-    ".gitignore": [".claude/", "node_modules", "out/", "dist/", "result", "result-*", "*.tsbuildinfo", "dev-data/", "coverage/", ""].join("\n"),
+    // The Android project is Capacitor's template that x-app-android makes and keeps up to date, so it is not kept.
+    ".gitignore": [".claude/", "node_modules", "out/", "dist/", "result", "result-*", "*.tsbuildinfo", "dev-data/", "coverage/", ...(options.android ? ["android/"] : []), ""].join("\n"),
   };
 }
 
@@ -457,13 +458,30 @@ in
   };
 }
 
+// Every push to main builds the Android package once the tests pass, signed when the repository holds the release key,
+// and a version tag publishes it as a release.
+const android_job = `
+  android:
+    needs: ci
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: x-tech-laboratories/X-App/.github/actions/app-android@main
+        with:
+          keystore-base64: \${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          keystore-password: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          key-alias: \${{ secrets.ANDROID_KEY_ALIAS }}
+`;
+
 function github_files(options: NewAppOptions): Record<string, string> {
   return {
     ".github/workflows/ci.yml": `name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main]${options.android ? '\n    tags: ["v*"]' : ""}
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -481,7 +499,7 @@ jobs:
       - uses: x-tech-laboratories/X-App/.github/actions/app-nix@main
         with:
           targets: ./nix#default${options.desktop ? " ./nix#desktop" : ""}
-`,
+${options.android ? android_job : ""}`,
     ".github/workflows/dependabot-auto-merge.yml": `name: Dependabot auto-merge
 
 on: pull_request
@@ -653,7 +671,7 @@ if (import.meta.main) {
     console.info(`Wrote ${options.name} into ${folder}. Next:
   cd ${folder} && git init && npm install
   nix flake lock ./nix
-  npm run icons${options.android ? "\n  npx cap add android" : ""}
+  npm run icons
   npm test`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
